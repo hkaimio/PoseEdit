@@ -16,41 +16,51 @@ The core class, `PoseData2D`, encapsulates the final, stitched pose data for a s
 - **Editing:** Users can manually adjust marker positions by moving the spheres in the 3D view, with changes automatically saved to the corresponding keyframe.
 - **Data Export:** The edited animation data for a person can be exported to a numpy array.
 
-## Multi-Person & Multi-Camera Management
-A new management layer will handle the initial data loading and organization:
-1.  **Project Setup:** The user defines a new project and imports one or more camera views.
-2.  **Camera View:** Each camera view consists of a video file and a corresponding pose data directory.
-3.  **Track Stitching UI:** For each camera view, a dedicated UI will be presented to the user:
-    *   It lists all raw tracks detected in the pose data files (e.g., `person_1`, `person_2`, `person_3`).
-    *   The user can create "Final Person" profiles (e.g., "Alice", "Bob").
-    *   The user can then assign raw tracks and frame ranges to each Final Person. For example:
-        *   `Alice` = `person_1` (1-100) + `person_3` (101-200)
-        *   `Bob` = `person_2` (1-200)
-4.  **Scene Generation:** Once the user confirms the stitching, the add-on generates the Blender objects. For each "Final Person" in each camera view, it creates a `PoseData2D` instance.
+## Identity Stitching Workflow
+This phase allows the user to build continuous tracks for real people from fragmented raw tracking data.
+
+1.  **Initial Visualization:**
+    *   Upon loading a camera view, all raw tracks from the pose data are loaded and visualized simultaneously. Each raw track will have its own skeleton and markers.
+    *   To distinguish them, each raw track's visualization will be contained within a bounding box, and an annotation with the track ID (e.g., "track_a") will be displayed.
+
+2.  **"Real Person" Creation:**
+    *   The user creates a "Real Person" entity via the add-on UI.
+    *   They assign it a unique name (e.g., "Alice") and a distinct base color for its visualization.
+    *   This action creates a new, separate armature for the Real Person.
+
+3.  **Stitching Process:**
+    *   The user selects the first raw track that corresponds to the Real Person.
+    *   They scrub through the timeline to a frame where the identity changes (e.g., the person is now tracked by a different raw ID).
+    *   At this frame, the user selects the new raw track in the UI and clicks a "Switch Source" button.
+
+4.  **Implementation via Keyframed Index:**
+    *   The armature of the "Real Person" will hold the logic for data sourcing.
+    *   It will have two custom properties:
+        1.  `raw_track_names`: A string property holding a comma-separated list of all available raw track IDs (e.g., "track_a,track_b,track_c").
+        2.  `active_track_index`: An integer property.
+    *   When the user performs a "Switch Source" action at a given frame, the add-on inserts a keyframe on the `active_track_index` property, setting its value to the index of the new source track in the `raw_track_names` list.
+    *   An operator or driver will be responsible for copying the animation data (marker locations, likelihoods) from the active raw track to the "Real Person's" markers. This data copy is effective from the keyframe onward, until a new keyframe on `active_track_index` is encountered.
 
 ## Key Use Case Flow
-1.  **Installation and Setup:** The user installs and enables the add-on. A "Pose Data Editor" panel appears in the 3D View.
+1.  **Installation and Setup:** The user installs and enables the add-on.
 
 2.  **Project and Camera Setup:**
-    *   The user creates a new project.
-    *   The user adds one or more camera views. For each view, they specify the video file and the pose data directory.
-    *   The add-on creates a Blender camera for each view and sets up the video as a synchronized background.
+    *   The user adds one or more camera views, specifying a video file and pose data directory for each.
+    *   The add-on creates Blender cameras and sets up the synchronized video backgrounds.
 
 3.  **Identity Stitching (Per Camera View):**
-    *   The user selects a camera view to work on.
-    *   In the add-on panel, a UI appears for stitching tracks. The user defines final persons and assigns the raw, fragmented tracks from the pose data to them.
+    *   The user selects a camera view. All raw tracks are displayed with annotations.
+    *   The user creates a "Real Person" (e.g., "Alice"), which gets its own armature.
+    *   The user scrubs the timeline. At frames where the person's track ID changes, they use the UI to keyframe the `active_track_index` property on Alice's armature, pointing it to the correct raw track for that time segment.
+    *   The system automatically updates Alice's animation data based on these keyframed index changes.
 
-4.  **Loading Data into Scene:**
-    *   After stitching, the user clicks a "Load to Scene" button.
-    *   The add-on creates `PoseData2D` objects for each defined person. This generates the spheres and armatures in the scene, parented under objects corresponding to their camera view.
+4.  **Editing and Interaction:**
+    *   Once stitching is complete, the user can hide the raw track visualizations.
+    *   The user can switch between camera views to see the stitched result from different angles.
+    *   The user selects a marker on a "Real Person's" skeleton and moves it to correct its position. The change is keyframed on the Real Person's marker.
 
-5.  **Editing and Interaction:**
-    *   The user can switch the active camera in Blender to change views.
-    *   The user selects a marker and moves it to correct its position. The change is keyframed.
-    *   The user can inspect and modify custom properties like `likelihood` in the properties panel.
-
-6.  **Exporting Data:**
-    *   The user selects a person and clicks "Export to NumPy" to save the corrected animation data to a file.
+5.  **Exporting Data:**
+    *   The user selects a "Real Person" and exports their continuous, corrected animation data to a NumPy file.
 
 ## Class Design: PoseData2D
 Represents a single, continuous pose for one person.
@@ -68,12 +78,10 @@ Represents a single, continuous pose for one person.
 
 ## Data Flow
 1.  User sets up camera views (video + pose data directory).
-2.  For each view, the user performs identity stitching, mapping raw tracks to final persons.
-3.  The application creates `PoseData2D` instances, passing the stitched data for each person.
-4.  The `PoseData2D` object creates and manages the Blender visualization (spheres, armature).
-5.  Keyframes and custom properties are set.
-6.  Armature constraints link bones to the marker spheres.
-7.  User edits the data, and can then export the result as a numpy array.
+2.  For each view, the user performs identity stitching using the keyframed index method to map raw tracks to final, "Real Person" armatures.
+3.  The animation data for the Real Person is dynamically sourced from the underlying raw tracks based on the `active_track_index` property.
+4.  After stitching, the user can directly edit the markers on the Real Person's armature.
+5.  User exports the final, edited data.
 
 ## Extensibility
 - Support for 3D pose data by extending `PoseData2D` to `PoseData3D`.
