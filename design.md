@@ -84,3 +84,127 @@ This phase builds the initial 2D data for a "Real Person".
 6.  **Armature Scaling:** For each "Real Person", generate/load their body measurements and scale a target armature.
 7.  **IK Rigging:** Create the IK rig for each person's armature, linking it to their 3D markers.
 8.  **Baking & Export:** Bake the final animation onto the armatures and export.
+
+## 6. Data Model
+This section describes the overall data model for the application. These entities and their relationships represent the core data that the add-on will manage.
+
+### 6.1. Entity Relationship Diagram
+This diagram provides a high-level overview of the main data entities and their connections.
+
+```mermaid
+erDiagram
+    Project {
+        string name
+    }
+    RealPerson {
+        string name
+        string color
+    }
+    CameraView {
+        string name
+        string video_path
+        string posedata_dir
+    }
+    CalibrationData {
+        string extrinsics_path
+        string intrinsics_paths
+    }
+    RawTrack {
+        string track_id
+    }
+    StitchedPose2D {
+        string source_map
+    }
+    MarkerSet3D {
+        string data_path
+    }
+    BodyMeasurements {
+        string data_path
+    }
+    FinalArmature {
+        string blender_object_name
+    }
+
+    Project ||--|{ RealPerson : manages
+    Project ||--|{ CameraView : contains
+    Project ||--|| CalibrationData : uses
+
+    RealPerson ||--o{ StitchedPose2D : has
+    RealPerson ||--|| MarkerSet3D : owns
+    RealPerson ||--|| BodyMeasurements : owns
+    RealPerson ||--|| FinalArmature : owns
+
+    CameraView ||--|{ StitchedPose2D : "is context for"
+    CameraView ||--o{ RawTrack : contains
+
+    StitchedPose2D }o--|| RawTrack : "is composed of"
+    MarkerSet3D }o--|| StitchedPose2D : "is triangulated from"
+```
+
+### 6.2. Entity Descriptions
+
+#### Project
+The top-level container for a single motion capture session.
+-   **Properties**:
+    -   `name`: A unique name for the project.
+    -   `real_persons`: A list of `RealPerson` entities managed within the project.
+    -   `camera_views`: A list of `CameraView` entities used in the project.
+    -   `calibration`: A reference to the active `CalibrationData` object.
+-   **Relationships**:
+    -   Has one-to-many `RealPerson`s.
+    -   Has one-to-many `CameraView`s.
+    -   Has one `CalibrationData` set.
+
+#### RealPerson
+The central entity representing a single, unique performer. It acts as a master container for all data related to that individual.
+-   **Properties**:
+    -   `name`: A unique, user-defined name (e.g., "Alice").
+    -   `color`: A unique color used for UI elements related to this person.
+    -   `stitched_2d_poses`: A dictionary mapping `CameraView` names to `StitchedPose2D` objects.
+    -   `marker_set_3d`: A reference to the `MarkerSet3D` object after triangulation.
+    -   `body_measurements`: A reference to the `BodyMeasurements` object.
+    -   `final_armature`: A reference to the final, rigged and animated Blender armature.
+-   **Relationships**:
+    -   Belongs to one `Project`.
+    -   Has one `StitchedPose2D` for each `CameraView` it appears in.
+    -   Has one `MarkerSet3D`, one `BodyMeasurements` object, and one `FinalArmature`.
+
+#### CameraView
+Represents a single camera's viewpoint and its associated data files.
+-   **Properties**:
+    -   `name`: A unique name for the camera (e.g., "cam_01").
+    -   `video_path`: Filesystem path to the background video file.
+    -   `posedata_dir`: Filesystem path to the directory of raw 2D pose JSON files.
+    -   `raw_tracks`: A list of `RawTrack` objects loaded from the `posedata_dir`.
+    -   `calibration_id`: The ID or name of the specific camera within the project's `CalibrationData` this view corresponds to.
+-   **Relationships**:
+    -   Belongs to one `Project`.
+    -   Contains many `RawTrack`s.
+
+#### RawTrack
+A data object representing a single, continuous but fragmented track from the initial pose detection software (e.g., `person_0`, `person_1`).
+-   **Properties**:
+    -   `track_id`: The identifier from the source JSON file.
+    -   `data`: The raw NumPy array of frame-by-frame marker data (x, y, likelihood).
+-   **Relationships**:
+    -   Belongs to one `CameraView`.
+    -   Is used as a source for a `StitchedPose2D` object.
+
+#### StitchedPose2D
+Represents the continuous, corrected 2D pose for a `RealPerson` within a single `CameraView`.
+-   **Properties**:
+    -   `data`: The final NumPy array of 2D marker data after stitching and editing.
+    -   `source_map`: A data structure (e.g., a list of tuples) indicating which `RawTrack` and frame range was used for each part of the animation (e.g., `[('track_a', 1, 100), ('track_c', 101, 200)]`). This is driven by the `active_track_index` keyframes.
+-   **Relationships**:
+    -   Belongs to one `RealPerson` and one `CameraView`.
+    -   Is composed of data from one or more `RawTrack`s.
+
+#### MarkerSet3D
+Represents the animated 3D markers for a `RealPerson`.
+-   **Properties**:
+    -   `data`: The NumPy array of 3D marker data (x, y, z) post-triangulation and filtering.
+    -   `markers`: A list of Blender empty objects that are animated by the `data`.
+    -   Each marker object in Blender will have custom properties for metadata like `reprojection_error`.
+-   **Relationships**:
+    -   Belongs to one `RealPerson`.
+    -   Is generated from two or more `StitchedPose2D` objects.
