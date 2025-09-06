@@ -6,7 +6,7 @@
 name = "pose-editor"
 version = "0.1.0"
 description = "A Blender add-on for editing motion capture pose data."
-requires-python = ">=3.10"
+requires-python = ">=3.11, <3.12"
 
 [project.optional-dependencies]
 dev = [
@@ -14,7 +14,7 @@ dev = [
     "pyright",
     "pytest",
     "pytest-cov",
-    "pytest-blender",
+    "bpy",
     "reuse",
 ]
 
@@ -29,7 +29,7 @@ exclude = ["**/__pycache__"]
 reportMissingImports = true
 reportUnusedVariable = true
 
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -40,3 +40,4 @@ testpaths = [
 
 [tool.hatch.scripts]
 lintage = "reuse lint"
+test = "pytest"
