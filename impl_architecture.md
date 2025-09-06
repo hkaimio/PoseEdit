@@ -231,22 +231,27 @@ This chapter details the implementation flow for the initial setup and 2D stitch
     -   `blender.scene_builder.create_person_instance()`: Creates the Blender objects for the new instance.
 
 ### 6.4. Stitching a Timeline
--   **Use Case:** The user specifies that for a given `RealPersonInstance`, the data source should switch from one `RawTrack` to another at the current frame. The `RealPersonInstance`'s 2D armature must update its pose in real-time as the timeline is scrubbed.
--   **Mechanism:** This is achieved non-destructively using Blender drivers. When a `RealPersonInstance` 2D armature is created, drivers are added to the transform channels of each marker. These drivers read the `active_track_index` custom property at the current frame and pull the animation data from the corresponding `RawTrack` marker. The "stitching" operation is therefore just the simple act of inserting a keyframe on the index property.
+-   **Use Case:** The user specifies that for a given `RealPersonInstance`, the data source should switch from one `RawTrack` to another at the current frame.
+-   **Mechanism:** This is a destructive operation that copies F-Curve keyframes from the source `RawTrack` armature to the target `RealPersonInstance` 2D armature. This makes the stitched armature directly editable. The `active_track_index` property is still used as a marker to define the "seams" and determine which source to copy from for a given frame range.
 -   **User Interaction:** The user selects a `RealPersonInstance`, a `CameraView`, and a `RawTrack` from UI lists. They move the timeline to the desired frame and click "Switch Source".
--   **Sequence Diagram (for the "Switch Source" operation):**
+-   **Sequence Diagram:**
     ```mermaid
     sequenceDiagram
         actor User
         User->>UI Panel: Clicks 'Switch Source'
         UI Panel->>Operator (PE_OT_SwitchSource): execute()
-        Note right of Operator (PE_OT_SwitchSource): Gets selected objects and current frame from context.
-        Operator (PE_OT_SwitchSource)->>Facade (RealPersonInstance): get_2d_armature_for_view(view_name)
-        Facade (RealPersonInstance)->>DAL: find_object_in_collection(...)
-        Operator (PE_OT_SwitchSource)->>DAL: set_keyframe(armature, '["active_track_index"]', frame, new_track_index)
-        Note left of DAL: The driver on the armature's markers now automatically pulls data from the new source track.
+        Operator (PE_OT_SwitchSource)->>Facade (RealPersonInstance): get_stitch_info()
+        Note right of Operator (PE_OT_SwitchSource): Facade uses DAL to read `active_track_index` keyframes and determines the new source track and the frame range to copy.
+        Facade (RealPersonInstance)-->>Operator (PE_OT_SwitchSource): returns {source_track, frame_range}
+        Operator (PE_OT_SwitchSource)->>Facade (RealPersonInstance): copy_animation_from_source(source_track, frame_range)
+        loop for each marker
+            Facade (RealPersonInstance)->>DAL: get_fcurves(source_marker, frame_range)
+            Facade (RealPersonInstance)->>DAL: set_fcurves(target_marker, keyframes)
+        end
     ```
 -   **Interfaces:**
-    -   `blender.scene_builder.create_person_2d_armature()`: This function is now also responsible for setting up the drivers on each marker bone.
-    -   `blender.dal.add_driver(object, property, expression)`: A function to create a scripted driver with a given Python expression.
-    -   `blender.operators.PE_OT_SwitchSource`: Reads context and sets a single keyframe on the `active_track_index` property.
+    -   `blender.operators.PE_OT_SwitchSource`: Orchestrates the entire operation.
+    -   `core.person_facade.RealPersonInstanceFacade.get_stitch_info()`: A method to analyze the `active_track_index` keyframes and determine the correct source and frame range for a copy operation.
+    -   `core.person_facade.RealPersonInstanceFacade.copy_animation_from_source()`: A method that iterates through the markers of a source and target armature.
+    -   `blender.dal.get_fcurves(object, data_path, frame_range)`: Retrieves all F-Curve keyframes for a specific property within a given frame range.
+    -   `blender.dal.set_fcurves(object, data_path, keyframes)`: Clears existing keyframes in a range and inserts a new set.
