@@ -160,3 +160,93 @@ class PE_OT_triangulate(bpy.types.Operator):
         # Pure, testable logic that might call Pose2Sim
         pass
 ```
+## 6. Initial Workflow Implementation Details
+This chapter details the implementation flow for the initial setup and 2D stitching phases of the add-on, showing how the different architectural layers interact.
+
+### 6.1. Project Initialization
+-   **Use Case:** The user needs to set up the basic collection structure in a new `.blend` file to begin work.
+-   **User Interaction:** The user clicks the "Create New Project" button in the Project Setup UI panel.
+-   **Sequence Diagram:**
+    ```mermaid
+    sequenceDiagram
+        actor User
+        User->>UI Panel: Clicks 'Create New Project'
+        UI Panel->>Operator (PE_OT_CreateProject): execute()
+        Operator (PE_OT_CreateProject)->>Scene Builder: create_project_structure()
+        Scene Builder->>DAL: create_collection("Camera Views")
+        Scene Builder->>DAL: create_collection("Real Persons")
+        Scene Builder->>DAL: create_empty("_ProjectSettings")
+    ```
+-   **Interfaces:**
+    -   `ui.panels.PE_PT_ProjectPanel`: Draws the button.
+    -   `blender.operators.PE_OT_CreateProject`: The operator that responds to the button click.
+    -   `blender.scene_builder.create_project_structure()`: Contains the logic to build the initial scene hierarchy.
+    -   `blender.dal`: Various functions to create collections and objects.
+
+### 6.2. Loading a Camera View
+-   **Use Case:** The user adds a camera view, loading its video and raw pose data.
+-   **User Interaction:** Clicks "Add Camera View", which opens a file browser. The user selects the video file and the directory containing the corresponding pose data JSONs.
+-   **Sequence Diagram:**
+    ```mermaid
+    sequenceDiagram
+        actor User
+        User->>UI Panel: Clicks 'Add Camera View'
+        UI Panel->>Operator (PE_OT_AddCameraView): invoke() -> opens file browser
+        Operator (PE_OT_AddCameraView)->>Scene Builder: create_camera_view(name, video, pose_dir)
+        Scene Builder->>DAL: create_collection("View: <name>")
+        Scene Builder->>DAL: create_camera_with_video_bg(video_path)
+        Note right of Scene Builder: Load raw track data from JSONs
+        Scene Builder->>Core Facade: parse_raw_tracks(pose_dir)
+        Scene Builder->>Scene Builder: create_raw_track_objects(parsed_data)
+        loop for each raw track
+            Scene Builder->>DAL: create_armature(...)
+            Scene Builder->>DAL: create_fcurves_from_data(...)
+        end
+    ```
+-   **Interfaces:**
+    -   `blender.operators.PE_OT_AddCameraView`: Has an `invoke` method for the file browser and an `execute` method to trigger the process.
+    -   `blender.scene_builder.create_camera_view()`: Orchestrates the creation of all necessary objects for a view.
+    -   `core.project_facade.parse_raw_tracks()`: A pure Python function to read and parse the JSON data files into a simple data structure.
+    -   `blender.dal`: Functions for creating cameras, collections, armatures, and populating their f-curves from data.
+
+### 6.3. Creating a Real Person Instance
+-   **Use Case:** The user adds a person to the project, either by creating a new reusable definition or by selecting an existing one from the library.
+-   **User Interaction:** Clicks "Add Person Instance". A popup dialog appears, allowing the user to select from a dropdown of existing `PersonDefinition`s or enter a new name to create a new one.
+-   **Sequence Diagram:**
+    ```mermaid
+    sequenceDiagram
+        actor User
+        User->>UI Panel: Clicks 'Add Person Instance'
+        UI Panel->>Operator (PE_OT_AddPersonInstance): invoke() -> opens popup
+        Operator (PE_OT_AddPersonInstance)->>Core Library: person_library.load_from_disk()
+        Note right of Operator (PE_OT_AddPersonInstance): Operator populates UI with person names
+        User->>Operator (PE_OT_AddPersonInstance): Selects person (e.g. 'Alice')
+        Operator (PE_OT_AddPersonInstance)->>Scene Builder: create_person_instance('Alice')
+        Scene Builder->>DAL: create_empty("Alice")
+        Scene Builder->>DAL: set_custom_property(empty, "person_definition_id", "Alice")
+    ```
+-   **Interfaces:**
+    -   `blender.operators.PE_OT_AddPersonInstance`: Manages the popup dialog and selection.
+    -   `core.person.PersonLibrary`: Methods to load, find, and create `PersonDefinition`s.
+    -   `blender.scene_builder.create_person_instance()`: Creates the Blender objects for the new instance.
+
+### 6.4. Stitching a Timeline
+-   **Use Case:** The user specifies that for a given `RealPersonInstance`, the data source should switch from one `RawTrack` to another at the current frame. The `RealPersonInstance`'s 2D armature must update its pose in real-time as the timeline is scrubbed.
+-   **Mechanism:** This is achieved non-destructively using Blender drivers. When a `RealPersonInstance` 2D armature is created, drivers are added to the transform channels of each marker. These drivers read the `active_track_index` custom property at the current frame and pull the animation data from the corresponding `RawTrack` marker. The "stitching" operation is therefore just the simple act of inserting a keyframe on the index property.
+-   **User Interaction:** The user selects a `RealPersonInstance`, a `CameraView`, and a `RawTrack` from UI lists. They move the timeline to the desired frame and click "Switch Source".
+-   **Sequence Diagram (for the "Switch Source" operation):**
+    ```mermaid
+    sequenceDiagram
+        actor User
+        User->>UI Panel: Clicks 'Switch Source'
+        UI Panel->>Operator (PE_OT_SwitchSource): execute()
+        Note right of Operator (PE_OT_SwitchSource): Gets selected objects and current frame from context.
+        Operator (PE_OT_SwitchSource)->>Facade (RealPersonInstance): get_2d_armature_for_view(view_name)
+        Facade (RealPersonInstance)->>DAL: find_object_in_collection(...)
+        Operator (PE_OT_SwitchSource)->>DAL: set_keyframe(armature, '["active_track_index"]', frame, new_track_index)
+        Note left of DAL: The driver on the armature's markers now automatically pulls data from the new source track.
+    ```
+-   **Interfaces:**
+    -   `blender.scene_builder.create_person_2d_armature()`: This function is now also responsible for setting up the drivers on each marker bone.
+    -   `blender.dal.add_driver(object, property, expression)`: A function to create a scripted driver with a given Python expression.
+    -   `blender.operators.PE_OT_SwitchSource`: Reads context and sets a single keyframe on the `active_track_index` property.
