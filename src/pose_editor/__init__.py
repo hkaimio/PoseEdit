@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import bpy
+from .blender.operators import PE_OT_CreateProject
+from .ui.panels import PE_PT_ProjectPanel
 
 bl_info = {
     "name": "Pose Editor",
@@ -27,6 +29,8 @@ class PE_OT_dummy(bpy.types.Operator):
 
 _classes = [
     PE_OT_dummy,
+    PE_OT_CreateProject,
+    PE_PT_ProjectPanel,
 ]
 
 def register():
