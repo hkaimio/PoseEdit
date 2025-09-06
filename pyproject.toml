@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2025 Harri Kaimio
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+[project]
+name = "pose-editor"
+version = "0.1.0"
+description = "A Blender add-on for editing motion capture pose data."
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "pyright",
+    "pytest",
+    "pytest-cov",
+    "pytest-blender",
+    "reuse",
+]
+
+[tool.ruff]
+line-length = 120
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+
+[tool.pyright]
+include = ["pose_editor"]
+exclude = ["**/__pycache__"]
+
+reportMissingImports = true
+reportUnusedVariable = true
+
+pythonVersion = "3.10"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+
+[tool.hatch.scripts]
+lintage = "reuse lint"
