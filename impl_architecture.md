@@ -2,231 +2,161 @@
 
 This document describes the proposed Python class structure and overall architecture for the Pose Editor add-on. The design emphasizes separation of concerns, maintainability, and unit testability.
 
-## 1. High-Level Architecture
+## 1. High-Level Architecture: Blender as the Source of Truth
 
-The add-on will follow a layered architecture, loosely based on the Model-View-Controller (MVC) pattern, adapted for the Blender environment. This separates the core data and logic from the user interface and the Blender scene representation.
+Per our discussion, we will adopt an architecture where the Blender scene (`bpy.data`) serves as the single source of truth. This is a robust, idiomatic approach for Blender add-ons that avoids complex data synchronization issues.
 
--   **Model (Core Layer):** Pure Python classes that represent the application's data and business logic. This layer has no dependency on Blender's `bpy` module and is therefore fully unit-testable.
--   **Scene/Blender Layer (Controller):** This layer acts as the bridge between the core Model and Blender. It consists of two main parts:
-    -   **Scene Manager:** A module responsible for all direct manipulation of the Blender scene (creating objects, collections, custom properties).
-    -   **Operators:** Blender Operators that respond to UI events. They orchestrate the flow of data, calling the Model to update its state and the Scene Manager to reflect those state changes in the viewport.
--   **UI Layer (View):** Standard Blender UI panels (`bpy.types.Panel`) that draw the user interface. They read data (managed by the Controller) and present it to the user.
+The layers are now defined as follows:
+
+-   **Blender Data (Source of Truth):** All persistent data, such as marker positions, object relationships, and project settings, resides directly in the `.blend` file on `bpy.data` objects (e.g., as custom properties on Empties).
+
+-   **Data Access Layer (DAL):** A thin, dedicated module that is the *only* part of the add-on allowed to make direct `bpy.data` calls (e.g., `obj.get("my_prop")`, `obj.location`). This layer provides simple, abstract functions for getting and setting data. Crucially, it can be easily mocked for unit testing the layers above it.
+
+-   **Business Logic / Facades (Model):** This layer contains the application's intelligence. The classes here (`RealPersonInstance`, `CameraView`) are lightweight, often transient wrappers that are initialized with a Blender object (like an Empty). They use the DAL to get or set data and perform operations. They contain the business logic (e.g., "how to triangulate") but do not know how the data is stored in Blender.
+
+-   **Operators & UI (Controller & View):** This layer remains the same. Operators handle user actions, using the Facade classes to work with the data. UI Panels read data (via the Facades) to draw themselves.
 
 ```mermaid
-graph TD
-    subgraph User Interaction
-        A[UI Panels (View)];
-    end
+classDiagram
+    class UIPanels {
+        <<View>>
+    }
+    class Operators {
+        <<Controller>>
+    }
+    class BusinessLogicFacades {
+        <<Facade>>
+        +RealPersonInstance(bpy_object)
+        +get_3d_markers()
+    }
+    class DataAccessLayer {
+        <<DAL>>
+        +get_custom_property(obj, key)
+        +set_fcurve_value(obj, path, frame, value)
+    }
+    class BlenderData {
+        <<Source of Truth>>
+        bpy.data
+    }
 
-    subgraph Blender-Specific Logic
-        B[Operators (Controller)];
-        C[Scene Manager (Controller)];
-    end
-
-    subgraph Pure Python Core
-        D[Data Model & Logic (Model)];
-    end
-
-    A -- "Triggers" --> B;
-    B -- "Updates" --> D;
-    B -- "Commands" --> C;
-    C -- "Reads from" --> D;
+    UIPanels ..> Operators : triggers
+    Operators ..> BusinessLogicFacades : uses
+    Operators ..> DataAccessLayer : uses
+    BusinessLogicFacades ..> DataAccessLayer : uses
+    DataAccessLayer ..> BlenderData : manipulates
 ```
 
 ## 2. Proposed Directory Structure
 
-To enforce this separation, the add-on's code will be organized as follows:
+The directory structure is updated to reflect this new architecture.
 
 ```
 pose_editor/
-|-- __init__.py       # Main add-on registration
-|-- core/             # Layer 1: Model
+|-- __init__.py           # Main add-on registration
+|-- core/                 # Business Logic / Facades
 |   |-- __init__.py
-|   |-- project.py      # Project, CameraView, etc.
-|   |-- person.py       # PersonDefinition, PersonLibrary
-|   |-- triangulation.py# Interface with Pose2Sim
-|   `-- filtering.py    # Interface with Pose2Sim
-|-- blender/          # Layer 2: Controller
+|   |-- project_facade.py
+|   `-- person_facade.py
+|-- blender/              # Blender-specific code
 |   |-- __init__.py
-|   |-- scene.py        # SceneManager: creates/updates Blender objects
-|   |-- operators.py    # All bpy.types.Operator classes
-|   `-- properties.py   # Blender PropertyGroup definitions
-`-- ui/               # Layer 3: View
+|   |-- dal.py            # The Data Access Layer
+|   |-- scene_builder.py  # For initial object creation
+|   |-- operators.py      # All bpy.types.Operator classes
+|   `-- properties.py       # Blender PropertyGroup definitions
+`-- ui/                   # UI Panels
     |-- __init__.py
-    |-- panels.py       # All bpy.types.Panel classes
-    `-- menus.py        # bpy.types.Menu classes
+    `-- panels.py
 ```
 
-## 3. Layer 1: Core Data Model & Logic
-This layer is pure Python. It knows nothing about Blender.
-
-### 3.1. Class Diagram
-
-```mermaid
-classDiagram
-    class PersonLibrary {
-        +List~PersonDefinition~ definitions
-        +load(path)
-        +save(path)
-        +find_person(name)
-    }
-
-    class PersonDefinition {
-        +string name
-        +dict body_measurements
-    }
-
-    class Project {
-        +string name
-        +List~RealPersonInstance~ person_instances
-        +List~CameraView~ camera_views
-        +Calibration calibration_data
-    }
-
-    class RealPersonInstance {
-        +string name
-        +PersonDefinition definition
-        +dict~StitchedPose2D~ stitched_2d_poses
-        +MarkerSet3D marker_set_3d
-    }
-
-    class CameraView {
-        +string name
-        +string video_path
-    }
-
-    PersonLibrary *-- "1..*" PersonDefinition
-    Project *-- "1..*" RealPersonInstance
-    Project *-- "1..*" CameraView
-    RealPersonInstance --|> PersonDefinition
-```
-
-### 3.2. Class Interfaces (Python Snippets)
+## 3. Data Access Layer (DAL)
+This is a new, critical layer located at `blender/dal.py`. It abstracts all `bpy` interactions into simple, testable functions.
 
 ```python
-# core/person.py
+# blender/dal.py
 
-class PersonDefinition:
-    """Stores the reusable data for a unique individual."""
-    name: str
-    body_measurements: dict[str, float]
+# This module contains all direct access to bpy.data
 
-class PersonLibrary:
-    """Manages the collection of all known PersonDefinitions."""
-    def load_from_disk(self, file_path: str) -> None:
-        pass
+def get_root_project_empty() -> bpy.types.Object:
+    # Logic to find and return the main project empty
+    pass
 
-    def save_to_disk(self, file_path: str) -> None:
-        pass
+def get_custom_property(blender_object: bpy.types.Object, key: str, default: any) -> any:
+    return blender_object.get(key, default)
 
-    def add_person_definition(self, name: str) -> PersonDefinition:
-        pass
+def set_custom_property(blender_object: bpy.types.Object, key: str, value: any) -> None:
+    blender_object[key] = value
 
-# core/project.py
+def get_marker_world_location(marker_object: bpy.types.Object, frame: int) -> tuple[float, float, float]:
+    # Logic to get f-curve value at a specific frame
+    pass
 
-class RealPersonInstance:
-    """Represents a person within a specific project."""
-    definition: PersonDefinition
-    # ... other project-specific data
-
-class Project:
-    """The main data container for the entire application state."""
-    name: str
-    person_instances: list[RealPersonInstance]
-    camera_views: list # ... and so on
-
-    def add_person_from_library(self, definition: PersonDefinition) -> RealPersonInstance:
-        pass
+# ... and so on for every other bpy.data interaction.
 ```
 
-## 4. Layer 2: Blender Scene & Operators (Controller)
-This layer translates the pure Python data model into Blender objects and handles user actions.
-
-### 4.1. Scene Manager
-The `blender/scene.py` module will be responsible for all `bpy` calls that modify scene data. This isolates mutation logic and makes it easier to debug.
+## 4. Business Logic / Facades
+These classes in the `core/` directory provide the main API for the rest of the application to use. They are initialized with a Blender object but perform all their internal data access via the DAL.
 
 ```python
-# blender/scene.py
+# core/person_facade.py
 
-from pose_editor.core import project
+# Note: No 'import bpy' here!
+from ..blender import dal
 
-def create_project_structure(proj: project.Project) -> None:
-    """Creates the main collections for the project."""
-    pass
+class RealPersonInstanceFacade:
+    """A lightweight wrapper around a person's master Empty object."""
 
-def create_person_instance_objects(person_instance: project.RealPersonInstance) -> None:
-    """Creates the master Empty and collections for a person instance."""
-    # 1. Create the master Empty
-    # 2. Set custom properties on the Empty (e.g., person_definition_id)
-    # 3. Create sub-collections for 3D markers and the final armature
-    pass
+    def __init__(self, person_instance_empty):
+        # In production, this is a bpy.types.Object.
+        # In testing, this can be a mock object or a simple dict.
+        self.bl_obj = person_instance_empty
 
-def sync_3d_markers_to_scene(person_instance: project.RealPersonInstance) -> None:
-    """Creates or updates Blender Empties to match the 3D marker data."""
-    pass
+    @property
+    def name(self) -> str:
+        return dal.get_custom_property(self.bl_obj, 'person_definition_id', "")
+
+    def get_3d_marker_data_as_numpy(self) -> 'numpy.ndarray':
+        """Gets all 3D marker data for this person."""
+        marker_objects = dal.get_children_in_collection(self.bl_obj, "3D Markers")
+        # ... logic to iterate through frames and markers, using the DAL
+        # to get locations for each frame, and assemble a numpy array.
+        pass
 ```
 
-### 4.2. Operators
-Operators in `blender/operators.py` contain the logic for user actions. They follow a clear pattern: `Modify Model -> Update Scene`.
+## 5. Operators and UI
+Operators now use the Facades to interact with the data, keeping the operator logic clean and focused on orchestration.
 
 ```python
 # blender/operators.py
 
 import bpy
-from pose_editor.core.project import Project
-from pose_editor.blender import scene
-
-# A global instance of our project data model
-# This would be managed by the add-on registration logic
-project_data = Project()
+from ..core.person_facade import RealPersonInstanceFacade
+from ..blender import dal
 
 class PE_OT_triangulate(bpy.types.Operator):
     bl_idname = "pose.triangulate"
     bl_label = "Triangulate Persons"
 
     def execute(self, context):
-        # 1. Get selected persons from the UI/context
-        selected_person_names = get_selected_persons_from_context(context)
+        # 1. Get selected Blender objects from the context
+        selected_empties = context.selected_objects
 
-        # 2. Call the CORE/MODEL layer to perform the logic
-        # (This is a hypothetical function)
-        for name in selected_person_names:
-            person_instance = project_data.get_person_by_name(name)
-            triangulate_person(person_instance) # This would call Pose2Sim
+        for empty in selected_empties:
+            # 2. Create a facade for the person instance
+            person_facade = RealPersonInstanceFacade(empty)
 
-        # 3. Call the SCENE layer to update Blender
-        for name in selected_person_names:
-            person_instance = project_data.get_person_by_name(name)
-            scene.sync_3d_markers_to_scene(person_instance)
+            # 3. Use the facade to perform the core logic
+            # The facade itself uses the DAL internally
+            numpy_data_2d = person_facade.get_all_2d_marker_data()
+            
+            # This function can be pure Python and easily tested
+            triangulated_data = self.perform_triangulation(numpy_data_2d)
+
+            # 4. Use the DAL to write the results back to Blender
+            dal.create_or_update_3d_markers(empty, triangulated_data)
 
         return {'FINISHED'}
-```
 
-## 5. Layer 3: UI Panels (View)
-The UI panels in `ui/panels.py` are responsible only for drawing. They read from the project data model (or Blender properties that are synced to it) and display it.
-
-```python
-# ui/panels.py
-
-import bpy
-
-class PE_PT_3d_pipeline(bpy.types.Panel):
-    bl_label = "3D Pipeline"
-    # ... other panel settings
-
-    def draw(self, context):
-        layout = self.layout
-        # Assume project_data is accessible
-        from .operators import project_data
-
-        # Draw the list of real persons
-        box = layout.box()
-        box.label(text="Process Real Persons:")
-        for person in project_data.person_instances:
-            row = box.row()
-            row.prop(person, "is_selected") # Assumes a BoolProperty
-            row.label(text=person.name)
-
-        # Draw the operator button
-        layout.operator(PE_OT_triangulate.bl_idname)
+    def perform_triangulation(self, data):
+        # Pure, testable logic that might call Pose2Sim
+        pass
 ```
