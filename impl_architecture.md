@@ -255,3 +255,16 @@ This chapter details the implementation flow for the initial setup and 2D stitch
     -   `core.person_facade.RealPersonInstanceFacade.copy_animation_from_source()`: A method that iterates through the markers of a source and target armature.
     -   `blender.dal.get_fcurves(object, data_path, frame_range)`: Retrieves all F-Curve keyframes for a specific property within a given frame range.
     -   `blender.dal.set_fcurves(object, data_path, keyframes)`: Clears existing keyframes in a range and inserts a new set.
+
+## 7. Deployment
+This chapter outlines the strategy for packaging and distributing the add-on, including its dependencies.
+
+### 7.1. Pose2Sim Dependency
+The add-on relies on the `Pose2Sim` library for core functionalities like 3D triangulation and body measurement calculations. To ensure a seamless user experience and avoid installation issues, the current plan is to bundle a compatible version of the `Pose2Sim` library directly within the add-on's distributed package.
+
+This approach has the following implications:
+-   **No User Installation Step:** Users will not need to manually install `Pose2Sim` via `pip`.
+-   **Version Control:** We can guarantee that the version of `Pose2Sim` being used is the one that has been tested and is known to be compatible with the add-on.
+-   **Packaging:** The `Pose2Sim` source code will be included in a `vendor` or `lib` directory within the add-on, and the add-on's Python code will add this directory to `sys.path` to make it importable.
+
+This decision may be revisited if it introduces significant complexity or increases the add-on's file size prohibitively.
