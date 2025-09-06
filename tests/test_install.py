@@ -4,23 +4,20 @@
 
 import bpy
 import pytest
+from pose_editor import register, unregister # Import register/unregister functions
 
 def test_install_addon():
     """
-    Tests that the add-on can be enabled and disabled.
+    Tests that the extension can be registered and unregistered.
     """
-    addon_name = "pose_editor"
-
-    # Enable the add-on
-    bpy.ops.preferences.addon_enable(module=addon_name)
-    assert addon_name in bpy.context.preferences.addons
+    # Register the extension
+    register()
 
     # Check that the dummy operator is registered
     assert hasattr(bpy.ops.pose_editor, "dummy")
 
-    # Disable the add-on
-    bpy.ops.preferences.addon_disable(module=addon_name)
-    assert addon_name not in bpy.context.preferences.addons
+    # Unregister the extension
+    unregister()
 
     # Check that the dummy operator is unregistered
     with pytest.raises(AttributeError):

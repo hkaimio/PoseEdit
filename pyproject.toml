@@ -14,7 +14,7 @@ dev = [
     "pyright",
     "pytest",
     "pytest-cov",
-    "bpy",
+    "bpy==4.2.0",
     "reuse",
 ]
 

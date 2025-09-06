@@ -33,7 +33,7 @@ wheels = [
 
 [[package]]
 name = "bpy"
-version = "4.5.2"
+version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cython" },
@@ -42,11 +42,10 @@ dependencies = [
     { name = "zstandard" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/4f/3bfcb8bf72754ca8d7f7c64e40429c2561a3e8fd24b41cdf49cc993f53b9/bpy-4.5.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:5bd8708d5d62a1cbde30ffc4395dde09febcf034a880cbb06f0ae1c95d99054c", size = 220890271 },
-    { url = "https://files.pythonhosted.org/packages/6e/15/ff6aecb4dda90328aee3327e49bd2d57c9b1b3eb8ca9b86ca9a666b64146/bpy-4.5.2-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:56515bcfeedf0a0ec9813179ef11bc54701c7389108f9a0a077226b35de5482a", size = 235127666 },
-    { url = "https://files.pythonhosted.org/packages/ee/f7/e34428697b79458c0a57c55e8c8f7e868bf922a8ad1de46be767a00ad69b/bpy-4.5.2-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:536a722cbb4ae6db5770edf8e8a8ccaff2f09c2a7eaf52ecba730e523b6e6bd7", size = 373008129 },
-    { url = "https://files.pythonhosted.org/packages/b6/bd/9d8528a1abb0a46baefe81eb3ab4ebb39aca3d5813acbb7c99d401d586c8/bpy-4.5.2-cp311-cp311-win_amd64.whl", hash = "sha256:e22275e42ddc227dd845406bd6605c29ab7ae18b266f068f9aa29e347e9f4671", size = 326586790 },
-    { url = "https://files.pythonhosted.org/packages/9e/98/f81dbde272f5a105921feba505cb188ac51ed63bd440e51726b01d444b4f/bpy-4.5.2-cp311-cp311-win_arm64.whl", hash = "sha256:c4e90e1387f5fc2e9e470b2f90cc0f868c23c00cba1a063ac661c41d6a22083b", size = 194073807 },
+    { url = "https://files.pythonhosted.org/packages/ea/5a/d085d433ad26687d7ba5be235c57679780a3b41316cd7ece1ee65694ebad/bpy-4.2.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e6e8857c9f483d42f5388642601080ad3e7488970cbc9e59efeedf4a8c26c90b", size = 207901162 },
+    { url = "https://files.pythonhosted.org/packages/39/03/579ec8a0d592424bd5743138ff40f2eca1944e427546721cfff091dbe730/bpy-4.2.0-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:4fd0e9872dceb37209d298ccbe77e6c3d0421501ef71b464dde22d09607966ec", size = 220963874 },
+    { url = "https://files.pythonhosted.org/packages/0b/bc/5245f98dafa39166a4d4701d64077d281a36110e780011de5c38135089aa/bpy-4.2.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:a8217c2bd7b3424d1f51ce0698c0bf65439de352f7f6ed7b9942e2a9e5eb121b", size = 519384061 },
+    { url = "https://files.pythonhosted.org/packages/c4/b0/6f18776208e13acb9bdbf3b5df9db9de42b09ab096aae68b171db422cccb/bpy-4.2.0-cp311-cp311-win_amd64.whl", hash = "sha256:26ce6210deb8316816938cb1c62c7fd257a8ef38d0c20b9f031a7a47a1492cac", size = 315442011 },
 ]
 
 [[package]]
@@ -272,7 +271,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bpy", marker = "extra == 'dev'" },
+    { name = "bpy", marker = "extra == 'dev'", specifier = "==4.2.0" },
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },

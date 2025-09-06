@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2025 Harri Kaimio
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+[blender_asset]
+id = "pose_editor"
+name = "Pose Editor"
+description = "A Blender extension for editing motion capture data."
+version = "0.1.0"
+blender_version_min = "4.2.0"
+blender_version_max = "" # No max version specified
+tags = ["Animation", "Motion Capture"]
+authors = ["Harri Kaimio"]
+license = "BSD-3-Clause"
+website = "" # To be filled later

@@ -6,18 +6,6 @@ import bpy
 from .blender.operators import PE_OT_CreateProject
 from .ui.panels import PE_PT_ProjectPanel
 
-bl_info = {
-    "name": "Pose Editor",
-    "author": "Harri Kaimio",
-    "version": (0, 1, 0),
-    "blender": (4, 0, 0),
-    "location": "View3D > Sidebar > Pose Editor",
-    "description": "A collection of tools for editing motion capture data.",
-    "warning": "",
-    "doc_url": "",
-    "category": "Animation",
-}
-
 class PE_OT_dummy(bpy.types.Operator):
     """A dummy operator to verify installation."""
     bl_idname = "pose_editor.dummy"
