@@ -1,88 +1,82 @@
-# Blender Add-on: Pose Data Editor Design
+# Blender Add-on: Pose-Editor Design
 
-## Overview
-This add-on provides tools for editing pose data captured from video, visualized and animated in Blender. It is designed to handle complex scenarios with multiple camera angles and multiple people, providing a workflow to consolidate fragmented tracking data into coherent character poses before editing.
+## 1. Overview
+This document outlines the design for a Blender add-on that provides an end-to-end pipeline for editing motion capture data. The workflow starts with editing 2D pose data captured from video, progresses to 3D reconstruction, and finishes with a fully rigged and animated 3D character.
 
-The core class, `PoseData2D`, encapsulates the final, stitched pose data for a single person in a single camera view and manages the associated Blender objects.
+The add-on is designed to handle complex scenarios with multiple camera angles and multiple people, providing workflows to consolidate fragmented tracking data. It will heavily integrate with **Pose2Sim**, a third-party Python library, to handle 3D triangulation, data filtering, and body measurement estimation.
 
-## Requirements
-- **Video Background:** The video from which pose data was extracted can be loaded and displayed as a synchronized background for the markers and skeleton.
-- **Multi-Camera Support:** Support loading data from multiple camera angles into a single Blender scene. Each angle has its own video and pose data, and the user can switch between camera views.
-- **Multi-Person Identity Stitching:** Provide a workflow to construct continuous animation tracks for real people by stitching together fragmented tracks from the source data.
-- **Data Loading:** Pose data is loaded from a directory of JSON files. The loader also receives a skeleton definition.
-- **Visualization:** Each marker is visualized as a small sphere. The skeleton is realized as a Blender armature whose bones connect the markers.
-- **Standard Animation Tools:** All editing should be compatible with Blender's native animation tools (Graph Editor, Dope Sheet, etc.).
-- **Hierarchical Manipulation:** Provide a tool to select a marker and all its children based on the skeleton structure. This action should also move the transform pivot point to the selected marker's location to facilitate rotating entire limbs.
-- **Keyframe Effects:** Manually keyframing a marker automatically sets its likelihood to 1.0. Users must also be able to mark a marker as occluded (not visible) for a range of frames.
-- **Data Export:** The edited animation data for a person can be exported to a numpy array.
+## 2. Core Workflows & Requirements
 
-## Identity Stitching Workflow
-This phase allows the user to build continuous tracks for real people from fragmented raw tracking data.
+### 2.1. 2D Pose Editing
+- **Multi-Camera/Multi-Person:** Support loading multiple camera views (video + 2D pose data) and provide a workflow for stitching fragmented person tracks into continuous "Real Person" entities.
+- **Synced Video:** Display the source video as a synchronized background for direct visual reference during editing.
+- **Blender-Native Editing:** All 2D marker data should be editable using standard Blender tools (3D Viewport, Graph Editor, Dope Sheet).
+- **Hierarchical Tools:** Provide tools for selecting and manipulating entire limbs (e.g., "Select Children" command that also sets the pivot point).
 
-1.  **Initial Visualization:** Upon loading a camera view, all raw tracks from the pose data are loaded and visualized simultaneously. Each raw track will have its own skeleton, markers, a bounding box, and an annotation with its track ID.
-2.  **"Real Person" Creation:** The user creates a "Real Person" entity (e.g., "Alice"), which gets a dedicated armature and a unique color.
-3.  **Stitching via Keyframed Index:** The Real Person's armature contains a custom property, `active_track_index`, which is keyframed over time. The value of this property at any given frame determines which raw track is used as the data source. The user scrubs the timeline and adds keyframes to this property to switch between source tracks when the person's tracking ID changes.
+### 2.2. 3D Motion Capture Pipeline
+- **Camera Calibration:** Load and manage camera calibration data (intrinsics/extrinsics in OpenCV format) required for 3D reconstruction.
+- **3D Triangulation:** Use `Pose2Sim` to triangulate the corrected 2D marker data from multiple views into a 3D pose. This process is iterative.
+- **3D Data Filtering:** Integrate `Pose2Sim`'s filters (e.g., Butterworth, Kalman) to process the raw 3D marker animation curves.
+- **Armature Fitting:** Provide a workflow to scale a standard armature to a person's estimated body measurements (calculated via `Pose2Sim`) and then rig it to be driven by the 3D markers using Blender's IK constraints.
+- **Finalization:** Bake the IK-driven animation onto the armature and provide export options.
 
-## Editing and Interaction Workflow
-This section details the process of manually correcting the stitched pose data.
+## 3. Detailed Pipeline Stages
 
-1.  **Core Principle:** Editing leverages Blender's standard animation editors. Marker locations are stored as f-curves on their transform channels, making them fully editable in the Graph Editor and Dope Sheet.
+### 3.1. 2D Identity Stitching
+This phase builds continuous tracks for real people from fragmented raw tracking data.
+- **Initial Visualization:** All raw tracks are loaded, each with its own annotated skeleton and markers.
+- **"Real Person" Creation:** The user creates a "Real Person" entity, which gets a dedicated armature.
+- **Stitching via Keyframed Index:** A custom property (`active_track_index`) on the Real Person's armature is keyframed over time to dynamically switch between the raw tracks used as the data source.
 
-2.  **Manual Keyframing:**
-    *   When a user moves a marker in the 3D viewport and inserts a keyframe, the add-on will automatically perform two actions on that frame:
-        1.  Set the marker's `likelihood` custom property to `1.0`.
-        2.  Set the marker's `visible` custom property to `True`.
-    *   This reflects that a manual correction is considered a high-confidence observation.
+### 3.2. 2D Editing and Interaction
+- **Manual Keyframing:** Moving a marker automatically sets its `likelihood` to 1.0.
+- **Occlusions:** Users can keyframe a `visible` property to mark markers as occluded.
+- **Hierarchical Posing:** A "Select Children" command selects a limb and sets the pivot to the root joint for intuitive rotation.
 
-3.  **Handling Occlusions:**
-    *   The user can mark a marker as occluded (not visible) over a range of frames.
-    *   A UI command will allow them to select a marker and a frame range, and then set the `visible` custom property to `False` and keyframe it accordingly.
+### 3.3. Camera Calibration Management
+- **Separation of Concerns:** Calibration data is managed separately from pose data, allowing calibrations to be reused across projects and sessions.
+- **Data Structure:**
+    - An **Extrinsics** file defines the positions of all cameras in a session.
+    - Each camera in the Extrinsics file references an **Intrinsics** file.
+    - Each 2D pose data set loaded into the project is linked to a specific camera from the active Extrinsics set.
+- **UI:** The add-on will provide a panel for loading and managing these calibration files.
 
-4.  **Hierarchical Manipulation:**
-    *   A "Select Children" UI command is available (e.g., via context menu or a button).
-    *   When the user activates this on a selected marker:
-        1.  The command selects the clicked marker and all of its descendants in the skeleton hierarchy (e.g., selecting a shoulder marker also selects the elbow, wrist, and hand).
-        2.  Crucially, Blender's transform pivot point is automatically moved to the location of the initially selected marker (the root of the hierarchy).
-    *   This allows the user to intuitively rotate or scale the entire limb from the correct joint.
+### 3.4. 3D Triangulation
+- **Engine:** Uses a function from the `Pose2Sim` library.
+- **Inputs:** Two or more sets of 2D marker data (as NumPy arrays) and the corresponding camera calibration data.
+- **Process:** The user selects the "Real Persons" they want to triangulate. The add-on gathers the 2D data from all available camera views for that person and passes it to `Pose2Sim`.
+- **Output:** A set of 3D markers (e.g., empties) animated in Blender. We will aim to modify the process to output and store metadata as custom properties on each 3D marker:
+    - `reprojection_error`: The calculated error for the triangulation at that frame.
+    - `contributing_views`: A list of camera views used to calculate the marker's position at that frame.
+- **Iterative Workflow:** The user can review the 3D output, go back to the 2D views to correct marker positions for frames with high reprojection error, and then re-run triangulation on a specific frame range.
 
-## Key Use Case Flow
-1.  **Setup:** Install and enable the add-on. Add camera views (video + pose data) to the project.
+### 3.5. 3D Data Filtering
+- **Engine:** Uses filtering functions from `Pose2Sim` (Butterworth, median, Kalman, etc.).
+- **Process:** The user selects a 3D marker set and applies one or more filters via the UI.
+- **Implementation:** The filter is applied to the f-curves of the 3D markers' location channels.
+- **Reversibility:** Before filtering, the original f-curves are saved to a custom property on the marker object, allowing the user to revert the filtering operation if needed.
 
-2.  **Identity Stitching:** For each camera view, visualize all raw tracks. Create "Real Person" armatures and use the keyframed `active_track_index` property to stitch together the correct animation sequences from the various raw tracks.
+### 3.6. Armature Fitting and Rigging
+This is a two-step process to create the final animated character.
+1.  **Armature Scaling:**
+    *   **Measurement Estimation:** Use `Pose2Sim` to estimate body measurements from the 3D marker data.
+    *   **UI:** The add-on will display these measurements and allow the user to edit them.
+    *   **Saving/Loading:** Person-specific measurements can be saved and reused in other projects.
+    *   **Application:** The user selects a target armature, and the add-on scales its bones to match the final measurements.
+2.  **IK Rigging:**
+    *   After scaling, the add-on will automatically create an IK rig. It will add IK constraints to the armature's limbs and target them to the corresponding 3D markers.
+    *   It will support setting this up for a standard Blender human armature (e.g., Rigify).
 
-3.  **Editing and Refinement:**
-    *   Once stitched, hide the raw data visualizations to focus on the "Real Person" armatures.
-    *   Use the editing tools described in the **Editing and Interaction Workflow** section to correct the pose. This includes moving markers directly, using the Graph Editor, using the "Select Children" command to pose limbs, and marking occlusions.
-    *   Switch between camera views to ensure consistency.
+### 3.7. Finalization
+- **Baking:** Once the user is satisfied with the IK-driven motion, they can "bake" the animation. This removes the constraints and keys the final rotation, location, and scale directly onto the armature's deforming bones.
+- **Export:** The baked armature can be exported to other software using standard Blender exporters (e.g., FBX, glTF).
 
-4.  **Export:** Select a "Real Person" and export their final, corrected animation data to a NumPy file.
-
-## Class Design: PoseData2D
-Represents a single, continuous pose for one person.
-
-### Constructor
-- Parameters:
-	- `parent_object`: Blender object (geometry parent).
-	- `base_color`: tuple (RGBA).
-	- `skeleton`: Skeleton structure.
-	- `stitched_pose_data`: The consolidated pose data for a single person, passed in after the identity stitching phase.
-
-### Methods
-- `load_pose_data()`: Now takes the `stitched_pose_data` and creates the spheres, armature, and keyframes.
-- `select_children(marker_name)`: Selects all child markers and sets the pivot point.
-- (Other methods like `update_marker_colors`, `get_animation_array` remain largely the same).
-
-## Data Flow
-1.  User sets up camera views (video + pose data directory).
-2.  For each view, the user performs identity stitching using the keyframed index method to map raw tracks to final, "Real Person" armatures.
-3.  The animation data for the Real Person is dynamically sourced from the underlying raw tracks based on the `active_track_index` property.
-4.  After stitching, the user can directly edit the markers on the Real Person's armature using the defined editing workflows.
-5.  User exports the final, edited data.
-
-## Extensibility
-- Support for 3D pose data by extending `PoseData2D` to `PoseData3D`.
-- More advanced editing tools, such as interpolation between keyframes.
-
-## References
-- Marker data format: See `2d-markers.py`
-- Skeleton structure: See `skeletons.py`
+## 4. Overall Key Use Case Flow
+1.  **Project Setup:** Load camera views (video + 2D data) and the corresponding camera calibration files.
+2.  **2D Stitching & Editing:** Create "Real Person" entities and stitch their tracks. Correct the 2D marker data in all views.
+3.  **3D Triangulation:** Run triangulation on the corrected 2D data to generate animated 3D markers.
+4.  **Iterative 3D/2D Refinement:** Review the 3D markers. If errors exist (e.g., high reprojection error), go back to the 2D views, fix the markers on the problematic frames, and re-triangulate.
+5.  **3D Filtering:** Apply filters (e.g., Butterworth) to the 3D marker animation curves to smooth the motion.
+6.  **Armature Scaling:** Generate and fine-tune body measurements and scale a target armature.
+7.  **IK Rigging:** Automatically set up IK constraints to make the scaled armature follow the 3D markers.
+8.  **Baking & Export:** Bake the final animation onto the armature and export it.
