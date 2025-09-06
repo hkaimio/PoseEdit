@@ -1,0 +1,3 @@
+[submodule "pose2sim"]
+	path = pose2sim
+	url = https://github.com/perfanalytics/pose2sim.git
