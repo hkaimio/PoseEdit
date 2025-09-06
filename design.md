@@ -132,7 +132,41 @@ erDiagram
     -   **Properties:** `name` (e.g., "Alice"), `person_definition_id` (a string linking to the `PersonDefinition`), `color_override`.
     -   **Relationships:** It is an instance of a `PersonDefinition`. It owns the project-specific data: `StitchedPose2D` sets, one `MarkerSet3D`, and one `FinalArmature`.
 
--   **CameraView, RawTrack, StitchedPose2D, MarkerSet3D:** These remain as previously defined, but now relate to a `RealPersonInstance`.
+-   **CameraView:** Represents a single camera's viewpoint and its associated data files.
+    -   **Properties**:
+        -   `name`: A unique name for the camera (e.g., "cam_01").
+        -   `video_path`: Filesystem path to the background video file.
+        -   `posedata_dir`: Filesystem path to the directory of raw 2D pose JSON files.
+        -   `raw_tracks`: A list of `RawTrack` objects loaded from the `posedata_dir`.
+        -   `calibration_id`: The ID or name of the specific camera within the project's `CalibrationData` this view corresponds to.
+    -   **Relationships**:
+        -   Belongs to one `Project`.
+        -   Contains many `RawTrack`s.
+
+-   **RawTrack:** A data object representing a single, continuous but fragmented track from the initial pose detection software (e.g., `person_0`, `person_1`).
+    -   **Properties**:
+        -   `track_id`: The identifier from the source JSON file.
+        -   `data`: The raw NumPy array of frame-by-frame marker data (x, y, likelihood).
+    -   **Relationships**:
+        -   Belongs to one `CameraView`.
+        -   Is used as a source for a `StitchedPose2D` object.
+
+-   **StitchedPose2D:** Represents the continuous, corrected 2D pose for a `RealPersonInstance` within a single `CameraView`.
+    -   **Properties**:
+        -   `data`: The final NumPy array of 2D marker data after stitching and editing.
+        -   `source_map`: A data structure (e.g., a list of tuples) indicating which `RawTrack` and frame range was used for each part of the animation (e.g., `[('track_a', 1, 100), ('track_c', 101, 200)]`). This is driven by the `active_track_index` keyframes.
+    -   **Relationships**:
+        -   Belongs to one `RealPersonInstance` and one `CameraView`.
+        -   Is composed of data from one or more `RawTrack`s.
+
+-   **MarkerSet3D:** Represents the animated 3D markers for a `RealPersonInstance`.
+    -   **Properties**:
+        -   `data`: The NumPy array of 3D marker data (x, y, z) post-triangulation and filtering.
+        -   `markers`: A list of Blender empty objects that are animated by the `data`.
+        -   Each marker object in Blender will have custom properties for metadata like `reprojection_error`.
+    -   **Relationships**:
+        -   Belongs to one `RealPersonInstance`.
+        -   Is generated from two or more `StitchedPose2D` objects.
 
 ### 6.3. Blender Data Representation
 This section details how the conceptual data model is implemented within a `.blend` file.
