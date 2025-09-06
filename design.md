@@ -209,6 +209,59 @@ Represents the animated 3D markers for a `RealPerson`.
     -   Belongs to one `RealPerson`.
     -   Is generated from two or more `StitchedPose2D` objects.
 
+### 6.3. Blender Data Representation
+This section details how the conceptual data model is implemented within a `.blend` file to ensure it is self-contained and organized.
+
+#### Overall Scene Organization
+A hierarchical collection structure will be used to keep the scene tidy. View Layers will be set up to allow users to easily toggle between different stages of the pipeline (e.g., 2D editing, 3D results).
+
+```mermaid
+graph TD
+    subgraph "Scene Collection"
+        A["PoseProject Root (Empty)"]
+        B["▶ Real Persons"]
+        C["▶ Camera Views"]
+        D["▶ 3D Data"]
+        E["▶ Final Armatures"]
+        F["_Project Settings (Empty)"]
+
+        A --> B;
+        A --> C;
+        A --> D;
+        A --> E;
+        A --> F;
+    end
+```
+
+#### Entity-to-Blender Mapping
+
+-   **Project:** Represented by a main root Empty, `PoseProject Root`. The `.blend` file itself is the project file. Project-level settings (like the path to the calibration files) are stored as custom properties on a dedicated `_Project Settings` Empty.
+
+-   **RealPerson:** Represented by a master **Empty** object named after the person (e.g., "Alice"). This Empty acts as the parent for all objects related to that person. 
+    -   **Custom Properties:** `person_name`, `color`, and a serialized dictionary for `body_measurements`.
+    -   **External Data:** Body measurements can be exported/imported as a separate `.json` or `.toml` file.
+
+-   **CameraView:** Represented by a **Collection** (e.g., "View: cam_01").
+    -   Inside this collection, there will be a Blender **Camera** object configured with the video clip as a synchronized background.
+    -   A sub-collection named "Raw Tracks" will contain the visualization for all `RawTrack`s belonging to this view.
+
+-   **RawTrack:** Represented by an **Armature** object for the skeleton and its child sphere objects for the markers. 
+    -   The root armature object will have a custom property `track_id`.
+    -   For easier viewing, a dedicated **Orthographic Camera** will be created and parented to each RawTrack armature, allowing the user to easily focus on and follow a specific track.
+
+-   **StitchedPose2D:** This is primarily a data concept. The Blender representation is the animation data on the **2D Armature** for a `RealPerson` within a specific `CameraView` collection. The keyframed `active_track_index` custom property on this armature is the direct representation of the stitching.
+
+-   **MarkerSet3D:** Represented by a set of animated **Empty** objects.
+    -   These empties are stored in a dedicated **Collection** under a `RealPerson`'s hierarchy (e.g., "Alice" > "3D Markers").
+    -   Each Empty has custom properties for `reprojection_error` and `contributing_views` on each frame.
+    -   The original, unfiltered animation data is stored in a separate custom property on the Empty before filtering is applied.
+
+-   **FinalArmature:** A standard Blender **Armature** object, scaled and rigged with IK constraints. It is parented to the corresponding `RealPerson` master Empty.
+
+-   **CalibrationData:** Represented by a single **Empty** object at the root of the scene, `_CalibrationData`. 
+    -   **Custom Properties:** `extrinsics_path`, `intrinsics_path_list`.
+    -   **External Data:** The actual calibration data resides in external `.json` or `.toml` files in OpenCV format.
+
 ## 7. UI Components and Flow
 This chapter describes the UI panels and workflows for the add-on. The main UI will be located in the Blender 3D View's sidebar (N-Panel) under a "Pose Editor" tab.
 
