@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2025 Harri Kaimio
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Implementation Architecture
 
 This document describes the proposed Python class structure and overall architecture for the Pose Editor add-on. The design emphasizes separation of concerns, maintainability, and unit testability.

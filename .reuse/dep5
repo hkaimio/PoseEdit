@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 Harri Kaimio
+# SPDX-License-Identifier: CC0-1.0
+
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: pose-editor
+Upstream-Contact: Harri Kaimio
+
+Files: *
+Copyright: 2025 Harri Kaimio
+License: BSD-3-Clause
