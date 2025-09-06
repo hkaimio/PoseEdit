@@ -208,3 +208,135 @@ Represents the animated 3D markers for a `RealPerson`.
 -   **Relationships**:
     -   Belongs to one `RealPerson`.
     -   Is generated from two or more `StitchedPose2D` objects.
+
+## 7. UI Components and Flow
+This chapter describes the UI panels and workflows for the add-on. The main UI will be located in the Blender 3D View's sidebar (N-Panel) under a "Pose Editor" tab.
+
+### 7.1. Main Panel Layout
+The main panel will use a tabbed or accordion layout to organize the pipeline into clear, sequential steps.
+
+```mermaid
+graph TD
+    subgraph "Pose Editor Main Panel"
+        A["1. Project Setup"] --> B["2. 2D Stitching"];
+        B --> C["3. 3D Pipeline"];
+        C --> D["4. Finalization"];
+    end
+```
+
+### 7.2. Project Setup Panel
+**Flow:** The user starts here to define the project, load calibration, and add camera views.
+1.  User clicks "New Project" and gives it a name.
+2.  User clicks "Load Calibration" and selects the main extrinsics file.
+3.  User clicks "Add Camera View" repeatedly, for each view selecting the video file and pose data directory.
+
+**Layout:**
+```mermaid
+graph TD
+    subgraph "1. Project Setup"
+        direction TB
+        A["Project Name: [Text Input]"]
+        B(Create New Project)
+        C["Calibration File: [File Path]"]
+        D(Load Calibration)
+        E["Camera Views List"]
+        F(Add Camera View)
+        G(Remove Selected View)
+
+        A --> B;
+        C --> D;
+        F --> E;
+        G --> E;
+    end
+```
+
+### 7.3. 2D Identity Stitching Panel
+**Flow:** After setting up the project, the user moves to this tab to assign raw tracks to real people.
+1.  Select a `Camera View` from a dropdown. This populates the `Raw Tracks` list.
+2.  Create a `Real Person` by giving them a name and color.
+3.  Select the desired `Real Person` and the first `Raw Track` they correspond to.
+4.  Scrub the timeline. When the tracking ID changes, select the new `Raw Track` and click "Switch Source" to insert a keyframe.
+
+**Layout:**
+```mermaid
+graph TD
+    subgraph "2. 2D Stitching"
+        direction TB
+        A["Work on Camera View:"]
+        B["Dropdown: cam_01"]
+        C["Real Persons List"]
+        D(New Person)
+        E(Delete Person)
+        F["Raw Tracks List"]
+        G(Switch Source)
+
+        A --> B;
+        D --> C;
+        E --> C;
+        B --> F;
+        G --> F;
+    end
+```
+
+### 7.4. 3D Pipeline Panel
+**Flow:** Once 2D data is clean, the user moves here to create the 3D animation.
+1.  Select one or more `Real Persons` to process.
+2.  Click "Triangulate" to generate the 3D markers.
+3.  Select a filter from the dropdown and click "Apply Filter".
+4.  Click "Calculate Body Measurements" and then "Edit" to open the measurement editor.
+5.  Click "Create IK Rig" to rig the armature.
+
+**Layout:**
+```mermaid
+graph TD
+    subgraph "3. 3D Pipeline"
+        direction TB
+        A["Process Real Persons List"]
+        B(Triangulate Selected Persons)
+        C["Filter Type Dropdown"]
+        D(Apply Filter)
+        E(Calculate Body Measurements)
+        F(Edit Measurements...)
+        G(Create IK Rig)
+
+        A --> B;
+        C --> D;
+        E --> F;
+    end
+```
+
+### 7.5. Body Measurement Editor
+**Flow:** This UI opens in a separate window (or as a sub-panel) when the user clicks "Edit Measurements". It allows fine-tuning of the `Pose2Sim` output before scaling the armature.
+
+**Layout:**
+```mermaid
+graph TD
+    subgraph "Edit Measurements for [Person]"
+        direction TB
+        A["Measurement List (e.g., Upper Arm)"]
+        B["Value Input"]
+        C(Save to Person)
+        D(Save to File...)
+        E(Load from File...)
+        F(Apply to Armature)
+
+        A --> B;
+    end
+```
+
+### 7.6. Finalization Panel
+**Flow:** The final step for baking and exporting the animation.
+
+**Layout:**
+```mermaid
+graph TD
+    subgraph "4. Finalization"
+        direction TB
+        A["Real Persons List"]
+        B(Bake Selected)
+        C(Export FBX...)
+
+        A --> B;
+        A --> C;
+    end
+```
