@@ -171,10 +171,14 @@ The main panel will use a tabbed or accordion layout to organize the pipeline in
 
 ```mermaid
 graph TD
-    subgraph "Pose Editor Main Panel"
-        A["1. Project Setup"] --> B["2. 2D Stitching"];
-        B --> C["3. 3D Pipeline"];
-        C --> D["4. Finalization"];
+    subgraph Pose Editor Main Panel
+        A["1. Project Setup"];
+        B["2. 2D Stitching"];
+        C["3. 3D Pipeline"];
+        D["4. Finalization"];
+        A --> B;
+        B --> C;
+        C --> D;
     end
 ```
 
@@ -188,15 +192,13 @@ graph TD
 ```mermaid
 graph TD
     subgraph "1. Project Setup"
-        direction TB
-        A["Project Name: [Text Input]"]
-        B(Create New Project)
-        C["Calibration File: [File Path]"]
-        D(Load Calibration)
-        E["Camera Views List"]
-        F(Add Camera View)
-        G(Remove Selected View)
-
+        A["Project Name Input"];
+        B("Create New Project Button");
+        C["Calibration File Path"];
+        D("Load Calibration Button");
+        E["Camera Views List UI"];
+        F("Add Camera View Button");
+        G("Remove Selected View Button");
         A --> B;
         C --> D;
         F --> E;
@@ -217,22 +219,19 @@ graph TD
 ```mermaid
 graph TD
     subgraph "2. 2D Stitching"
-        direction TB
-        A["Project Person Instances"]
-        B["List of RealPersonInstances"]
-        C(Add Person Instance...)
-        D(Remove Selected Instance)
-        E["--- Stitching Workflow ---"]
-        F["Work on Camera View:"]
-        G["Dropdown: cam_01"]
-        H["Selected Instance: Alice"]
-        I["Assign Raw Track:"]
-        J["Raw Tracks List"]
-        K(Switch Source)
-
-        C --> B;
-        D --> B;
-        F --> G --> I --> J --> K;
+        A["Project Person Instances List"];
+        B("Add Person Instance Button");
+        C("Remove Selected Instance Button");
+        D["--- Separator ---"];
+        E["Camera View Dropdown"];
+        F["Selected Instance Label"];
+        G["Raw Tracks List"];
+        H("Switch Source Button");
+        B --> A;
+        C --> A;
+        E --> G;
+        F --> G;
+        H --> G;
     end
 ```
 
@@ -248,15 +247,13 @@ graph TD
 ```mermaid
 graph TD
     subgraph "3. 3D Pipeline"
-        direction TB
-        A["Process Real Persons List"]
-        B(Triangulate Selected Persons)
-        C["Filter Type Dropdown"]
-        D(Apply Filter)
-        E(Calculate Body Measurements)
-        F(Edit Measurements...)
-        G(Create IK Rig)
-
+        A["Process Real Persons List"];
+        B("Triangulate Selected Button");
+        C["Filter Type Dropdown"];
+        D("Apply Filter Button");
+        E("Calculate Measurements Button");
+        F("Edit Measurements Button");
+        G("Create IK Rig Button");
         A --> B;
         C --> D;
         E --> F;
@@ -269,14 +266,12 @@ graph TD
 **Layout:**
 ```mermaid
 graph TD
-    subgraph "Edit Measurements for Alice"
-        direction TB
-        A["Measurement List (e.g., Upper Arm)"]
-        B["Value Input"]
-        C(Save to Person Definition Library) --> D((Updates external library file));
-        E(Load from File...) 
-        F(Apply to Instance Armature)
-
+    subgraph "Edit Measurements for [Person]"
+        A["Measurement List"];
+        B["Value Input Field"];
+        C("Save to Person Definition Library Button");
+        D("Load from File Button");
+        E("Apply to Instance Armature Button");
         A --> B;
     end
 ```
@@ -288,11 +283,9 @@ graph TD
 ```mermaid
 graph TD
     subgraph "4. Finalization"
-        direction TB
-        A["Real Persons List"]
-        B(Bake Selected)
-        C(Export FBX...)
-
+        A["Real Persons List"];
+        B("Bake Selected Button");
+        C("Export FBX Button");
         A --> B;
         A --> C;
     end
