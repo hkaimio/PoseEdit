@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+from typing import Generic, TypeVar
 import bpy
 from . import drivers # Import the new drivers module
 
@@ -24,7 +25,45 @@ class CollectionRef:
         if self._collection is None:
             self._collection = bpy.data.collections.get(self._id)
         return self._collection
-    
+
+T = TypeVar('T')
+class CustomProperty(Generic[T]):
+    """
+    A generic class to identify and describe custom properties on Blender objects,
+    providing type hints for their values.
+    """
+    def __init__(self, prop_name: str):
+        """
+        Initializes a CustomProperty.
+
+        Args:
+            prop_name: The name of the custom property.
+        """
+        self._prop_name = prop_name
+
+def set_custom_property(obj: bpy.types.Object, prop: CustomProperty[T], value: T) -> None:
+    """
+    Sets a custom property on a Blender object.
+
+    Args:
+        obj: The Blender object to set the property on.
+        prop: A CustomProperty object describing the property.
+        value: The value to set the property to.
+    """
+    obj[prop._prop_name] = value
+
+def get_custom_property(obj: bpy.types.Object, prop: CustomProperty[T]) -> T | None:
+    """
+    Gets a custom property from a Blender object.
+
+    Args:
+        obj: The Blender object to retrieve the property from.
+        prop: A CustomProperty object describing the property.
+
+    Returns:
+        The value of the custom property, or None if the property does not exist.
+    """
+    return obj.get(prop._prop_name)
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
     """

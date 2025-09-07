@@ -152,3 +152,46 @@ class TestDalBlender:
 
         # Ensure no objects were created
         assert "TestMarker" not in bpy.data.objects
+
+    def test_set_and_get_custom_property_int(self, blender_parent_obj):
+        prop = dal.CustomProperty[int]("my_int_prop")
+        value = 123
+        dal.set_custom_property(blender_parent_obj, prop, value)
+        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        assert retrieved_value == value
+        assert isinstance(retrieved_value, int)
+
+    def test_set_and_get_custom_property_float(self, blender_parent_obj):
+        prop = dal.CustomProperty[float]("my_float_prop")
+        value = 123.45
+        dal.set_custom_property(blender_parent_obj, prop, value)
+        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        assert retrieved_value == pytest.approx(value)
+        assert isinstance(retrieved_value, float)
+
+    def test_set_and_get_custom_property_string(self, blender_parent_obj):
+        prop = dal.CustomProperty[str]("my_string_prop")
+        value = "hello world"
+        dal.set_custom_property(blender_parent_obj, prop, value)
+        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        assert retrieved_value == value
+        assert isinstance(retrieved_value, str)
+
+    def test_set_and_get_custom_property_bool(self, blender_parent_obj):
+        prop = dal.CustomProperty[bool]("my_bool_prop")
+        value = True
+        dal.set_custom_property(blender_parent_obj, prop, value)
+        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        assert retrieved_value == value
+        assert isinstance(retrieved_value, bool)
+
+    def test_get_custom_property_non_existent(self, blender_parent_obj):
+        prop = dal.CustomProperty[str]("non_existent_prop")
+        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        assert retrieved_value is None
+
+    def test_get_custom_property_with_default_value(self, blender_parent_obj):
+        # This test is not directly applicable with the current get_custom_property signature
+        # as it doesn't take a default value. Blender's .get() method does.
+        # If a default value parameter is added to dal.get_custom_property, this test would be relevant.
+        pass
