@@ -1,0 +1,125 @@
+from typing import List, Dict
+from ..blender.dal import BlenderObjRef, create_empty, create_marker, set_fcurve_from_data
+from .person_data_series import RawPersonData
+from pathlib import Path
+import json
+import os
+import re
+from anytree import Node
+from anytree.iterators import PreOrderIter
+from pose2sim.Pose2Sim.skeletons import HALPE_26
+
+class CameraView(object):
+    def __init__(self):
+        self._obj: BlenderObjRef | None = None
+        self._video_surf: BlenderObjRef | None = None
+
+        self._raw_person_data: List[RawPersonData] = []
+
+def create_camera_view(name: str, video_file: Path, pose_data_dir: Path) -> CameraView:
+    """
+    Loads raw pose data from JSON files for a single camera view, creates Blender objects
+    to represent the camera view and raw person data, and links them.
+
+    Args:
+        name: The name of the camera view.
+        video_file: The path to the background video file.
+        pose_data_dir: The path to the directory containing JSON pose data files.
+
+    Returns:
+        A CameraView object containing references to the created Blender objects.
+    """
+    camera_view = CameraView()
+
+    # Create main camera view empty
+    camera_view_empty_name = f"View_{name}"
+    camera_view._obj = create_empty(camera_view_empty_name)
+
+    # Load skeleton
+    skeleton = HALPE_26
+    marker_ids = {node.id: node.name for node in PreOrderIter(skeleton) if node.id is not None}
+
+    # Process JSON files
+    json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith('.json')])
+    
+    pose_data_by_person_and_frame: Dict[int, Dict[int, List[float]]] = {}
+    min_frame = float('inf')
+    max_frame = float('-inf')
+
+    for filename in json_files:
+        frame_num_match = re.search(r'\d+', filename)
+        if not frame_num_match:
+            continue
+        frame_num = int(frame_num_match.group(0))
+        min_frame = min(min_frame, frame_num)
+        max_frame = max(max_frame, frame_num)
+
+        filepath = os.path.join(pose_data_dir, filename)
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        
+        if "people" in data:
+            for person_idx, person_data in enumerate(data["people"]):
+                if person_idx not in pose_data_by_person_and_frame:
+                    pose_data_by_person_and_frame[person_idx] = {}
+                pose_data_by_person_and_frame[person_idx][frame_num] = person_data["pose_keypoints_2d"]
+
+    # Create RawPersonData objects and Blender markers
+    for person_idx, frames_data in pose_data_by_person_and_frame.items():
+        raw_person_data = RawPersonData(create_empty(f"{name}_Person{person_idx}", parent_obj=camera_view._obj._get_obj()))
+        raw_person_data._skeleton = skeleton
+        camera_view._raw_person_data.append(raw_person_data)
+
+        # Prepare data for F-curves
+        marker_fcurve_data: Dict[str, Dict[str, List[tuple[int, float]]]] = {}
+        for marker_name in marker_ids.values():
+            marker_fcurve_data[marker_name] = {
+                'location.x': [],
+                'location.y': [],
+                'location.z': [],
+                'quality': []
+            }
+
+        for frame_num in range(min_frame, max_frame + 1):
+            if frame_num not in frames_data:
+                # Handle missing frames if necessary, e.g., interpolate or skip
+                continue
+            
+            keypoints = frames_data[frame_num]
+            for node_id, marker_name in marker_ids.items():
+                # Assuming keypoints are [x1, y1, l1, x2, y2, l2, ...]
+                # and node_id corresponds to the 0-indexed marker in the flattened array
+                # So, actual index in keypoints array is node_id * 3
+                idx = node_id * 3
+                if idx + 2 < len(keypoints):
+                    x = keypoints[idx]
+                    y = keypoints[idx + 1]
+                    likelihood = keypoints[idx + 2]
+
+                    # Convert pixel coordinates to Blender units (example: simple scaling)
+                    # Assuming video resolution is 1920x1080, and Blender unit is 1m
+                    # This needs to be refined based on actual video and scene scale
+                    blender_x = x / 1000.0  # Example scaling
+                    blender_y = y / 1000.0  # Example scaling
+                    blender_z = 0.0 # 2D data
+
+                    marker_fcurve_data[marker_name]['location.x'].append((frame_num, blender_x))
+                    marker_fcurve_data[marker_name]['location.y'].append((frame_num, blender_y))
+                    marker_fcurve_data[marker_name]['location.z'].append((frame_num, blender_z))
+                    marker_fcurve_data[marker_name]['quality'].append((frame_num, likelihood))
+
+        # Create marker objects and set F-curves
+        for marker_name, fcurve_data in marker_fcurve_data.items():
+            # Find the corresponding skeleton node to get its parent for Blender object hierarchy
+            # This part needs refinement based on how you want to parent markers in Blender
+            # For now, parent all markers directly to the RawPersonData empty
+            marker_obj_ref = create_marker(raw_person_data._blenderObj, marker_name, (1.0, 1.0, 0.0, 1.0)) # Default color yellow
+            raw_person_data._markers[marker_name] = marker_obj_ref
+
+            for data_path, keyframes in fcurve_data.items():
+                if keyframes:
+                    set_fcurve_from_data(marker_obj_ref._get_obj(), data_path, keyframes)
+
+    # TODO: Create video plane (optional for now)
+
+    return camera_view
