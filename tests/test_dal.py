@@ -3,340 +3,138 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import pytest
-from unittest.mock import MagicMock, patch
+import bpy
 
-# Mock bpy module for testing outside Blender environment
-bpy = MagicMock()
-bpy.data = MagicMock()
-bpy.context = MagicMock()
-bpy.ops = MagicMock()
+from pose_editor.blender import dal
 
-# Import the dal module after mocking bpy
-with patch.dict('sys.modules', {'bpy': bpy}):
-    from src.pose_editor.blender import dal
-
-@pytest.fixture
-def mock_bpy_data():
-    """Fixture to reset bpy.data mocks for each test."""
-    bpy.data.collections = MagicMock()
-    bpy.data.objects = MagicMock()
-    bpy.data.materials = MagicMock()
-    bpy.context.scene.collection = MagicMock()
-    bpy.ops.mesh.primitive_uv_sphere_add = MagicMock()
-    bpy.ops.object.select_all = MagicMock()
-    bpy.ops.object.parent_set = MagicMock()
-    return bpy.data
+@pytest.fixture(autouse=True)
+def clean_blender_scene():
+    """Cleans the Blender scene before each test."""
+    # Ensure the scene is clean before each test
+    #bpy.ops.wm.read_factory_settings(use_empty=True)
+    #bpy.ops.wm.read_userpref()
+    # Remove all objects from the scene
+    bpy.context.preferences.filepaths.use_scripts_auto_execute = True
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
+    yield
+    # Clean up after test
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
 
 @pytest.fixture
-def mock_parent_obj():
-    """Fixture for a mock parent Blender object."""
-    parent = MagicMock()
+def blender_parent_obj():
+    """Fixture for a real Blender parent object."""
+    bpy.ops.object.empty_add(type='PLAIN_AXES', align='WORLD', location=(0, 0, 0))
+    parent = bpy.context.active_object
     parent.name = "ParentObj"
-    parent.objects = [] # To simulate children
     return parent
 
 @pytest.fixture
-def mock_blender_obj_ref(mock_parent_obj):
-    """Fixture for a mock BlenderObjRef."""
-    mock_ref = MagicMock(spec=dal.BlenderObjRef)
-    mock_ref._id = mock_parent_obj.name
-    mock_ref._get_obj.return_value = mock_parent_obj
-    return mock_ref
+def blender_obj_ref(blender_parent_obj):
+    """Fixture for a real BlenderObjRef."""
+    return dal.BlenderObjRef(blender_parent_obj.name)
 
-class TestDal:
-    def test_create_collection(self, mock_bpy_data):
-        mock_collection_obj = MagicMock()
-        mock_collection_obj.name = "NewCollection" # Explicitly set the name attribute
-        mock_bpy_data.collections.new.return_value = mock_collection_obj
-        mock_parent_collection = MagicMock()
+class TestDalBlender:
+    def test_create_collection(self):
+        collection_name = "TestCollection"
+        collection = dal.create_collection(collection_name)
         
-        collection = dal.create_collection("TestCollection", mock_parent_collection)
+        assert collection.name == collection_name
+        assert collection_name in bpy.data.collections
+        assert collection_name in bpy.context.scene.collection.children
+
+        # Clean up
+        bpy.data.collections.remove(collection)
+
+    def test_create_empty(self):
+        empty_name = "TestEmpty"
+        empty = dal.create_empty(empty_name)
         
-        mock_bpy_data.collections.new.assert_called_once_with("TestCollection")
-        mock_parent_collection.children.link.assert_called_once_with(collection)
-        assert collection.name == "NewCollection"
+        assert empty.name == empty_name
+        assert empty_name in bpy.data.objects
+        assert empty_name in bpy.context.scene.collection.objects
 
-    def test_create_empty(self, mock_bpy_data):
-        mock_empty_obj = MagicMock()
-        mock_empty_obj.name = "NewEmpty" # Explicitly set the name attribute
-        mock_bpy_data.objects.new.return_value = mock_empty_obj
-        mock_collection = MagicMock()
-        
-        empty = dal.create_empty("TestEmpty", mock_collection)
-        
-        mock_bpy_data.objects.new.assert_called_once_with("TestEmpty", None)
-        mock_collection.objects.link.assert_called_once_with(empty)
-        assert empty.name == "NewEmpty"
+        # Clean up
+        bpy.data.objects.remove(empty)
 
-    # SPDX-FileCopyrightText: 2025 Harri Kaimio
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
-import pytest
-from unittest.mock import MagicMock, patch
-
-# Mock bpy module for testing outside Blender environment
-bpy = MagicMock()
-bpy.data = MagicMock()
-bpy.context = MagicMock()
-bpy.ops = MagicMock()
-
-# Import the dal module after mocking bpy
-with patch.dict('sys.modules', {'bpy': bpy}):
-    from src.pose_editor.blender import dal
-
-@pytest.fixture
-def mock_bpy_data():
-    """Fixture to reset bpy.data mocks for each test."""
-    bpy.data.collections = MagicMock()
-    bpy.data.objects = MagicMock()
-    bpy.data.materials = MagicMock()
-    bpy.context.scene.collection = MagicMock()
-    bpy.ops.mesh.primitive_uv_sphere_add = MagicMock()
-    bpy.ops.object.select_all = MagicMock()
-    bpy.ops.object.parent_set = MagicMock()
-    return bpy.data
-
-@pytest.fixture
-def mock_parent_obj():
-    """Fixture for a mock parent Blender object."""
-    parent = MagicMock()
-    parent.name = "ParentObj"
-    parent.objects = [] # To simulate children
-    return parent
-
-@pytest.fixture
-def mock_blender_obj_ref(mock_parent_obj):
-    """Fixture for a mock BlenderObjRef."""
-    mock_ref = MagicMock(spec=dal.BlenderObjRef)
-    mock_ref._id = mock_parent_obj.name
-    mock_ref._get_obj.return_value = mock_parent_obj
-    return mock_ref
-
-class TestDal:
-    def test_create_collection(self, mock_bpy_data):
-        mock_collection_obj = MagicMock()
-        mock_collection_obj.name = "NewCollection" # Explicitly set the name attribute
-        mock_bpy_data.collections.new.return_value = mock_collection_obj
-        mock_parent_collection = MagicMock()
-        
-        collection = dal.create_collection("TestCollection", mock_parent_collection)
-        
-        mock_bpy_data.collections.new.assert_called_once_with("TestCollection")
-        mock_parent_collection.children.link.assert_called_once_with(collection)
-        assert collection.name == "NewCollection"
-
-    def test_create_empty(self, mock_bpy_data):
-        mock_empty_obj = MagicMock()
-        mock_empty_obj.name = "NewEmpty" # Explicitly set the name attribute
-        mock_bpy_data.objects.new.return_value = mock_empty_obj
-        mock_collection = MagicMock()
-        
-        empty = dal.create_empty("TestEmpty", mock_collection)
-        
-        mock_bpy_data.objects.new.assert_called_once_with("TestEmpty", None)
-        mock_collection.objects.link.assert_called_once_with(empty)
-        assert empty.name == "NewEmpty"
-
-    # SPDX-FileCopyrightText: 2025 Harri Kaimio
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
-import pytest
-from unittest.mock import MagicMock, patch
-
-# Mock bpy module for testing outside Blender environment
-bpy = MagicMock()
-bpy.data = MagicMock()
-bpy.context = MagicMock()
-bpy.ops = MagicMock()
-
-# Import the dal module after mocking bpy
-with patch.dict('sys.modules', {'bpy': bpy}):
-    from src.pose_editor.blender import dal
-
-@pytest.fixture
-def mock_bpy_data():
-    """Fixture to reset bpy.data mocks for each test."""
-    bpy.data.collections = MagicMock()
-    bpy.data.objects = MagicMock()
-    bpy.data.materials = MagicMock()
-    bpy.context.scene.collection = MagicMock()
-    bpy.ops.mesh.primitive_uv_sphere_add = MagicMock()
-    bpy.ops.object.select_all = MagicMock()
-    bpy.ops.object.parent_set = MagicMock()
-    return bpy.data
-
-@pytest.fixture
-def mock_parent_obj():
-    """Fixture for a mock parent Blender object."""
-    parent = MagicMock()
-    parent.name = "ParentObj"
-    parent.objects = [] # To simulate children
-    return parent
-
-@pytest.fixture
-def mock_blender_obj_ref(mock_parent_obj):
-    """Fixture for a mock BlenderObjRef."""
-    mock_ref = MagicMock(spec=dal.BlenderObjRef)
-    mock_ref._id = mock_parent_obj.name
-    mock_ref._get_obj.return_value = mock_parent_obj
-    return mock_ref
-
-class TestDal:
-    def test_create_collection(self, mock_bpy_data):
-        mock_collection_obj = MagicMock()
-        mock_collection_obj.name = "NewCollection" # Explicitly set the name attribute
-        mock_bpy_data.collections.new.return_value = mock_collection_obj
-        mock_parent_collection = MagicMock()
-        
-        collection = dal.create_collection("TestCollection", mock_parent_collection)
-        
-        mock_bpy_data.collections.new.assert_called_once_with("TestCollection")
-        mock_parent_collection.children.link.assert_called_once_with(collection)
-        assert collection.name == "NewCollection"
-
-    def test_create_empty(self, mock_bpy_data):
-        mock_empty_obj = MagicMock()
-        mock_empty_obj.name = "NewEmpty" # Explicitly set the name attribute
-        mock_bpy_data.objects.new.return_value = mock_empty_obj
-        mock_collection = MagicMock()
-        
-        empty = dal.create_empty("TestEmpty", mock_collection)
-        
-        mock_bpy_data.objects.new.assert_called_once_with("TestEmpty", None)
-        mock_collection.objects.link.assert_called_once_with(empty)
-        assert empty.name == "NewEmpty"
-
-    def test_create_marker_success(self, mock_bpy_data, mock_blender_obj_ref, mock_parent_obj):
-        # Mock the marker object that bpy.context.active_object will return
-        mock_marker_obj = MagicMock()
-        mock_marker_obj.name = "NewMarker"
-        mock_marker_obj.data.materials = []
-        mock_marker_obj.__setitem__ = MagicMock() # Mock setting custom properties
-        mock_marker_obj.__getitem__ = MagicMock(return_value=1.0) # Mock getting custom properties
-        bpy.context.active_object = mock_marker_obj
-
-        # Mock material creation
-        mock_material = MagicMock()
-        mock_bsdf_node = MagicMock()
-        mock_material.node_tree.nodes.get.return_value = mock_bsdf_node
-        mock_bpy_data.materials.new.return_value = mock_material
-
-        # Mock driver_add and its return values
-        mock_drivers = []
-        for _ in range(8): # 4 for Base Color, 4 for Emission
-            mock_driver = MagicMock()
-            mock_driver.variables.new.return_value = MagicMock(targets=[MagicMock()]) # Mock driver variables
-            mock_drivers.append(mock_driver)
-
-        # Configure driver_add to return these mock drivers sequentially
-        mock_bsdf_node.inputs = {
-            'Base Color': MagicMock(driver_add=MagicMock(side_effect=[MagicMock(driver=d) for d in mock_drivers[:4]])),
-            'Emission': MagicMock(driver_add=MagicMock(side_effect=[MagicMock(driver=d) for d in mock_drivers[4:]])),
-            'Emission Strength': MagicMock() # Add this line
-        }
-
+    def test_create_marker_success(self, blender_obj_ref, blender_parent_obj):
         marker_name = "TestMarker"
         marker_color = (1.0, 0.0, 0.0, 1.0) # Red
 
-        # Call the function
-        result_ref = dal.create_marker(mock_blender_obj_ref, marker_name, marker_color)
+        result_ref = dal.create_marker(blender_obj_ref, marker_name, marker_color)
 
         # Assertions for basic marker properties
-        mock_blender_obj_ref._get_obj.assert_called_once() # Ensure parent object is retrieved
-        bpy.ops.mesh.primitive_uv_sphere_add.assert_called_once_with(radius=0.02, enter_editmode=False, align='WORLD', location=(0, 0, 0))
-        assert mock_marker_obj.parent == mock_parent_obj
-        assert mock_marker_obj.name == f"{mock_parent_obj.name}_{marker_name}"
-        mock_bpy_data.materials.new.assert_called_once_with(name=f"MarkerMaterial_{mock_parent_obj.name}_{marker_name}")
-        assert mock_material.use_nodes is True
-        assert mock_material.node_tree.nodes.get.called_with('Principled BSDF')
-        assert mock_marker_obj.data.materials[0] == mock_material
-        assert isinstance(result_ref, dal.BlenderObjRef)
-        assert result_ref._id == mock_marker_obj.name
-
+        marker_obj = result_ref._get_obj()
+        assert marker_obj is not None
+        assert marker_obj.parent == blender_parent_obj
+        assert marker_obj.name == f"{blender_parent_obj.name}_{marker_name}"
+        assert marker_obj.type == 'MESH'
+        assert marker_obj.data.materials[0].name == f"MarkerMaterial_{blender_parent_obj.name}_{marker_name}"
+        
         # Assertions for custom properties
-        mock_marker_obj.__setitem__.assert_any_call("quality", 1.0)
-        mock_marker_obj.__setitem__.assert_any_call("_original_color_r", marker_color[0])
-        mock_marker_obj.__setitem__.assert_any_call("_original_color_g", marker_color[1])
-        mock_marker_obj.__setitem__.assert_any_call("_original_color_b", marker_color[2])
-        mock_marker_obj.__setitem__.assert_any_call("_original_color_a", marker_color[3])
+        assert "quality" in marker_obj
+        assert marker_obj["quality"] == 1.0
+        assert marker_obj["_original_color_r"] == marker_color[0]
+        assert marker_obj["_original_color_g"] == marker_color[1]
+        assert marker_obj["_original_color_b"] == marker_color[2]
+        assert marker_obj["_original_color_a"] == marker_color[3]
 
-        # Assertions for driver setup
-        expected_expressions = []
-        for i in range(4):
-            expected_expressions.append(f'drivers.get_quality_driven_color_component(quality, _original_color_r, _original_color_g, _original_color_b, _original_color_a, {i})')
+        # Assertions for material and drivers
+        material = marker_obj.data.materials[0]
+        assert material.use_nodes is True
+        bsdf = material.node_tree.nodes.get('Emission')
+        assert bsdf is not None
 
         # Check Base Color drivers
-        assert mock_bsdf_node.inputs['Base Color'].driver_add.call_count == 4
         for i in range(4):
-            call_args = mock_bsdf_node.inputs['Base Color'].driver_add.call_args_list[i]
-            assert call_args.args == ('default_value', i)
-            
-            # Get the specific mock driver for this call
-            current_mock_driver = mock_drivers[i]
-            assert current_mock_driver.type == 'SCRIPTED'
-            assert current_mock_driver.expression == expected_expressions[i]
-            # Check driver variables (simplified, just checking creation)
-            assert current_mock_driver.variables.new.call_count == 5 # 5 variables per channel
+            data_path = f'nodes["Principled BSDF"].inputs["Base Color"].default_value'
+            driver = material.node_tree.animation_data.drivers.find(data_path, index=i)
+            assert driver is not None
+            assert driver.type == 'SCRIPTED'
+            expected_expression = f'drivers.get_quality_driven_color_component(quality, _original_color_r, _original_color_g, _original_color_b, _original_color_a, {i})'
+            assert driver.expression == expected_expression
+            # Check driver variables
+            assert len(driver.variables) == 5
+            for var_name in ['quality', '_original_color_r', '_original_color_g', '_original_color_b', '_original_color_a']:
+                var = driver.variables.get(var_name)
+                assert var is not None
+                assert var.type == 'SINGLE_PROP'
+                assert var.targets[0].id == marker_obj
+                assert var.targets[0].data_path == f'["{var_name}"]'
 
-        # Check Emission drivers
-        assert mock_bsdf_node.inputs['Emission'].driver_add.call_count == 4
+        # Check Emission Color drivers
         for i in range(4):
-            call_args = mock_bsdf_node.inputs['Emission'].driver_add.call_args_list[i]
-            assert call_args.args == ('default_value', i)
-            
-            # Get the specific mock driver for this call (offset by 4 for Emission drivers)
-            current_mock_driver = mock_drivers[i + 4]
-            assert current_mock_driver.type == 'SCRIPTED'
-            assert current_mock_driver.expression == expected_expressions[i]
-            # Check driver variables (simplified, just checking creation)
-            assert current_mock_driver.variables.new.call_count == 5 # 5 variables per channel
+            data_path = f'nodes["Principled BSDF"].inputs["Emission Color"].default_value'
+            driver = material.node_tree.animation_data.drivers.find(data_path, index=i)
+            assert driver is not None
+            assert driver.type == 'SCRIPTED'
+            expected_expression = f'drivers.get_quality_driven_color_component(quality, _original_color_r, _original_color_g, _original_color_b, _original_color_a, {i})'
+            assert driver.expression == expected_expression
+            # Check driver variables
+            assert len(driver.variables) == 5
+            for var_name in ['quality', '_original_color_r', '_original_color_g', '_original_color_b', '_original_color_a']:
+                var = driver.variables.get(var_name)
+                assert var is not None
+                assert var.type == 'SINGLE_PROP'
+                assert var.targets[0].id == marker_obj
+                assert var.targets[0].data_path == f'["{var_name}"]'
 
+        # Check Emission Strength
+        assert bsdf.inputs['Emission Strength'].default_value == 1.0
 
-    def test_create_marker_parent_not_found(self, mock_bpy_data):
-        mock_blender_obj_ref = MagicMock(spec=dal.BlenderObjRef)
-        mock_blender_obj_ref._id = "NonExistentParent"
-        mock_blender_obj_ref._get_obj.return_value = None # Simulate parent not found
+        # Clean up
+        bpy.data.objects.remove(marker_obj, do_unlink=True)
 
-        marker_name = "TestMarker"
-        marker_color = (1.0, 0.0, 0.0, 1.0)
-
-        with pytest.raises(ValueError, match=f"Parent object with ID {mock_blender_obj_ref._id} not found."):
-            dal.create_marker(mock_blender_obj_ref, marker_name, marker_color)
-
-        mock_blender_obj_ref._get_obj.assert_called_once()
-        # Ensure no Blender ops are called if parent is not found
-        bpy.ops.mesh.primitive_uv_sphere_add.assert_not_called()
-
-
-    def test_create_marker_parent_not_found(self, mock_bpy_data):
-        mock_blender_obj_ref = MagicMock(spec=dal.BlenderObjRef)
-        mock_blender_obj_ref._id = "NonExistentParent"
-        mock_blender_obj_ref._get_obj.return_value = None # Simulate parent not found
+    def test_create_marker_parent_not_found(self):
+        # Create a BlenderObjRef for a non-existent object
+        non_existent_parent_ref = dal.BlenderObjRef("NonExistentParent")
 
         marker_name = "TestMarker"
         marker_color = (1.0, 0.0, 0.0, 1.0)
 
-        with pytest.raises(ValueError, match=f"Parent object with ID {mock_blender_obj_ref._id} not found."):
-            dal.create_marker(mock_blender_obj_ref, marker_name, marker_color)
+        with pytest.raises(ValueError, match=f"Parent object with ID {non_existent_parent_ref._id} not found."):
+            dal.create_marker(non_existent_parent_ref, marker_name, marker_color)
 
-        mock_blender_obj_ref._get_obj.assert_called_once()
-        # Ensure no Blender ops are called if parent is not found
-        bpy.ops.mesh.primitive_uv_sphere_add.assert_not_called()
-
-
-    def test_create_marker_parent_not_found(self, mock_bpy_data):
-        mock_blender_obj_ref = MagicMock(spec=dal.BlenderObjRef)
-        mock_blender_obj_ref._id = "NonExistentParent"
-        mock_blender_obj_ref._get_obj.return_value = None # Simulate parent not found
-
-        marker_name = "TestMarker"
-        marker_color = (1.0, 0.0, 0.0, 1.0)
-
-        with pytest.raises(ValueError, match=f"Parent object with ID {mock_blender_obj_ref._id} not found."):
-            dal.create_marker(mock_blender_obj_ref, marker_name, marker_color)
-
-        mock_blender_obj_ref._get_obj.assert_called_once()
-        # Ensure no Blender ops are called if parent is not found
-        bpy.ops.mesh.primitive_uv_sphere_add.assert_not_called()
+        # Ensure no objects were created
+        assert "TestMarker" not in bpy.data.objects

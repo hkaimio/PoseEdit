@@ -107,86 +107,64 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
     mat_name = f"MarkerMaterial_{parent_obj.name}_{name}"
     material = bpy.data.materials.new(name=mat_name)
     material.use_nodes = True
-    bsdf = material.node_tree.nodes.get('Principled BSDF')
+    # Clear existing nodes
+    material.node_tree.nodes.clear()
 
-    if bsdf:
-        # Set up drivers for Base Color and Emission
-        for i, channel in enumerate(['r', 'g', 'b', 'a']):
-            # Base Color Driver
-            driver = bsdf.inputs['Base Color'].driver_add('default_value', i).driver
-            driver.type = 'SCRIPTED'
-            driver.expression = f'drivers.get_quality_driven_color_component(quality, _original_color_r, _original_color_g, _original_color_b, _original_color_a, {i})'
-            
-            # Add variables to the driver
-            var_quality = driver.variables.new()
-            var_quality.name = 'quality'
-            var_quality.type = 'SINGLE_PROP'
-            var_quality.targets[0].id = marker_obj
-            var_quality.targets[0].data_path = '["quality"]'
+    # Create nodes
+    value_node = material.node_tree.nodes.new(type='ShaderNodeValue')
+    color_ramp_node = material.node_tree.nodes.new(type='ShaderNodeValToRGB')
+    emission_node = material.node_tree.nodes.new(type='ShaderNodeEmission')
+    material_output_node = material.node_tree.nodes.new(type='ShaderNodeOutputMaterial')
 
-            var_orig_r = driver.variables.new()
-            var_orig_r.name = '_original_color_r'
-            var_orig_r.type = 'SINGLE_PROP'
-            var_orig_r.targets[0].id = marker_obj
-            var_orig_r.targets[0].data_path = '["_original_color_r"]'
+    # Position nodes (optional, for better readability in Blender's shader editor)
+    value_node.location = (-800, 0)
+    color_ramp_node.location = (-400, 0)
+    emission_node.location = (0, 0)
+    material_output_node.location = (400, 0)
 
-            var_orig_g = driver.variables.new()
-            var_orig_g.name = '_original_color_g'
-            var_orig_g.type = 'SINGLE_PROP'
-            var_orig_g.targets[0].id = marker_obj
-            var_orig_g.targets[0].data_path = '["_original_color_g"]'
+    # Set up driver for Value node
+    driver = value_node.outputs[0].driver_add('default_value').driver # 'value' input
+    #driver.type = 'SCRIPTED'
+    driver.expression = 'quality' # Use the 'quality' custom property directly
 
-            var_orig_b = driver.variables.new()
-            var_orig_b.name = '_original_color_b'
-            var_orig_b.type = 'SINGLE_PROP'
-            var_orig_b.targets[0].id = marker_obj
-            var_orig_b.targets[0].data_path = '["_original_color_b"]'
+    # Add variable to the driver
+    var_quality = driver.variables.new()
+    var_quality.name = 'quality'
+    var_quality.type = 'SINGLE_PROP'
+    var_quality.targets[0].id = marker_obj
+    var_quality.targets[0].data_path = '["quality"]'
 
-            var_orig_a = driver.variables.new()
-            var_orig_a.name = '_original_color_a'
-            var_orig_a.type = 'SINGLE_PROP'
-            var_orig_a.targets[0].id = marker_obj
-            var_orig_a.targets[0].data_path = '["_original_color_a"]'
+    # Configure ColorRamp stops
+    # Clear default stops
+    while len(color_ramp_node.color_ramp.elements) > 1:
+        color_ramp_node.color_ramp.elements.remove(color_ramp_node.color_ramp.elements[0])
 
+    # Add new stops
+    # Stop 1: at 0.0, color #390007FF (dark red)
+    element = color_ramp_node.color_ramp.elements[0]
+    element.position = 0.0
+    element.color = (0.2235, 0.0, 0.0275, 1.0) # #390007FF in RGBA (0-1 range)
 
-            # Emission Driver (similar to Base Color)
-            driver = bsdf.inputs['Emission'].driver_add('default_value', i).driver
-            driver.type = 'SCRIPTED'
-            driver.expression = f'drivers.get_quality_driven_color_component(quality, _original_color_r, _original_color_g, _original_color_b, _original_color_a, {i})'
-            
-            # Add variables to the driver
-            var_quality = driver.variables.new()
-            var_quality.name = 'quality'
-            var_quality.type = 'SINGLE_PROP'
-            var_quality.targets[0].id = marker_obj
-            var_quality.targets[0].data_path = '["quality"]'
+    # Stop 2: at 0.3, same color #390007FF
+    element = color_ramp_node.color_ramp.elements.new(0.3)
+    element.color = (0.2235, 0.0, 0.0275, 1.0)
 
-            var_orig_r = driver.variables.new()
-            var_orig_r.name = '_original_color_r'
-            var_orig_r.type = 'SINGLE_PROP'
-            var_orig_r.targets[0].id = marker_obj
-            var_orig_r.targets[0].data_path = '["_original_color_r"]'
+    # Stop 3: at 0.301, color #7f7f7fff (grey)
+    element = color_ramp_node.color_ramp.elements.new(0.301)
+    element.color = (0.498, 0.498, 0.498, 1.0) # #7f7f7fff in RGBA (0-1 range)
 
-            var_orig_g = driver.variables.new()
-            var_orig_g.name = '_original_color_g'
-            var_orig_g.type = 'SINGLE_PROP'
-            var_orig_g.targets[0].id = marker_obj
-            var_orig_g.targets[0].data_path = '["_original_color_g"]'
+    # Stop 4: at 1.0, the target color (from function argument)
+    element = color_ramp_node.color_ramp.elements.new(1.0)
+    element.color = color # Use the 'color' argument directly
 
-            var_orig_b = driver.variables.new()
-            var_orig_b.name = '_original_color_b'
-            var_orig_b.type = 'SINGLE_PROP'
-            var_orig_b.targets[0].id = marker_obj
-            var_orig_b.targets[0].data_path = '["_original_color_b"]'
+    # Link nodes
+    links = material.node_tree.links
+    links.new(value_node.outputs[0], color_ramp_node.inputs[0]) # Value to ColorRamp Fac
+    links.new(color_ramp_node.outputs[0], emission_node.inputs[0]) # ColorRamp Color to Emission Color
+    links.new(emission_node.outputs[0], material_output_node.inputs[0]) # Emission to Material Output Surface
 
-            var_orig_a = driver.variables.new()
-            var_orig_a.name = '_original_color_a'
-            var_orig_a.type = 'SINGLE_PROP'
-            var_orig_a.targets[0].id = marker_obj
-            var_orig_a.targets[0].data_path = '["_original_color_a"]'
-
-
-        bsdf.inputs['Emission Strength'].default_value = 1.0 # Full emission
+    # Set Emission Strength
+    emission_node.inputs['Strength'].default_value = 1.0
 
     if marker_obj.data.materials:
         marker_obj.data.materials[0] = material
