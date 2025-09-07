@@ -266,6 +266,30 @@ The raw 2D pose data is mapped to Blender objects and their properties as follow
     -   **Quality (Likelihood):** The `Likelihood` value from `pose_keypoints_2d` is stored as an F-curve on a custom property named `"quality"` on the marker sphere. This property drives the marker's material color, allowing visual feedback on data quality.
     -   **Material:** Each marker sphere is assigned a node-based material. The `quality` custom property drives a `Value` node, which feeds into a `ColorRamp` node. The `ColorRamp` is configured to show dark red for low quality (below 0.3), grey for medium quality (0.3 to 1.0), and the original marker color for high quality (1.0). This material is then connected to an `Emission` shader for visibility.
 
+### 6.2.2. Coordinate Transformation and Custom Properties
+To correctly map 2D pixel coordinates (origin top-left, Y-down) to Blender's 3D coordinate system (origin center, Y-up), a transformation is applied. This transformation involves scaling and offsetting the X and Y coordinates.
+
+The transformation factors and offsets are stored as custom properties on the main `CameraView` Blender Empty object (e.g., `View_cam_01`). These properties allow for mapping Blender coordinates back to pixel coordinates if needed.
+
+-   **`camera_x_factor` (float):** The scaling factor for the X-axis. This is calculated to maintain the video's aspect ratio within a target Blender width.
+-   **`camera_y_factor` (float):** The scaling factor for the Y-axis. This is negative to invert the Y-axis (pixel Y-down to Blender Y-up) and is calculated to maintain the video's aspect ratio.
+-   **`camera_x_offset` (float):** The offset for the X-axis, used to center the transformed coordinates in Blender.
+-   **`camera_y_offset` (float):** The offset for the Y-axis, used to center the transformed coordinates in Blender.
+
+**Transformation Formula:**
+`blender_x = pixel_x * camera_x_factor + camera_x_offset`
+`blender_y = pixel_y * camera_y_factor + camera_y_offset`
+
+**Calculation Logic:**
+1.  A `scale_factor` is determined based on the larger dimension of the video (`VIDEO_WIDTH`, `VIDEO_HEIGHT`) and a predefined `BLENDER_TARGET_WIDTH` to ensure the video's aspect ratio is maintained.
+    `scale_factor = BLENDER_TARGET_WIDTH / max(VIDEO_WIDTH, VIDEO_HEIGHT)`
+2.  `camera_x_factor = scale_factor`
+3.  `camera_y_factor = -scale_factor` (negative for Y-axis inversion)
+4.  `scaled_blender_width = VIDEO_WIDTH * scale_factor`
+5.  `scaled_blender_height = VIDEO_HEIGHT * scale_factor`
+6.  `camera_x_offset = -scaled_blender_width / 2`
+7.  `camera_y_offset = scaled_blender_height / 2` (since pixel Y=0 maps to the top of the video, which corresponds to `scaled_blender_height / 2` in Blender's Y-up coordinate system).
+
 **Skeleton Definition (`pose2sim/Pose2Sim/skeletons.py`)**
 The `pose_keypoints_2d` array's structure is determined by the chosen skeleton. For example, the `HALPE_26` skeleton defines the order and meaning of each `[X, Y, Likelihood]` triplet. The `id` attribute of each `anytree.Node` in the skeleton directly corresponds to its 0-based index in the `pose_keypoints_2d` array.
 

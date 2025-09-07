@@ -65,6 +65,12 @@ def get_custom_property(obj: bpy.types.Object, prop: CustomProperty[T]) -> T | N
     """
     return obj.get(prop._prop_name)
 
+# Specific custom properties for CameraView objects
+CAMERA_X_FACTOR = CustomProperty[float]("camera_x_factor")
+CAMERA_Y_FACTOR = CustomProperty[float]("camera_y_factor")
+CAMERA_X_OFFSET = CustomProperty[float]("camera_x_offset")
+CAMERA_Y_OFFSET = CustomProperty[float]("camera_y_offset")
+
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
     """
     Creates a new collection in the scene.
