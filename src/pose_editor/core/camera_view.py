@@ -130,10 +130,13 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                     blender_y = y / 1000.0  # Example scaling
                     blender_z = 0.0 # 2D data
 
-                    marker_fcurve_data[marker_name]['location.x'].append((frame_num, blender_x))
-                    marker_fcurve_data[marker_name]['location.y'].append((frame_num, blender_y))
-                    marker_fcurve_data[marker_name]['location.z'].append((frame_num, blender_z))
-                    marker_fcurve_data[marker_name]['quality'].append((frame_num, likelihood))
+                    if math.isnan(x) or math.isnan(y):
+                        marker_fcurve_data[marker_name]['quality'].append((frame_num, 0.0))
+                    else:
+                        marker_fcurve_data[marker_name]['location.x'].append((frame_num, blender_x))
+                        marker_fcurve_data[marker_name]['location.y'].append((frame_num, blender_y))
+                        marker_fcurve_data[marker_name]['location.z'].append((frame_num, blender_z))
+                        marker_fcurve_data[marker_name]['quality'].append((frame_num, likelihood))
 
         # Create marker objects and set F-curves
         for marker_name, fcurve_data in marker_fcurve_data.items():
@@ -145,7 +148,6 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
             for data_path, keyframes in fcurve_data.items():
                 if keyframes:
-                    print(f"Setting F-curve for {marker_name} {data_path} with {len(keyframes)} keyframes")
                     set_fcurve_from_data(marker_obj_ref, data_path, keyframes)
 
     # TODO: Create video plane (optional for now)
