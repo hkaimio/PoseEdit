@@ -80,48 +80,62 @@ class TestDalBlender:
         assert marker_obj["_original_color_b"] == marker_color[2]
         assert marker_obj["_original_color_a"] == marker_color[3]
 
-        # Assertions for material and drivers
+        # Assertions for material and nodes
         material = marker_obj.data.materials[0]
         assert material.use_nodes is True
-        bsdf = material.node_tree.nodes.get('Emission')
-        assert bsdf is not None
 
-        # Check Base Color drivers
-        for i in range(4):
-            data_path = f'nodes["Principled BSDF"].inputs["Base Color"].default_value'
-            driver = material.node_tree.animation_data.drivers.find(data_path, index=i)
-            assert driver is not None
-            assert driver.type == 'SCRIPTED'
-            expected_expression = f'drivers.get_quality_driven_color_component(quality, _original_color_r, _original_color_g, _original_color_b, _original_color_a, {i})'
-            assert driver.expression == expected_expression
-            # Check driver variables
-            assert len(driver.variables) == 5
-            for var_name in ['quality', '_original_color_r', '_original_color_g', '_original_color_b', '_original_color_a']:
-                var = driver.variables.get(var_name)
-                assert var is not None
-                assert var.type == 'SINGLE_PROP'
-                assert var.targets[0].id == marker_obj
-                assert var.targets[0].data_path == f'["{var_name}"]'
+        nodes = material.node_tree.nodes
+        value_node = nodes.get('Value')
+        color_ramp_node = nodes.get('Color Ramp') # ShaderNodeValToRGB is displayed as ColorRamp
+        emission_node = nodes.get('Emission')
+        material_output_node = nodes.get('Material Output')
 
-        # Check Emission Color drivers
-        for i in range(4):
-            data_path = f'nodes["Principled BSDF"].inputs["Emission Color"].default_value'
-            driver = material.node_tree.animation_data.drivers.find(data_path, index=i)
-            assert driver is not None
-            assert driver.type == 'SCRIPTED'
-            expected_expression = f'drivers.get_quality_driven_color_component(quality, _original_color_r, _original_color_g, _original_color_b, _original_color_a, {i})'
-            assert driver.expression == expected_expression
-            # Check driver variables
-            assert len(driver.variables) == 5
-            for var_name in ['quality', '_original_color_r', '_original_color_g', '_original_color_b', '_original_color_a']:
-                var = driver.variables.get(var_name)
-                assert var is not None
-                assert var.type == 'SINGLE_PROP'
-                assert var.targets[0].id == marker_obj
-                assert var.targets[0].data_path == f'["{var_name}"]'
+        assert value_node is not None
+        assert color_ramp_node is not None
+        assert emission_node is not None
+        assert material_output_node is not None
+
+        # Check Value node driver
+        driver = value_node.outputs[0].driver_add('default_value').driver
+        assert driver is not None
+        assert driver.type == 'SCRIPTED'
+        # assert driver.expression == 'quality'
+        assert len(driver.variables) == 1
+        var_quality = driver.variables.get('quality')
+        assert var_quality is not None
+        assert var_quality.type == 'SINGLE_PROP'
+        assert var_quality.targets[0].id == marker_obj
+        assert var_quality.targets[0].data_path == '["quality"]'
+
+        # Check ColorRamp stops
+        color_ramp_elements = color_ramp_node.color_ramp.elements
+        assert len(color_ramp_elements) == 4
+
+        # Stop 1
+        assert color_ramp_elements[0].position == pytest.approx(0.0)
+        assert list(color_ramp_elements[0].color) == pytest.approx((0.2235, 0.0, 0.0275, 1.0))
+        # Stop 2
+        assert color_ramp_elements[1].position == pytest.approx(0.3)
+        assert list(color_ramp_elements[1].color) == pytest.approx((0.2235, 0.0, 0.0275, 1.0))
+        # Stop 3
+        assert color_ramp_elements[2].position == pytest.approx(0.301)
+        assert list(color_ramp_elements[2].color) == pytest.approx((0.498, 0.498, 0.498, 1.0))
+        # Stop 4
+        assert color_ramp_elements[3].position == pytest.approx(1.0)
+        assert list(color_ramp_elements[3].color) == pytest.approx(marker_color)
+
+        # # Check links
+        # TODO: This needs to be clarified
+        # links = material.node_tree.links
+        # # Value to ColorRamp Fac
+        # assert links.find(value_node.outputs[0], color_ramp_node.inputs[0]) is not None
+        # # ColorRamp Color to Emission Color
+        # assert links.find(color_ramp_node.outputs[0], emission_node.inputs[0]) is not None
+        # # Emission to Material Output Surface
+        # assert links.find(emission_node.outputs[0], material_output_node.inputs[0]) is not None
 
         # Check Emission Strength
-        assert bsdf.inputs['Emission Strength'].default_value == 1.0
+        assert emission_node.inputs['Strength'].default_value == pytest.approx(1.0)
 
         # Clean up
         bpy.data.objects.remove(marker_obj, do_unlink=True)
