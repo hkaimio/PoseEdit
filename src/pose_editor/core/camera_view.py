@@ -7,7 +7,7 @@ import os
 import re
 from anytree import Node
 from anytree.iterators import PreOrderIter
-from pose2sim.Pose2Sim.skeletons import HALPE_26
+from .skeleton import SkeletonBase
 
 class CameraView(object):
     def __init__(self):
@@ -16,7 +16,7 @@ class CameraView(object):
 
         self._raw_person_data: List[RawPersonData] = []
 
-def create_camera_view(name: str, video_file: Path, pose_data_dir: Path) -> CameraView:
+def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleton_obj: SkeletonBase) -> CameraView:
     """
     Loads raw pose data from JSON files for a single camera view, creates Blender objects
     to represent the camera view and raw person data, and links them.
@@ -25,6 +25,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path) -> Came
         name: The name of the camera view.
         video_file: The path to the background video file.
         pose_data_dir: The path to the directory containing JSON pose data files.
+        skeleton_obj: A SkeletonBase object representing the skeleton definition.
 
     Returns:
         A CameraView object containing references to the created Blender objects.
@@ -35,9 +36,8 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path) -> Came
     camera_view_empty_name = f"View_{name}"
     camera_view._obj = create_empty(camera_view_empty_name)
 
-    # Load skeleton
-    skeleton = HALPE_26
-    marker_ids = {node.id: node.name for node in PreOrderIter(skeleton) if node.id is not None}
+    # Use the provided skeleton object
+    marker_ids = {node.id: node.name for node in PreOrderIter(skeleton_obj._skeleton) if node.id is not None}
 
     # Process JSON files
     json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith('.json')])
@@ -67,7 +67,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path) -> Came
     # Create RawPersonData objects and Blender markers
     for person_idx, frames_data in pose_data_by_person_and_frame.items():
         raw_person_data = RawPersonData(create_empty(f"{name}_Person{person_idx}", parent_obj=camera_view._obj._get_obj()))
-        raw_person_data._skeleton = skeleton
+        raw_person_data._skeleton = skeleton_obj._skeleton
         camera_view._raw_person_data.append(raw_person_data)
 
         # Prepare data for F-curves

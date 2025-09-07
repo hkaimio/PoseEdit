@@ -128,6 +128,20 @@ class RealPersonInstanceFacade:
         pass
 ```
 
+### 4.1. Skeleton Handling
+The `core/skeleton.py` module defines classes for managing different skeleton definitions and their associated joint data.
+
+-   **`SkeletonBase`**: This is the base class for all skeleton types. It encapsulates an `anytree.Node` structure representing the hierarchical definition of a skeleton. It provides common methods for querying joint information, such as:
+    -   `get_joint_name(joint_id: int) -> str | None`: Retrieves the name of a joint given its ID.
+    -   `get_joint_id(joint_name: str) -> int | None`: Retrieves the ID of a joint given its name.
+    -   `calculate_fake_marker_pos(name: str, marker_data: Dict[str, List[float]]) -> List[float] | None`: A placeholder method intended to calculate positions for "fake" or derived markers that are not directly provided by the raw pose data.
+
+-   **`COCO133Skeleton`**: This class extends `SkeletonBase` to provide specific implementations for the `COCO_133` skeleton definition. It overrides the `calculate_fake_marker_pos` method to compute the positions of "Hip" and "Neck" markers, which are often not directly provided by pose estimation models for this skeleton.
+    -   The "Hip" marker position is calculated as the midpoint between the "RHip" and "LHip" markers.
+    -   The "Neck" marker position is calculated as the midpoint between the "RShoulder" and "LShoulder" markers.
+    This method is designed to work with both 2D (x, y, likelihood) and 3D (x, y, z) marker data.
+
+
 ## 5. Operators and UI
 Operators now use the Facades to interact with the data, keeping the operator logic clean and focused on orchestration.
 
