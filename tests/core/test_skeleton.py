@@ -1,6 +1,6 @@
 import pytest
 from anytree import Node
-from pose_editor.core.skeleton import SkeletonBase
+from pose_editor.core.skeleton import SkeletonBase, COCO133Skeleton
 from pose_editor.pose2sim import skeletons
 
 def test_get_joint_name_valid_id():
@@ -53,3 +53,74 @@ def test_calculate_fake_marker_pos_placeholder():
     """
     skeleton = SkeletonBase(skeletons.HALPE_26)
     assert skeleton.calculate_fake_marker_pos("fake_marker", {}) is None
+
+def test_coco133_skeleton_calculate_fake_marker_pos_hip_2d():
+    """
+    Test calculate_fake_marker_pos for Hip in 2D for COCO133Skeleton.
+    """
+    skeleton = COCO133Skeleton(skeletons.COCO_133)
+    marker_data = {
+        "RHip": [10.0, 20.0, 1.0],
+        "LHip": [30.0, 40.0, 1.0]
+    }
+    expected_pos = [20.0, 30.0, 1.0]
+    assert skeleton.calculate_fake_marker_pos("Hip", marker_data) == expected_pos
+
+def test_coco133_skeleton_calculate_fake_marker_pos_hip_3d():
+    """
+    Test calculate_fake_marker_pos for Hip in 3D for COCO133Skeleton.
+    """
+    skeleton = COCO133Skeleton(skeletons.COCO_133)
+    marker_data = {
+        "RHip": [10.0, 20.0, 30.0],
+        "LHip": [30.0, 40.0, 50.0]
+    }
+    expected_pos = [20.0, 30.0, 40.0]
+    assert skeleton.calculate_fake_marker_pos("Hip", marker_data) == expected_pos
+
+def test_coco133_skeleton_calculate_fake_marker_pos_neck_2d():
+    """
+    Test calculate_fake_marker_pos for Neck in 2D for COCO133Skeleton.
+    """
+    skeleton = COCO133Skeleton(skeletons.COCO_133)
+    marker_data = {
+        "RShoulder": [100.0, 110.0, 1.0],
+        "LShoulder": [120.0, 130.0, 1.0]
+    }
+    expected_pos = [110.0, 120.0, 1.0]
+    assert skeleton.calculate_fake_marker_pos("Neck", marker_data) == expected_pos
+
+def test_coco133_skeleton_calculate_fake_marker_pos_neck_3d():
+    """
+    Test calculate_fake_marker_pos for Neck in 3D for COCO133Skeleton.
+    """
+    skeleton = COCO133Skeleton(skeletons.COCO_133)
+    marker_data = {
+        "RShoulder": [100.0, 110.0, 120.0],
+        "LShoulder": [120.0, 130.0, 140.0]
+    }
+    expected_pos = [110.0, 120.0, 130.0]
+    assert skeleton.calculate_fake_marker_pos("Neck", marker_data) == expected_pos
+
+def test_coco133_skeleton_calculate_fake_marker_pos_insufficient_data():
+    """
+    Test calculate_fake_marker_pos with insufficient data for COCO133Skeleton.
+    """
+    skeleton = COCO133Skeleton(skeletons.COCO_133)
+    marker_data = {
+        "RHip": [10.0, 20.0, 1.0] # Missing LHip
+    }
+    assert skeleton.calculate_fake_marker_pos("Hip", marker_data) is None
+
+    marker_data = {
+        "RShoulder": [100.0, 110.0, 1.0] # Missing LShoulder
+    }
+    assert skeleton.calculate_fake_marker_pos("Neck", marker_data) is None
+
+def test_coco133_skeleton_calculate_fake_marker_pos_unhandled_name():
+    """
+    Test calculate_fake_marker_pos for an unhandled marker name (should fall back to base).
+    """
+    skeleton = COCO133Skeleton(skeletons.COCO_133)
+    marker_data = {}
+    assert skeleton.calculate_fake_marker_pos("SomeOtherMarker", marker_data) is None
