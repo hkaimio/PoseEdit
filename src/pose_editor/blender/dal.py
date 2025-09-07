@@ -83,13 +83,14 @@ def create_collection(name: str, parent_collection: bpy.types.Collection = None)
     parent_collection.children.link(collection)
     return collection
 
-def create_empty(name: str, collection: bpy.types.Collection = None) -> bpy.types.Object:
+def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj: bpy.types.Object = None) -> bpy.types.Object:
     """
     Creates a new empty object in the scene.
 
     Args:
         name: The name of the new empty.
         collection: The collection to link the empty to. If None, the empty is linked to the scene's master collection.
+        parent_obj: The parent object for the new empty.
 
     Returns:
         The new empty object.
@@ -98,7 +99,46 @@ def create_empty(name: str, collection: bpy.types.Collection = None) -> bpy.type
     if collection is None:
         collection = bpy.context.scene.collection
     collection.objects.link(empty)
+    
+    if parent_obj:
+        empty.parent = parent_obj
+        empty.matrix_parent_inverse.identity() # Clear parent inverse to keep local transform
+
     return empty
+
+def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list[tuple[int, float]]) -> None:
+    """
+    Sets F-curves for a given data path on a Blender object from a list of keyframe data.
+
+    Args:
+        blender_object: The Blender object to set the F-curves on.
+        data_path: The data path for the property (e.g., "location.x", "quality").
+        keyframes: A list of (frame_number, value) tuples.
+    """
+    if not keyframes:
+        return
+
+    blender_object = obj_ref._get_obj()
+    if not blender_object:
+        raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
+
+    # Ensure animation data exists
+    if not blender_object.animation_data:
+        blender_object.animation_data_create()
+
+    # Ensure an action exists for the animation data
+    if not blender_object.animation_data.action:
+        blender_object.animation_data.action = bpy.data.actions.new(name=f"{blender_object.name}_Action")
+
+    # Create F-curve
+    fcurve = blender_object.animation_data.action.fcurves.new(data_path)
+
+    # Add keyframes
+    for frame, value in keyframes:
+        fcurve.keyframe_points.insert(frame, value)
+
+    # Update tangents
+    fcurve.update()
 
 def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float]) -> BlenderObjRef:
     """

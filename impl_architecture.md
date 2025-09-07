@@ -215,6 +215,46 @@ This chapter details the implementation flow for the initial setup and 2D stitch
     -   `core.project_facade.parse_raw_tracks()`: A pure Python function to read and parse the JSON data files into a simple data structure.
     -   `blender.dal`: Functions for creating cameras, collections, armatures, and populating their f-curves from data.
 
+### 6.2.1. Raw Pose Data Format and Blender Mapping
+This section details the structure of the raw 2D pose data JSON files and how this data is mapped to Blender objects and properties.
+
+**JSON File Format (Example: `cam1_000000.json`)**
+Each JSON file represents a single frame and contains data for one or more persons.
+```json
+{
+  "version": 1.3,
+  "people": [
+    {
+      "person_id": [-1],
+      "pose_keypoints_2d": [
+        // x1, y1, likelihood1, x2, y2, likelihood2, ...
+      ]
+    },
+    // ... more person objects
+  ]
+}
+```
+-   `"version"`: (float) Version of the data format.
+-   `"people"`: (array of objects) Contains data for each detected person in the frame.
+    -   `"person_id"`: (array of int) An identifier for the person. The order of persons in this array is consistent across all frames.
+    -   `"pose_keypoints_2d"`: (array of float) A flattened array of 2D marker data. Each marker has three values: `[X coordinate, Y coordinate, Likelihood]`.
+        -   **X, Y Coordinates:** Pixel coordinates from the top-left corner of the video frame.
+        -   **Likelihood:** A confidence score (0.0 to 1.0) for the detected marker.
+
+**Mapping to Blender Data**
+
+The raw 2D pose data is mapped to Blender objects and their properties as follows:
+
+-   **Camera View Object:** A top-level Blender Empty object is created for each camera view (e.g., `View_cam_01`). This empty serves as the parent for all objects related to that specific camera view.
+-   **Raw Person Data Object:** For each person detected in the raw data, a Blender Empty object is created as a child of the Camera View object (e.g., `View_cam_01_Person0`). This empty represents the raw 2D data for a single person within that camera view.
+-   **Marker Spheres:** For each marker defined in the chosen skeleton (e.g., `HALPE_26`), a small UV sphere (Blender Mesh object) is created as a child of the Raw Person Data object.
+    -   **Location:** The `X` and `Y` coordinates from `pose_keypoints_2d` are converted from pixel space to Blender's 3D coordinate system and stored as F-curves on the marker sphere's `location.x` and `location.y` properties. The `Z` coordinate is typically set to 0 for 2D data.
+    -   **Quality (Likelihood):** The `Likelihood` value from `pose_keypoints_2d` is stored as an F-curve on a custom property named `"quality"` on the marker sphere. This property drives the marker's material color, allowing visual feedback on data quality.
+    -   **Material:** Each marker sphere is assigned a node-based material. The `quality` custom property drives a `Value` node, which feeds into a `ColorRamp` node. The `ColorRamp` is configured to show dark red for low quality (below 0.3), grey for medium quality (0.3 to 1.0), and the original marker color for high quality (1.0). This material is then connected to an `Emission` shader for visibility.
+
+**Skeleton Definition (`pose2sim/Pose2Sim/skeletons.py`)**
+The `pose_keypoints_2d` array's structure is determined by the chosen skeleton. For example, the `HALPE_26` skeleton defines the order and meaning of each `[X, Y, Likelihood]` triplet. The `id` attribute of each `anytree.Node` in the skeleton directly corresponds to its 0-based index in the `pose_keypoints_2d` array.
+
 ### 6.3. Creating a Real Person Instance
 -   **Use Case:** The user adds a person to the project, either by creating a new reusable definition or by selecting an existing one from the library.
 -   **User Interaction:** Clicks "Add Person Instance". A popup dialog appears, allowing the user to select from a dropdown of existing `PersonDefinition`s or enter a new name to create a new one.

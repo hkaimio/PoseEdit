@@ -153,6 +153,31 @@ class TestDalBlender:
         # Ensure no objects were created
         assert "TestMarker" not in bpy.data.objects
 
+    def test_set_fcurve_from_data(self, blender_obj_ref):
+        # Get the actual Blender object from the ref
+        blender_object = blender_obj_ref._get_obj()
+        assert blender_object is not None, "Blender object should exist for testing"
+
+        data_path = "location.x"
+        keyframes = [(1, 10.0), (10, 20.0), (20, 5.0)]
+
+        # Call the function under test
+        dal.set_fcurve_from_data(blender_obj_ref, data_path, keyframes)
+
+        # Assertions
+        assert blender_object.animation_data is not None
+        assert blender_object.animation_data.action is not None
+
+        fcurve = blender_object.animation_data.action.fcurves.find(data_path)
+        assert fcurve is not None
+
+        assert len(fcurve.keyframe_points) == len(keyframes)
+
+        for i, (frame, value) in enumerate(keyframes):
+            keyframe_point = fcurve.keyframe_points[i]
+            assert keyframe_point.co.x == pytest.approx(frame)
+            assert keyframe_point.co.y == pytest.approx(value)
+
     def test_set_and_get_custom_property_int(self, blender_parent_obj):
         prop = dal.CustomProperty[int]("my_int_prop")
         value = 123
