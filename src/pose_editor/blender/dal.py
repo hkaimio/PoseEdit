@@ -83,17 +83,17 @@ def create_collection(name: str, parent_collection: bpy.types.Collection = None)
     parent_collection.children.link(collection)
     return collection
 
-def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj: bpy.types.Object = None) -> bpy.types.Object:
+def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj: BlenderObjRef = None) -> BlenderObjRef:
     """
     Creates a new empty object in the scene.
 
     Args:
         name: The name of the new empty.
         collection: The collection to link the empty to. If None, the empty is linked to the scene's master collection.
-        parent_obj: The parent object for the new empty.
+        parent_obj: The parent object for the new empty, wrapped in a BlenderObjRef.
 
     Returns:
-        The new empty object.
+        The new empty object wrapped in a BlenderObjRef.
     """
     empty = bpy.data.objects.new(name, None)
     if collection is None:
@@ -101,10 +101,10 @@ def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj:
     collection.objects.link(empty)
     
     if parent_obj:
-        empty.parent = parent_obj
+        empty.parent = parent_obj._get_obj()
         empty.matrix_parent_inverse.identity() # Clear parent inverse to keep local transform
 
-    return empty
+    return BlenderObjRef(empty.name)
 
 def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list[tuple[int, float]]) -> None:
     """

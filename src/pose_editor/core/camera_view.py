@@ -16,6 +16,33 @@ class CameraView(object):
 
         self._raw_person_data: List[RawPersonData] = []
 
+def _extract_frame_number(filename: str) -> int:
+    """
+    Extracts the frame number from a filename.
+    Assumes the frame number is the last sequence of digits before the file extension.
+    e.g., "cam1_000000.json" -> 0
+          "video_frame_00123.png" -> 123
+
+    Args:
+        filename: The name of the file.
+
+    Returns:
+        The extracted frame number.
+
+    Raises:
+        ValueError: If no frame number can be extracted.
+    """
+    match = re.search(r'(\d+)\.\w+', filename)
+    if match:
+        return int(match.group(1))
+    
+    # Fallback for filenames without extension or different patterns
+    numbers = re.findall(r'\d+', filename)
+    if numbers:
+        return int(numbers[-1])
+    
+    raise ValueError(f"No frame number found in filename: {filename}")
+
 def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleton_obj: SkeletonBase) -> CameraView:
     """
     Loads raw pose data from JSON files for a single camera view, creates Blender objects
@@ -47,10 +74,10 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     max_frame = float('-inf')
 
     for filename in json_files:
-        frame_num_match = re.search(r'\d+', filename)
-        if not frame_num_match:
-            continue
-        frame_num = int(frame_num_match.group(0))
+        try:
+            frame_num = _extract_frame_number(filename)
+        except ValueError:
+            continue # Skip files that don't have a valid frame number
         min_frame = min(min_frame, frame_num)
         max_frame = max(max_frame, frame_num)
 
@@ -66,7 +93,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
     # Create RawPersonData objects and Blender markers
     for person_idx, frames_data in pose_data_by_person_and_frame.items():
-        raw_person_data = RawPersonData(create_empty(f"{name}_Person{person_idx}", parent_obj=camera_view._obj._get_obj()))
+        raw_person_data = RawPersonData(create_empty(f"{name}_Person{person_idx}", parent_obj=camera_view._obj))
         raw_person_data._skeleton = skeleton_obj._skeleton
         camera_view._raw_person_data.append(raw_person_data)
 
@@ -118,7 +145,8 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
             for data_path, keyframes in fcurve_data.items():
                 if keyframes:
-                    set_fcurve_from_data(marker_obj_ref._get_obj(), data_path, keyframes)
+                    print(f"Setting F-curve for {marker_name} {data_path} with {len(keyframes)} keyframes")
+                    set_fcurve_from_data(marker_obj_ref, data_path, keyframes)
 
     # TODO: Create video plane (optional for now)
 

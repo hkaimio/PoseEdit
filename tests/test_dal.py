@@ -49,14 +49,14 @@ class TestDalBlender:
 
     def test_create_empty(self):
         empty_name = "TestEmpty"
-        empty = dal.create_empty(empty_name)
+        empty_ref = dal.create_empty(empty_name)
         
-        assert empty.name == empty_name
+        assert empty_ref._get_obj().name == empty_name
         assert empty_name in bpy.data.objects
         assert empty_name in bpy.context.scene.collection.objects
 
         # Clean up
-        bpy.data.objects.remove(empty)
+        bpy.data.objects.remove(empty_ref._get_obj())
 
     def test_create_marker_success(self, blender_obj_ref, blender_parent_obj):
         marker_name = "TestMarker"
