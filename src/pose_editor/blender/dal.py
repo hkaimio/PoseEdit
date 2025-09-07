@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from typing import Generic, TypeVar
+from typing import Generic, List, TypeVar
 import bpy
 from . import drivers # Import the new drivers module
 
@@ -102,18 +102,40 @@ def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj:
     
     if parent_obj:
         empty.parent = parent_obj._get_obj()
-        empty.matrix_parent_inverse.identity() # Clear parent inverse to keep local transform
+        empty.matrix_parent_inverse.identity()  # Clear parent inverse to keep local transform
 
     return BlenderObjRef(empty.name)
 
-def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list[tuple[int, float]]) -> None:
+def add_keyframe(obj_ref: BlenderObjRef, frame: int, values: dict[str, any]) -> None:
+    """
+    Adds a keyframe to a Blender object.
+
+    Args:
+        obj_ref: The Blender object reference.
+        frame: The frame number to add the keyframe at.
+    """
+    blender_object = obj_ref._get_obj()
+    if not blender_object:
+        raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
+
+    for data_path, value in values.items():
+        if data_path == "location":
+            blender_object.location = value
+        else:
+            if len(value) == 1:
+                value = value[0]
+            blender_object[data_path] = value
+        blender_object.keyframe_insert(data_path=data_path, frame=frame)
+
+
+def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list[tuple[int, list[float]]]) -> None:
     """
     Sets F-curves for a given data path on a Blender object from a list of keyframe data.
 
     Args:
         blender_object: The Blender object to set the F-curves on.
-        data_path: The data path for the property (e.g., "location.x", "quality").
-        keyframes: A list of (frame_number, value) tuples.
+        data_path: The data path for the property (e.g., "location", "quality").
+        keyframes: A list of (frame_number, [list of values]) tuples. If the property is an array, the values list must match data path array length.
     """
     if not keyframes:
         return
@@ -131,14 +153,35 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
         blender_object.animation_data.action = bpy.data.actions.new(name=f"{blender_object.name}_Action")
 
     # Create F-curve
-    fcurve = blender_object.animation_data.action.fcurves.new(data_path)
+    fcurves = []
+    if len(keyframes[0][1]) == 1:
+        fcurve = blender_object.animation_data.action.fcurves.new(data_path)
+        fcurve.keyframe_points.add(count=len(keyframes))
+        fcurves.append(fcurve)
+    else:
+        for i in range(len(keyframes[0][1])):
+            fcurve = blender_object.animation_data.action.fcurves.new(data_path, index=i)
+            fcurve.keyframe_points.add(count=len(keyframes))
+            fcurves.append(fcurve)
 
     # Add keyframes
-    for frame, value in keyframes:
-        fcurve.keyframe_points.insert(frame, value)
+    for i in range(len(keyframes)):
+        frame, values = keyframes[i]
+        for j in range(len(fcurves)):
+            if(j < len(values)):
+                fcurves[j].keyframe_points[i].co = (frame, values[j])
+            else:
+                print(f"Warning: Not enough values for F-curve index {j} at frame {frame}")
 
     # Update tangents
-    fcurve.update()
+    for fcurve in fcurves:
+        fcurve.update()
+
+    # Hack to force update
+    max_keyframe = keyframes[-1][0]
+    blender_object.keyframe_insert(data_path, frame=max_keyframe+1)
+    for f in fcurves:
+        f.keyframe_points.remove(f.keyframe_points[-1])
 
 def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float]) -> BlenderObjRef:
     """
