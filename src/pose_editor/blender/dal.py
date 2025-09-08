@@ -41,28 +41,34 @@ class CustomProperty(Generic[T]):
         """
         self._prop_name = prop_name
 
-def set_custom_property(obj: bpy.types.Object, prop: CustomProperty[T], value: T) -> None:
+def set_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T], value: T) -> None:
     """
     Sets a custom property on a Blender object.
 
     Args:
-        obj: The Blender object to set the property on.
+        obj_ref: The Blender object reference to set the property on.
         prop: A CustomProperty object describing the property.
         value: The value to set the property to.
     """
+    obj = obj_ref._get_obj()
+    if not obj:
+        raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     obj[prop._prop_name] = value
 
-def get_custom_property(obj: bpy.types.Object, prop: CustomProperty[T]) -> T | None:
+def get_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T]) -> T | None:
     """
     Gets a custom property from a Blender object.
 
     Args:
-        obj: The Blender object to retrieve the property from.
+        obj_ref: The Blender object reference to retrieve the property from.
         prop: A CustomProperty object describing the property.
 
     Returns:
         The value of the custom property, or None if the property does not exist.
     """
+    obj = obj_ref._get_obj()
+    if not obj:
+        raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     return obj.get(prop._prop_name)
 
 # Specific custom properties for CameraView objects
@@ -185,9 +191,11 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
 
     # Hack to force update
     max_keyframe = keyframes[-1][0]
+    print(data_path)
     blender_object.keyframe_insert(data_path, frame=max_keyframe+1)
     for f in fcurves:
         f.keyframe_points.remove(f.keyframe_points[-1])
+
 
 def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float]) -> BlenderObjRef:
     """
@@ -298,5 +306,16 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
         marker_obj.data.materials[0] = material
     else:
         marker_obj.data.materials.append(material)
+
+    # Add driver for hide_viewport based on "quality"
+    driver = marker_obj.driver_add('hide_viewport').driver
+    driver.type = 'SCRIPTED'
+    driver.expression = 'quality < 0'
+
+    var_quality_hide = driver.variables.new()
+    var_quality_hide.name = 'quality'
+    var_quality_hide.type = 'SINGLE_PROP'
+    var_quality_hide.targets[0].id = marker_obj
+    var_quality_hide.targets[0].data_path = '["quality"]'
 
     return BlenderObjRef(marker_obj.name)

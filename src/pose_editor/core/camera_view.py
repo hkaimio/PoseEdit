@@ -158,7 +158,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                     blender_z = 0.0 # 2D data
 
                     if math.isnan(x) or math.isnan(y):
-                        marker_fcurve_data[marker_name]['["quality"]'].append((frame_num, [0.0]))
+                        marker_fcurve_data[marker_name]['["quality"]'].append((frame_num, [-1.0]))
                     else:
                         marker_fcurve_data[marker_name]['location'].append((frame_num, [blender_x, blender_y, blender_z]))
                         marker_fcurve_data[marker_name]['["quality"]'].append((frame_num, [likelihood]))

@@ -158,8 +158,8 @@ class TestDalBlender:
         blender_object = blender_obj_ref._get_obj()
         assert blender_object is not None, "Blender object should exist for testing"
 
-        data_path = "location.x"
-        keyframes = [(1, 10.0), (10, 20.0), (20, 5.0)]
+        data_path = "location"
+        keyframes = [(1, [10.0]), (10, [20.0]), (20, [5.0])]
 
         # Call the function under test
         dal.set_fcurve_from_data(blender_obj_ref, data_path, keyframes)
@@ -176,46 +176,46 @@ class TestDalBlender:
         for i, (frame, value) in enumerate(keyframes):
             keyframe_point = fcurve.keyframe_points[i]
             assert keyframe_point.co.x == pytest.approx(frame)
-            assert keyframe_point.co.y == pytest.approx(value)
+            assert keyframe_point.co.y == pytest.approx(value[0])
 
-    def test_set_and_get_custom_property_int(self, blender_parent_obj):
+    def test_set_and_get_custom_property_int(self, blender_obj_ref):
         prop = dal.CustomProperty[int]("my_int_prop")
         value = 123
-        dal.set_custom_property(blender_parent_obj, prop, value)
-        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        dal.set_custom_property(blender_obj_ref, prop, value)
+        retrieved_value = dal.get_custom_property(blender_obj_ref, prop)
         assert retrieved_value == value
         assert isinstance(retrieved_value, int)
 
-    def test_set_and_get_custom_property_float(self, blender_parent_obj):
+    def test_set_and_get_custom_property_float(self, blender_obj_ref):
         prop = dal.CustomProperty[float]("my_float_prop")
         value = 123.45
-        dal.set_custom_property(blender_parent_obj, prop, value)
-        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        dal.set_custom_property(blender_obj_ref, prop, value)
+        retrieved_value = dal.get_custom_property(blender_obj_ref, prop)
         assert retrieved_value == pytest.approx(value)
         assert isinstance(retrieved_value, float)
 
-    def test_set_and_get_custom_property_string(self, blender_parent_obj):
+    def test_set_and_get_custom_property_string(self, blender_obj_ref):
         prop = dal.CustomProperty[str]("my_string_prop")
         value = "hello world"
-        dal.set_custom_property(blender_parent_obj, prop, value)
-        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        dal.set_custom_property(blender_obj_ref, prop, value)
+        retrieved_value = dal.get_custom_property(blender_obj_ref, prop)
         assert retrieved_value == value
         assert isinstance(retrieved_value, str)
 
-    def test_set_and_get_custom_property_bool(self, blender_parent_obj):
+    def test_set_and_get_custom_property_bool(self, blender_obj_ref):
         prop = dal.CustomProperty[bool]("my_bool_prop")
         value = True
-        dal.set_custom_property(blender_parent_obj, prop, value)
-        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        dal.set_custom_property(blender_obj_ref, prop, value)
+        retrieved_value = dal.get_custom_property(blender_obj_ref, prop)
         assert retrieved_value == value
         assert isinstance(retrieved_value, bool)
 
-    def test_get_custom_property_non_existent(self, blender_parent_obj):
+    def test_get_custom_property_non_existent(self, blender_obj_ref):
         prop = dal.CustomProperty[str]("non_existent_prop")
-        retrieved_value = dal.get_custom_property(blender_parent_obj, prop)
+        retrieved_value = dal.get_custom_property(blender_obj_ref, prop)
         assert retrieved_value is None
 
-    def test_get_custom_property_with_default_value(self, blender_parent_obj):
+    def test_get_custom_property_with_default_value(self, blender_obj_ref):
         # This test is not directly applicable with the current get_custom_property signature
         # as it doesn't take a default value. Blender's .get() method does.
         # If a default value parameter is added to dal.get_custom_property, this test would be relevant.
