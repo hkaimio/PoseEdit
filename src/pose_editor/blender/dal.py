@@ -353,33 +353,38 @@ def get_or_create_action(action_name: str) -> bpy.types.Action:
         action = bpy.data.actions.new(action_name)
     return action
 
+def _get_prefixed_slot_name(slot_name: str) -> str:
+    """Returns the name of the slot with Blender's internal prefix."""
+    # For id_type='OBJECT', the prefix is 'OB'.
+    return f"OB{slot_name}"
+
 def action_has_slot(action: bpy.types.Action, slot_name: str) -> bool:
     """Checks if an Action has a specific slot."""
-    return slot_name in action.slots
+    prefixed_name = _get_prefixed_slot_name(slot_name)
+    return prefixed_name in action.slots
 
 def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.types.ActionSlot:
     """Gets an ActionSlot by name from an Action, or creates it if it doesn't exist."""
-    slot = action.slots.get(slot_name)
+    prefixed_name = _get_prefixed_slot_name(slot_name)
+    slot = action.slots.get(prefixed_name)
     if not slot:
-        slot = action.slots.new(slot_name)
+        # Pass the UN-PREFIXED name to new(). Blender handles the prefixing.
+        slot = action.slots.new(name=slot_name, id_type='OBJECT')
     return slot
 
-def get_or_create_action_strip(slot: bpy.types.ActionSlot, strip_name: str) -> bpy.types.ActionStrip:
-    """Gets an ActionStrip by name from an ActionSlot, or creates it if it doesn't exist."""
-    strip = slot.strips.get(strip_name)
-    if not strip:
-        strip = slot.strips.new(strip_name, 0)
-    return strip
+def get_or_create_fcurve(slot: bpy.types.ActionSlot, data_path: str, index: int = -1) -> bpy.types.FCurve:
+    """
+    Gets an FCurve from an ActionSlot's default layer, or creates it.
+    A new ActionSlot is assumed to have one strip and one layer by default.
+    """
+    if not slot.strips:
+        raise RuntimeError(f"ActionSlot '{slot.path_from_id()}' has no strips.")
+    strip = slot.strips[0]
 
-def get_or_create_action_layer(strip: bpy.types.ActionStrip, layer_name: str) -> bpy.types.ActionLayer:
-    """Gets an ActionLayer by name from an ActionStrip, or creates it if it doesn't exist."""
-    layer = strip.layers.get(layer_name)
-    if not layer:
-        layer = strip.layers.new(layer_name)
-    return layer
+    if not strip.layers:
+        raise RuntimeError(f"ActionStrip '{strip.name}' has no layers.")
+    layer = strip.layers[0]
 
-def get_or_create_fcurve(layer: bpy.types.ActionLayer, data_path: str, index: int = -1) -> bpy.types.FCurve:
-    """Gets an FCurve from an ActionLayer, or creates it if it doesn't exist."""
     fcurve = layer.fcurves.find(data_path, index=index)
     if not fcurve:
         fcurve = layer.fcurves.new(data_path, index=index)
@@ -399,11 +404,13 @@ def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, 
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     if not obj.animation_data:
         obj.animation_data_create()
+    
     obj.animation_data.action = action
-    if slot_name in action.slots:
-        obj.animation_data.action_slot = action.slots[slot_name]
-    else:
-        raise ValueError(f"Slot '{slot_name}' not found in action '{action.name}'")
+    
+    # Ensure the slot is created before assigning
+    get_or_create_action_slot(action, slot_name)
+    prefixed_name = _get_prefixed_slot_name(slot_name)
+    obj.animation_data.action_slot = action.slots[prefixed_name]
 
 def get_children_of_object(obj_ref: "BlenderObjRef") -> List["BlenderObjRef"]:
     """Returns a list of direct children objects of a given object."""
@@ -420,13 +427,10 @@ def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
     return None
 
 def get_fcurve_from_action_slot(slot: bpy.types.ActionSlot, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
-    """Gets an FCurve from an ActionSlot's first strip and layer."""
-    if not slot.strips:
+    """Gets an FCurve from an ActionSlot's default layer."""
+    if not slot.strips or not slot.strips[0].layers:
         return None
-    strip = slot.strips[0] # Assuming a single strip
-    if not strip.layers:
-        return None
-    layer = strip.layers[0] # Assuming a single layer
+    layer = slot.strips[0].layers[0]
     return layer.fcurves.find(data_path, index=index)
 
 def get_scene_frame_range() -> Tuple[int, int]:
