@@ -136,6 +136,11 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                 '["quality"]': []
             }
 
+        if min_frame not in frames_data:
+            # Set quality to -1 to indicate that there is no data
+            for marker_name in marker_fcurve_data.keys():
+                marker_fcurve_data[marker_name]['["quality"]'].append((min_frame, [-1.0]))
+
         for frame_num in range(min_frame, max_frame + 1):
             if frame_num not in frames_data:
                 # Handle missing frames if necessary, e.g., interpolate or skip
