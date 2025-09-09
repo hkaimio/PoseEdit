@@ -78,6 +78,11 @@ CAMERA_Y_FACTOR = CustomProperty[float]("camera_y_factor")
 CAMERA_X_OFFSET = CustomProperty[float]("camera_x_offset")
 CAMERA_Y_OFFSET = CustomProperty[float]("camera_y_offset")
 
+# Specific custom properties for DataSeries objects
+SERIES_NAME = CustomProperty[str]("series_name")
+SKELETON = CustomProperty[str]("skeleton")
+ACTION_NAME = CustomProperty[str]("action_name")
+
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
     """
     Creates a new collection in the scene.
