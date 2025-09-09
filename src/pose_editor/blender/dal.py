@@ -372,29 +372,28 @@ def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.t
         slot = action.slots.new(name=slot_name, id_type='OBJECT')
     return slot
 
-def get_or_create_fcurve(slot: bpy.types.ActionSlot, data_path: str, index: int = -1) -> bpy.types.FCurve:
+def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> bpy.types.FCurve:
     """
-    Gets an FCurve from an ActionSlot's default layer, or creates it.
-    A new ActionSlot is assumed to have one strip and one layer by default.
+    Gets or creates an F-Curve on an Action, targeted at a specific slot.
+    The F-Curve lives on the Action, and its data_path points to the slot.
     """
-    if not slot.strips:
-        raise RuntimeError(f"ActionSlot '{slot.path_from_id()}' has no strips.")
-    strip = slot.strips[0]
-
-    if not strip.layers:
-        raise RuntimeError(f"ActionStrip '{strip.name}' has no layers.")
-    layer = strip.layers[0]
-
-    fcurve = layer.fcurves.find(data_path, index=index)
+    # Ensure the slot exists, so Blender knows how to resolve the data_path
+    get_or_create_action_slot(action, slot_name)
+    
+    prefixed_slot_name = _get_prefixed_slot_name(slot_name)
+    slotted_data_path = f'slots["{prefixed_slot_name}"].{data_path}'
+    
+    fcurve = action.fcurves.find(slotted_data_path, index=index)
     if not fcurve:
-        fcurve = layer.fcurves.new(data_path, index=index)
+        fcurve = action.fcurves.new(slotted_data_path, index=index)
     return fcurve
 
 def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, float]]) -> None:
     """Sets keyframes for an FCurve, clearing existing ones in the process."""
     fcurve.keyframe_points.clear()
     for frame, value in keyframes:
-        fcurve.keyframe_points.insert(frame, value)
+        kp = fcurve.keyframe_points.insert(frame, value)
+        kp.interpolation = 'LINEAR'
     fcurve.update()
 
 def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, slot_name: str) -> None:
@@ -426,12 +425,11 @@ def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
         return BlenderObjRef(obj.name)
     return None
 
-def get_fcurve_from_action_slot(slot: bpy.types.ActionSlot, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
-    """Gets an FCurve from an ActionSlot's default layer."""
-    if not slot.strips or not slot.strips[0].layers:
-        return None
-    layer = slot.strips[0].layers[0]
-    return layer.fcurves.find(data_path, index=index)
+def get_fcurve_from_action(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
+    """Gets an FCurve from an Action for a specific slot."""
+    prefixed_slot_name = _get_prefixed_slot_name(slot_name)
+    slotted_data_path = f'slots["{prefixed_slot_name}"].{data_path}'
+    return action.fcurves.find(slotted_data_path, index=index)
 
 def get_scene_frame_range() -> Tuple[int, int]:
     """Returns the start and end frame of the current scene."""

@@ -111,12 +111,6 @@ class TestDalBlender:
         assert prefixed_name in action.slots
         assert action.slots.get(prefixed_name) == slot1
 
-        # Check that it comes with a default strip and layer
-        assert hasattr(slot1, 'strips')
-        assert len(slot1.strips) == 1
-        assert hasattr(slot1.strips[0], 'layers')
-        assert len(slot1.strips[0].layers) == 1
-
         slot2 = dal.get_or_create_action_slot(action, slot_name)
         assert slot2 == slot1
 
@@ -130,24 +124,27 @@ class TestDalBlender:
 
     def test_get_or_create_fcurve(self):
         action = dal.get_or_create_action("FCurveAction")
-        slot = dal.get_or_create_action_slot(action, "TestSlot")
+        slot_name = "TestSlot"
         data_path = "location"
 
-        fcurve = dal.get_or_create_fcurve(slot, data_path, index=0)
+        fcurve = dal.get_or_create_fcurve(action, slot_name, data_path, index=0)
         assert fcurve is not None
-        assert fcurve.data_path == data_path
+        
+        prefixed_slot_name = dal._get_prefixed_slot_name(slot_name)
+        expected_data_path = f'slots["{prefixed_slot_name}"].{data_path}'
+        assert fcurve.data_path == expected_data_path
         assert fcurve.array_index == 0
 
-        # Check it was added to the correct layer
-        assert fcurve in slot.strips[0].layers[0].fcurves
+        # Check it was added to the action
+        assert action.fcurves.find(fcurve.data_path, index=fcurve.array_index) is not None
 
-        fcurve2 = dal.get_or_create_fcurve(slot, data_path, index=0)
+        fcurve2 = dal.get_or_create_fcurve(action, slot_name, data_path, index=0)
         assert fcurve2 == fcurve
 
     def test_set_fcurve_keyframes(self):
         action = dal.get_or_create_action("KeyframeAction")
-        slot = dal.get_or_create_action_slot(action, "TestSlot")
-        fcurve = dal.get_or_create_fcurve(slot, "location", index=1)
+        slot_name = "TestSlot"
+        fcurve = dal.get_or_create_fcurve(action, slot_name, "location", index=1)
 
         keyframes = [(1.0, 10.0), (10.0, 20.0), (20.0, 5.0)]
         dal.set_fcurve_keyframes(fcurve, keyframes)
@@ -163,7 +160,6 @@ class TestDalBlender:
         action = dal.get_or_create_action("AssignAction")
         slot_name = "MyObjectSlot"
 
-        # This will create the slot
         dal.assign_action_to_object(blender_obj_ref, action, slot_name)
 
         assert obj.animation_data is not None
@@ -173,21 +169,21 @@ class TestDalBlender:
         prefixed_name = dal._get_prefixed_slot_name(slot_name)
         assert obj.animation_data.action_slot == action.slots[prefixed_name]
 
-    def test_get_fcurve_from_action_slot(self):
+    def test_get_fcurve_from_action(self):
         action = dal.get_or_create_action("GetFCurveAction")
-        slot = dal.get_or_create_action_slot(action, "TestSlot")
-        fcurve = dal.get_or_create_fcurve(slot, "location", index=2)
+        slot_name = "TestSlot"
+        fcurve = dal.get_or_create_fcurve(action, slot_name, "location", index=2)
 
-        retrieved_fcurve = dal.get_fcurve_from_action_slot(slot, "location", index=2)
+        retrieved_fcurve = dal.get_fcurve_from_action(action, slot_name, "location", index=2)
         assert retrieved_fcurve == fcurve
 
-        assert dal.get_fcurve_from_action_slot(slot, "location", index=0) is None
+        assert dal.get_fcurve_from_action(action, slot_name, "location", index=0) is None
 
     def test_sample_fcurve(self):
         import numpy as np
         action = dal.get_or_create_action("SampleAction")
-        slot = dal.get_or_create_action_slot(action, "TestSlot")
-        fcurve = dal.get_or_create_fcurve(slot, "location", index=0)
+        slot_name = "TestSlot"
+        fcurve = dal.get_or_create_fcurve(action, slot_name, "location", index=0)
         
         keyframes = [(0, 0), (10, 10)]
         dal.set_fcurve_keyframes(fcurve, keyframes)
