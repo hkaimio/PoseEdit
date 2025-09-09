@@ -322,7 +322,17 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
     return BlenderObjRef(marker_obj.name)
 
 def get_or_create_object(name: str, obj_type: str, collection_name: Optional[str] = None) -> "BlenderObjRef":
-    """Gets an object by name, or creates it if it doesn't exist."""
+    """Gets an object by name, or creates it if it doesn't exist.
+
+    Args:
+        name: The name for the object.
+        obj_type: The type of object to create (e.g., 'EMPTY').
+        collection_name: The name of the collection to place the object in.
+                         If the collection doesn't exist, it will be created.
+
+    Returns:
+        A BlenderObjRef wrapper for the found or created object.
+    """
     obj = bpy.data.objects.get(name)
     if not obj:
         if obj_type == 'EMPTY':
@@ -347,35 +357,82 @@ def get_or_create_object(name: str, obj_type: str, collection_name: Optional[str
     return BlenderObjRef(obj.name)
 
 def get_or_create_action(action_name: str) -> bpy.types.Action:
-    """Gets an Action by name, or creates it if it doesn't exist."""
+    """Gets an Action data-block by name, or creates it if it doesn't exist.
+
+    Args:
+        action_name: The name of the Action.
+
+    Returns:
+        The found or created Action data-block.
+    """
     action = bpy.data.actions.get(action_name)
     if not action:
         action = bpy.data.actions.new(action_name)
     return action
 
 def _get_prefixed_slot_name(slot_name: str) -> str:
-    """Returns the name of the slot with Blender's internal prefix."""
-    # For id_type='OBJECT', the prefix is 'OB'.
+    """Returns the name of the slot with Blender's internal prefix.
+
+    For id_type='OBJECT', Blender prepends 'OB' to the name provided by the user
+    to form the key in the `action.slots` collection.
+
+    Args:
+        slot_name: The user-facing name of the slot.
+
+    Returns:
+        The internal, prefixed name used as the key in the collection.
+    """
     return f"OB{slot_name}"
 
 def action_has_slot(action: bpy.types.Action, slot_name: str) -> bool:
-    """Checks if an Action has a specific slot."""
+    """Checks if an Action has a specific slot, checking by its prefixed name.
+
+    Args:
+        action: The Action to check.
+        slot_name: The user-facing name of the slot.
+
+    Returns:
+        True if the slot exists, False otherwise.
+    """
     prefixed_name = _get_prefixed_slot_name(slot_name)
     return prefixed_name in action.slots
 
 def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.types.ActionSlot:
-    """Gets an ActionSlot by name from an Action, or creates it if it doesn't exist."""
+    """Gets a slot from an action, or creates it if it doesn't exist.
+
+    Handles the Blender API nuance where the key for the slot in the collection
+    is automatically prefixed based on its `id_type`.
+
+    Args:
+        action: The action to get the slot from.
+        slot_name: The desired user-facing name for the slot.
+    
+    Returns:
+        The found or created ActionSlot.
+    """
     prefixed_name = _get_prefixed_slot_name(slot_name)
     slot = action.slots.get(prefixed_name)
     if not slot:
-        # Pass the UN-PREFIXED name to new(). Blender handles the prefixing.
+        # Pass the UN-PREFIXED name to new(). Blender handles creating the
+        # correct key (e.g., "OB" + slot_name) internally.
         slot = action.slots.new(name=slot_name, id_type='OBJECT')
     return slot
 
 def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> bpy.types.FCurve:
-    """
-    Gets or creates an F-Curve on an Action, targeted at a specific slot.
-    The F-Curve lives on the Action, and its data_path points to the slot.
+    """Gets or creates an F-Curve on an Action, targeted at a specific slot.
+
+    The F-Curve lives directly on the Action data-block. Its association with
+    a slot is defined by its `data_path`, which must be formatted as
+    'slots["PREFIXED_SLOT_NAME"].property'.
+
+    Args:
+        action: The Action to add the F-Curve to.
+        slot_name: The user-facing name of the slot to target.
+        data_path: The property to animate (e.g., "location").
+        index: The array index for vector properties (e.g., 0 for X).
+
+    Returns:
+        The found or created FCurve.
     """
     # Ensure the slot exists, so Blender knows how to resolve the data_path
     get_or_create_action_slot(action, slot_name)
@@ -389,7 +446,12 @@ def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: st
     return fcurve
 
 def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, float]]) -> None:
-    """Sets keyframes for an FCurve, clearing existing ones in the process."""
+    """Populates an F-Curve with keyframes and sets their interpolation to LINEAR.
+
+    Args:
+        fcurve: The F-Curve to modify.
+        keyframes: A list of (frame, value) tuples.
+    """
     fcurve.keyframe_points.clear()
     for frame, value in keyframes:
         kp = fcurve.keyframe_points.insert(frame, value)
@@ -397,7 +459,16 @@ def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, 
     fcurve.update()
 
 def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, slot_name: str) -> None:
-    """Assigns a shared Action and a specific ActionSlot to an object's animation_data."""
+    """Assigns a shared Action and a specific ActionSlot to an object.
+
+    This function ensures the object's animation data is set up to be driven
+    by a specific slot within a larger Action.
+
+    Args:
+        obj_ref: A reference to the object to assign the action to.
+        action: The Action containing the animation data.
+        slot_name: The user-facing name of the slot that should drive the object.
+    """
     obj = obj_ref._get_obj()
     if not obj:
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
@@ -412,31 +483,68 @@ def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, 
     obj.animation_data.action_slot = action.slots[prefixed_name]
 
 def get_children_of_object(obj_ref: "BlenderObjRef") -> List["BlenderObjRef"]:
-    """Returns a list of direct children objects of a given object."""
+    """Returns a list of direct children objects of a given object.
+
+    Args:
+        obj_ref: A reference to the parent object.
+
+    Returns:
+        A list of BlenderObjRef wrappers for the children.
+    """
     obj = obj_ref._get_obj()
     if not obj:
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     return [BlenderObjRef(child.name) for child in obj.children]
 
 def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
-    """Returns a Blender object by its name, wrapped in a BlenderObjRef."""
+    """Returns a Blender object by its name, wrapped in a BlenderObjRef.
+
+    Args:
+        name: The name of the object to find.
+
+    Returns:
+        A BlenderObjRef for the object, or None if not found.
+    """
     obj = bpy.data.objects.get(name)
     if obj:
         return BlenderObjRef(obj.name)
     return None
 
 def get_fcurve_from_action(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
-    """Gets an FCurve from an Action for a specific slot."""
+    """Gets an F-Curve from an Action targeted at a specific slot.
+
+    Args:
+        action: The Action to search within.
+        slot_name: The user-facing name of the slot the F-Curve targets.
+        data_path: The property animated by the F-Curve (e.g., "location").
+        index: The array index for vector properties.
+
+    Returns:
+        The found F-Curve, or None if it does not exist.
+    """
     prefixed_slot_name = _get_prefixed_slot_name(slot_name)
     slotted_data_path = f'slots["{prefixed_slot_name}"].{data_path}'
     return action.fcurves.find(slotted_data_path, index=index)
 
 def get_scene_frame_range() -> Tuple[int, int]:
-    """Returns the start and end frame of the current scene."""
+    """Returns the start and end frame of the current scene.
+
+    Returns:
+        A tuple containing the start and end frame numbers.
+    """
     return bpy.context.scene.frame_start, bpy.context.scene.frame_end
 
 def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> np.ndarray:
-    """Samples an FCurve over a given frame range."""
+    """Samples an F-Curve's values over a given frame range.
+
+    Args:
+        fcurve: The F-Curve to sample.
+        start_frame: The first frame to sample (inclusive).
+        end_frame: The last frame to sample (inclusive).
+
+    Returns:
+        A NumPy array of the evaluated F-Curve values for each frame.
+    """
     frames = np.arange(start_frame, end_frame + 1)
     values = np.array([fcurve.evaluate(f) for f in frames])
     return values
