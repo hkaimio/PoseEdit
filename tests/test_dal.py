@@ -220,3 +220,196 @@ class TestDalBlender:
         # as it doesn't take a default value. Blender's .get() method does.
         # If a default value parameter is added to dal.get_custom_property, this test would be relevant.
         pass
+
+    def test_get_or_create_action(self):
+        action_name = "TestAction"
+        # Ensure action doesn't exist
+        assert bpy.data.actions.get(action_name) is None
+        
+        # Create action
+        action1 = dal.get_or_create_action(action_name)
+        assert action1 is not None
+        assert action1.name == action_name
+        assert action_name in bpy.data.actions
+
+        # Get existing action
+        action2 = dal.get_or_create_action(action_name)
+        assert action2 == action1
+
+        # Clean up
+        bpy.data.actions.remove(action1)
+
+    def test_action_slot_functions(self):
+        action = dal.get_or_create_action("SlotTest_Action")
+        slot_name = "TestSlot"
+
+        # action_has_slot
+        assert not dal.action_has_slot(action, slot_name)
+        
+        # get_or_create_action_slot
+        slot1 = dal.get_or_create_action_slot(action, slot_name)
+        assert slot1 is not None
+        assert slot1.name == slot_name
+        assert dal.action_has_slot(action, slot_name)
+
+        # Get existing slot
+        slot2 = dal.get_or_create_action_slot(action, slot_name)
+        assert slot1 == slot2
+
+        # Clean up
+        bpy.data.actions.remove(action)
+
+    def test_action_strip_layer_fcurve_creation(self):
+        action = dal.get_or_create_action("HierarchyTest_Action")
+        slot = dal.get_or_create_action_slot(action, "TestSlot")
+        strip_name = "TestStrip"
+        layer_name = "TestLayer"
+        data_path = "location"
+        
+        # get_or_create_action_strip
+        strip = dal.get_or_create_action_strip(slot, strip_name)
+        assert strip is not None
+        assert strip.name == strip_name
+
+        # get_or_create_action_layer
+        layer = dal.get_or_create_action_layer(strip, layer_name)
+        assert layer is not None
+        assert layer.name == layer_name
+
+        # get_or_create_fcurve
+        fcurve = dal.get_or_create_fcurve(layer, data_path, index=0)
+        assert fcurve is not None
+        assert fcurve.data_path == data_path
+        assert fcurve.array_index == 0
+
+        # get existing fcurve
+        fcurve2 = dal.get_or_create_fcurve(layer, data_path, index=0)
+        assert fcurve == fcurve2
+
+        # Clean up
+        bpy.data.actions.remove(action)
+
+    def test_set_fcurve_keyframes(self):
+        action = dal.get_or_create_action("KeyframeTest_Action")
+        slot = dal.get_or_create_action_slot(action, "TestSlot")
+        strip = dal.get_or_create_action_strip(slot, "TestStrip")
+        layer = dal.get_or_create_action_layer(strip, "TestLayer")
+        fcurve = dal.get_or_create_fcurve(layer, "location", index=0)
+
+        keyframes = [(1.0, 10.0), (10.0, 20.0), (20.0, 5.0)]
+        dal.set_fcurve_keyframes(fcurve, keyframes)
+
+        assert len(fcurve.keyframe_points) == len(keyframes)
+        for i, (frame, value) in enumerate(keyframes):
+            kp = fcurve.keyframe_points[i]
+            assert kp.co.x == pytest.approx(frame)
+            assert kp.co.y == pytest.approx(value)
+
+        # Clean up
+        bpy.data.actions.remove(action)
+
+    def test_assign_action_to_object(self, blender_obj_ref):
+        obj = blender_obj_ref._get_obj()
+        action = dal.get_or_create_action("AssignActionTest")
+        slot_name = "TestSlot"
+        dal.get_or_create_action_slot(action, slot_name)
+
+        dal.assign_action_to_object(blender_obj_ref, action, slot_name)
+
+        assert obj.animation_data is not None
+        assert obj.animation_data.action == action
+        assert obj.animation_data.action_slot is not None
+        assert obj.animation_data.action_slot.name == slot_name
+
+        # Clean up
+        bpy.data.actions.remove(action)
+
+    def test_get_children_of_object(self, blender_parent_obj):
+        parent_ref = dal.BlenderObjRef(blender_parent_obj.name)
+        
+        # Create children
+        child1 = dal.create_empty("Child1", parent_obj=parent_ref)
+        child2 = dal.create_empty("Child2", parent_obj=parent_ref)
+
+        children_refs = dal.get_children_of_object(parent_ref)
+        
+        assert len(children_refs) == 2
+        child_names = [ref._id for ref in children_refs]
+        assert child1._id in child_names
+        assert child2._id in child_names
+
+    def test_get_object_by_name(self):
+        obj_name = "FindMe"
+        dal.create_empty(obj_name)
+
+        obj_ref = dal.get_object_by_name(obj_name)
+        assert obj_ref is not None
+        assert obj_ref._id == obj_name
+        assert obj_ref._get_obj() is not None
+
+        non_existent_ref = dal.get_object_by_name("DoesNotExist")
+        assert non_existent_ref is None
+
+    def test_get_fcurve_from_action_slot(self):
+        action = dal.get_or_create_action("GetFCurveTest")
+        slot = dal.get_or_create_action_slot(action, "TestSlot")
+        strip = dal.get_or_create_action_strip(slot, "TestStrip")
+        layer = dal.get_or_create_action_layer(strip, "TestLayer")
+        fcurve = dal.get_or_create_fcurve(layer, "location", index=1)
+
+        retrieved_fcurve = dal.get_fcurve_from_action_slot(slot, "location", index=1)
+        assert retrieved_fcurve == fcurve
+
+        # Test non-existent
+        assert dal.get_fcurve_from_action_slot(slot, "location", index=2) is None
+
+        # Clean up
+        bpy.data.actions.remove(action)
+
+    def test_get_scene_frame_range(self):
+        bpy.context.scene.frame_start = 10
+        bpy.context.scene.frame_end = 150
+        start, end = dal.get_scene_frame_range()
+        assert start == 10
+        assert end == 150
+
+    def test_sample_fcurve(self):
+        # This requires numpy
+        import numpy as np
+
+        action = dal.get_or_create_action("SampleTest")
+        slot = dal.get_or_create_action_slot(action, "TestSlot")
+        strip = dal.get_or_create_action_strip(slot, "TestStrip")
+        layer = dal.get_or_create_action_layer(strip, "TestLayer")
+        fcurve = dal.get_or_create_fcurve(layer, "location", index=0)
+        
+        keyframes = [(0, 0), (10, 10)]
+        dal.set_fcurve_keyframes(fcurve, keyframes)
+
+        start_frame, end_frame = 0, 10
+        sampled_data = dal.sample_fcurve(fcurve, start_frame, end_frame)
+        
+        assert isinstance(sampled_data, np.ndarray)
+        assert len(sampled_data) == 11
+        expected = np.arange(0.0, 11.0)
+        assert np.allclose(sampled_data, expected)
+
+        # Clean up
+        bpy.data.actions.remove(action)
+
+    def test_get_or_create_object(self):
+        obj_name = "TestGOC"
+        collection_name = "TestGOC_Collection"
+
+        # Create new object and collection
+        obj_ref = dal.get_or_create_object(obj_name, 'EMPTY', collection_name)
+        assert obj_ref._id == obj_name
+        obj = obj_ref._get_obj()
+        assert obj is not None
+        assert obj.name == obj_name
+        assert collection_name in bpy.data.collections
+        assert obj.name in bpy.data.collections[collection_name].objects
+
+        # Get existing object
+        obj_ref2 = dal.get_or_create_object(obj_name, 'EMPTY', collection_name)
+        assert obj_ref2._id == obj_ref._id

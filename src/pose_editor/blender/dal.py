@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from typing import Generic, List, TypeVar
+from typing import Generic, List, TypeVar, Optional, Tuple, Any
+import numpy as np
 import bpy
 from . import drivers # Import the new drivers module
 
@@ -319,3 +320,121 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
     var_quality_hide.targets[0].data_path = '["quality"]'
 
     return BlenderObjRef(marker_obj.name)
+
+def get_or_create_object(name: str, obj_type: str, collection_name: Optional[str] = None) -> "BlenderObjRef":
+    """Gets an object by name, or creates it if it doesn't exist."""
+    obj = bpy.data.objects.get(name)
+    if not obj:
+        if obj_type == 'EMPTY':
+            obj = bpy.data.objects.new(name, None)
+        # Add other object types as needed
+        else:
+            raise NotImplementedError(f"Object creation for type '{obj_type}' is not implemented.")
+
+        if collection_name:
+            target_collection = bpy.data.collections.get(collection_name)
+            if not target_collection:
+                target_collection = bpy.data.collections.new(collection_name)
+                bpy.context.scene.collection.children.link(target_collection)
+            
+            # Unlink from default scene collection if linking to a specific one
+            if obj.name in bpy.context.scene.collection.objects:
+                bpy.context.scene.collection.objects.unlink(obj)
+            target_collection.objects.link(obj)
+        else:
+            bpy.context.scene.collection.objects.link(obj)
+
+    return BlenderObjRef(obj.name)
+
+def get_or_create_action(action_name: str) -> bpy.types.Action:
+    """Gets an Action by name, or creates it if it doesn't exist."""
+    action = bpy.data.actions.get(action_name)
+    if not action:
+        action = bpy.data.actions.new(action_name)
+    return action
+
+def action_has_slot(action: bpy.types.Action, slot_name: str) -> bool:
+    """Checks if an Action has a specific slot."""
+    return slot_name in action.slots
+
+def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.types.ActionSlot:
+    """Gets an ActionSlot by name from an Action, or creates it if it doesn't exist."""
+    slot = action.slots.get(slot_name)
+    if not slot:
+        slot = action.slots.new(slot_name)
+    return slot
+
+def get_or_create_action_strip(slot: bpy.types.ActionSlot, strip_name: str) -> bpy.types.ActionStrip:
+    """Gets an ActionStrip by name from an ActionSlot, or creates it if it doesn't exist."""
+    strip = slot.strips.get(strip_name)
+    if not strip:
+        strip = slot.strips.new(strip_name, 0)
+    return strip
+
+def get_or_create_action_layer(strip: bpy.types.ActionStrip, layer_name: str) -> bpy.types.ActionLayer:
+    """Gets an ActionLayer by name from an ActionStrip, or creates it if it doesn't exist."""
+    layer = strip.layers.get(layer_name)
+    if not layer:
+        layer = strip.layers.new(layer_name)
+    return layer
+
+def get_or_create_fcurve(layer: bpy.types.ActionLayer, data_path: str, index: int = -1) -> bpy.types.FCurve:
+    """Gets an FCurve from an ActionLayer, or creates it if it doesn't exist."""
+    fcurve = layer.fcurves.find(data_path, index=index)
+    if not fcurve:
+        fcurve = layer.fcurves.new(data_path, index=index)
+    return fcurve
+
+def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, float]]) -> None:
+    """Sets keyframes for an FCurve, clearing existing ones in the process."""
+    fcurve.keyframe_points.clear()
+    for frame, value in keyframes:
+        fcurve.keyframe_points.insert(frame, value)
+    fcurve.update()
+
+def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, slot_name: str) -> None:
+    """Assigns a shared Action and a specific ActionSlot to an object's animation_data."""
+    obj = obj_ref._get_obj()
+    if not obj:
+        raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
+    if not obj.animation_data:
+        obj.animation_data_create()
+    obj.animation_data.action = action
+    if slot_name in action.slots:
+        obj.animation_data.action_slot = action.slots[slot_name]
+    else:
+        raise ValueError(f"Slot '{slot_name}' not found in action '{action.name}'")
+
+def get_children_of_object(obj_ref: "BlenderObjRef") -> List["BlenderObjRef"]:
+    """Returns a list of direct children objects of a given object."""
+    obj = obj_ref._get_obj()
+    if not obj:
+        raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
+    return [BlenderObjRef(child.name) for child in obj.children]
+
+def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
+    """Returns a Blender object by its name, wrapped in a BlenderObjRef."""
+    obj = bpy.data.objects.get(name)
+    if obj:
+        return BlenderObjRef(obj.name)
+    return None
+
+def get_fcurve_from_action_slot(slot: bpy.types.ActionSlot, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
+    """Gets an FCurve from an ActionSlot's first strip and layer."""
+    if not slot.strips:
+        return None
+    strip = slot.strips[0] # Assuming a single strip
+    if not strip.layers:
+        return None
+    layer = strip.layers[0] # Assuming a single layer
+    return layer.fcurves.find(data_path, index=index)
+
+def get_scene_frame_range() -> Tuple[int, int]:
+    """Returns the start and end frame of the current scene."""
+    return bpy.context.scene.frame_start, bpy.context.scene.frame_end
+
+def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> np.ndarray:
+    """Samples an FCurve over a given frame range."""
+    frames = np.arange(start_frame, end_frame + 1)
+    values = np.array([fcurve.evaluate(f) for f in frames])
+    return values
