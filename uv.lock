@@ -33,7 +33,7 @@ wheels = [
 
 [[package]]
 name = "bpy"
-version = "4.2.0"
+version = "4.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cython" },
@@ -42,10 +42,10 @@ dependencies = [
     { name = "zstandard" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/5a/d085d433ad26687d7ba5be235c57679780a3b41316cd7ece1ee65694ebad/bpy-4.2.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e6e8857c9f483d42f5388642601080ad3e7488970cbc9e59efeedf4a8c26c90b", size = 207901162 },
-    { url = "https://files.pythonhosted.org/packages/39/03/579ec8a0d592424bd5743138ff40f2eca1944e427546721cfff091dbe730/bpy-4.2.0-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:4fd0e9872dceb37209d298ccbe77e6c3d0421501ef71b464dde22d09607966ec", size = 220963874 },
-    { url = "https://files.pythonhosted.org/packages/0b/bc/5245f98dafa39166a4d4701d64077d281a36110e780011de5c38135089aa/bpy-4.2.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:a8217c2bd7b3424d1f51ce0698c0bf65439de352f7f6ed7b9942e2a9e5eb121b", size = 519384061 },
-    { url = "https://files.pythonhosted.org/packages/c4/b0/6f18776208e13acb9bdbf3b5df9db9de42b09ab096aae68b171db422cccb/bpy-4.2.0-cp311-cp311-win_amd64.whl", hash = "sha256:26ce6210deb8316816938cb1c62c7fd257a8ef38d0c20b9f031a7a47a1492cac", size = 315442011 },
+    { url = "https://files.pythonhosted.org/packages/05/7e/d54b46e9d70898a717bfd817d797a2130f18a3717643110f1730f8337531/bpy-4.5.0-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:94321c8ede518910412f8bb8f147edf96991cd160f7d28060d9a6e53ef26913f", size = 235113657 },
+    { url = "https://files.pythonhosted.org/packages/74/59/28304b38bc038844baa167d358221dd477daff53eaf57dac3dd773d149af/bpy-4.5.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:666c9355869eb7025a3f771339f7871f55430ce89491a505d48dc96477430a8c", size = 372989706 },
+    { url = "https://files.pythonhosted.org/packages/13/fa/6eec79be7b24b642736536e4a7433682d06ab7caaa5897638619290b131a/bpy-4.5.0-cp311-cp311-win_amd64.whl", hash = "sha256:073ae3d6ab6ad7464b2240ef9e371666c8ffd7cb3e9c09e281c08eaa09b674a5", size = 326550429 },
+    { url = "https://files.pythonhosted.org/packages/1d/10/d9359c86793042c0a72e1084ba19ddf9b6af06e6d2c0015e5a766ac6a835/bpy-4.5.0-cp311-cp311-win_arm64.whl", hash = "sha256:1372583229104d7edc5e2ca27e506b1ad6c4c27996ae077348935a55cfcb5260", size = 194057457 },
 ]
 
 [[package]]
@@ -269,15 +269,23 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "bpy" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "bpy", marker = "extra == 'dev'", specifier = "==4.2.0" },
+    { name = "bpy", marker = "extra == 'dev'", specifier = "==4.5.0" },
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "reuse", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "bpy", specifier = "==4.5.0" }]
 
 [[package]]
 name = "pygments"
