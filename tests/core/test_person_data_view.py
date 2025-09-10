@@ -43,10 +43,11 @@ class TestPersonDataView:
 
         # Arrange
         view_name = "PV.Test.cam1"
+        marker_color = (0.1, 0.2, 0.3, 1.0) # Example color
         mock_dal.get_or_create_object.return_value = mock_blender_obj_ref
 
         # Act
-        view = PersonDataView(view_name, mock_skeleton)
+        view = PersonDataView(view_name, mock_skeleton, color=marker_color)
 
         # Assert
         # Check that the root object was created
@@ -61,14 +62,15 @@ class TestPersonDataView:
             mock_blender_obj_ref, mock_dal.SKELETON, mock_skeleton._skeleton.name
         )
 
-        # Check that child marker objects were created
+        # Check that child marker objects were created using dal.create_marker
         expected_marker_calls = [
-            call(name="Nose", obj_type='EMPTY', parent=mock_blender_obj_ref),
-            call(name="LEye", obj_type='EMPTY', parent=mock_blender_obj_ref),
+            call(parent=mock_blender_obj_ref, name="Nose", color=marker_color),
+            call(parent=mock_blender_obj_ref, name="LEye", color=marker_color),
         ]
-        mock_dal.get_or_create_object.assert_has_calls(expected_marker_calls, any_order=True)
-        # Total calls: 1 for root + 2 for markers
-        assert mock_dal.get_or_create_object.call_count == 3
+        mock_dal.create_marker.assert_has_calls(expected_marker_calls, any_order=True)
+        # Total calls: 1 for root (get_or_create_object) + 2 for markers (create_marker)
+        assert mock_dal.get_or_create_object.call_count == 1
+        assert mock_dal.create_marker.call_count == 2
 
     @patch('pose_editor.core.person_data_view.dal')
     def test_connect_to_series(self, mock_dal, mock_skeleton, mock_marker_data):
@@ -77,7 +79,8 @@ class TestPersonDataView:
 
         # Arrange
         view_name = "PV.Test.cam1"
-        view = PersonDataView(view_name, mock_skeleton)
+        marker_color = (0.1, 0.2, 0.3, 1.0)
+        view = PersonDataView(view_name, mock_skeleton, color=marker_color)
 
         # Act
         view.connect_to_series(mock_marker_data)
@@ -92,8 +95,9 @@ class TestPersonDataView:
 
         # Arrange
         view_name = "PV.Test.cam1"
+        marker_color = (0.1, 0.2, 0.3, 1.0)
         mock_dal.get_or_create_object.return_value = mock_blender_obj_ref
-        view = PersonDataView(view_name, mock_skeleton)
+        view = PersonDataView(view_name, mock_skeleton, color=marker_color)
 
         mock_children = [MagicMock(), MagicMock()]
         mock_dal.get_children_of_object.return_value = mock_children

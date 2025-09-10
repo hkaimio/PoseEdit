@@ -16,7 +16,7 @@ class PersonDataView:
     which visually represent the animation data from a MarkerData series.
     """
 
-    def __init__(self, view_name: str, skeleton: SkeletonBase):
+    def __init__(self, view_name: str, skeleton: SkeletonBase, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)):
         """Initializes the PersonDataView.
 
         This finds or creates the necessary Blender objects for the view
@@ -26,9 +26,11 @@ class PersonDataView:
         Args:
             view_name: A unique name for this person view (e.g., "PV.Alice.cam1").
             skeleton: The skeleton definition to use for creating marker objects.
+            color: The color for the markers (RGBA tuple).
         """
         self.view_name = view_name
         self.skeleton = skeleton
+        self.color = color
 
         # Find or create the root Empty for this view
         self.view_root_object = dal.get_or_create_object(
@@ -42,16 +44,16 @@ class PersonDataView:
         self._create_marker_objects()
 
     def _create_marker_objects(self):
-        """Creates an Empty object for each joint in the skeleton."""
+        """Creates a marker object for each joint in the skeleton."""
         if self.skeleton is None or self.skeleton._skeleton is None:
             return
 
         for node in self.skeleton._skeleton.descendants:
             marker_name = node.name
-            dal.get_or_create_object(
+            dal.create_marker(
+                parent=self.view_root_object,
                 name=marker_name,
-                obj_type='EMPTY',
-                parent=self.view_root_object
+                color=self.color
             )
 
     def connect_to_series(self, marker_data: MarkerData):
