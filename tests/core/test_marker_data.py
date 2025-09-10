@@ -110,36 +110,35 @@ class TestMarkerData:
         """Test that apply_to_view correctly assigns the action to child objects."""
         from pose_editor.core.marker_data import MarkerData
         from pose_editor.blender.dal import BlenderObjRef # Import BlenderObjRef
+        from pose_editor.core.person_data_view import PersonDataView # Import PersonDataView
 
         # Arrange
         mock_dal.get_or_create_action.return_value = mock_action
         md = MarkerData("apply_view_series")
     
-        view_root_name = "PV.Test.cam1"
-        mock_dal.get_object_by_name.return_value = mock_blender_obj_ref
-    
-        # Create mock children for the view root as BlenderObjRef instances
-        child1_ref_dal = BlenderObjRef("Nose")
-        child2_ref_dal = BlenderObjRef("LEye")
+        # Create a mock PersonDataView object
+        mock_person_data_view = MagicMock(spec=PersonDataView)
         
-        # Mock the _get_obj method of these BlenderObjRef instances if needed
-        # For this test, we only care about their 'name' property, which is _id
-        
-        mock_dal.get_children_of_object.return_value = [child1_ref_dal, child2_ref_dal]
+        # Mock the get_marker_objects method to return a dictionary of BlenderObjRef instances
+        mock_nose_marker_ref = BlenderObjRef("Nose_marker_obj")
+        mock_leye_marker_ref = BlenderObjRef("LEye_marker_obj")
+        mock_person_data_view.get_marker_objects.return_value = {
+            "Nose": mock_nose_marker_ref,
+            "LEye": mock_leye_marker_ref
+        }
     
         # Simulate that the action has slots for these children
         mock_dal.action_has_slot.return_value = True
     
         # Act
-        md.apply_to_view(view_root_name)
+        md.apply_to_view(mock_person_data_view)
     
         # Assert
-        mock_dal.get_object_by_name.assert_called_once_with(view_root_name)
-        mock_dal.get_children_of_object.assert_called_once_with(mock_blender_obj_ref)
+        mock_person_data_view.get_marker_objects.assert_called_once()
     
         # Check that assign_action_to_object was called for each child
         expected_calls = [
-            call(child1_ref_dal, mock_action, "Nose"), # Use the BlenderObjRef instances
-            call(child2_ref_dal, mock_action, "LEye")
+            call(mock_nose_marker_ref, mock_action, "Nose"),
+            call(mock_leye_marker_ref, mock_action, "LEye")
         ]
         mock_dal.assign_action_to_object.assert_has_calls(expected_calls, any_order=True)

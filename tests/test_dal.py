@@ -77,6 +77,8 @@ class TestDalBlender:
         assert marker_obj.name == f"{blender_parent_obj.name}_{marker_name}"
         assert marker_obj.type == 'MESH'
         assert marker_obj.data.materials[0].name == f"MarkerMaterial_{blender_parent_obj.name}_{marker_name}"
+        # Assert that the MARKER_ROLE custom property is set
+        assert dal.get_custom_property(result_ref, dal.MARKER_ROLE) == marker_name
         
     def test_set_and_get_custom_property_string(self, blender_obj_ref):
         prop = dal.CustomProperty[str]("my_string_prop")

@@ -31,6 +31,7 @@ class PersonDataView:
         self.view_name = view_name
         self.skeleton = skeleton
         self.color = color
+        self._marker_objects_by_role = {} # New dictionary to store markers by role
 
         # Find or create the root Empty for this view
         self.view_root_object = dal.get_or_create_object(
@@ -42,6 +43,8 @@ class PersonDataView:
 
         # Create marker objects based on the skeleton definition
         self._create_marker_objects()
+        # Populate the dictionary after creating markers
+        self._populate_marker_objects_by_role()
 
     def _create_marker_objects(self):
         """Creates a marker object for each joint in the skeleton."""
@@ -56,6 +59,14 @@ class PersonDataView:
                 color=self.color
             )
 
+    def _populate_marker_objects_by_role(self):
+        """Populates the _marker_objects_by_role dictionary by reading custom properties."""
+        self._marker_objects_by_role = {}
+        for marker_obj_ref in dal.get_children_of_object(self.view_root_object):
+            marker_role = dal.get_custom_property(marker_obj_ref, dal.MARKER_ROLE)
+            if marker_role:
+                self._marker_objects_by_role[marker_role] = marker_obj_ref
+
     def connect_to_series(self, marker_data: MarkerData):
         """Connects this view to a MarkerData series.
 
@@ -67,6 +78,6 @@ class PersonDataView:
         """
         marker_data.apply_to_view(self.view_name)
 
-    def get_marker_objects(self) -> List[any]:
-        """Returns a list of all marker objects in this view."""
-        return dal.get_children_of_object(self.view_root_object)
+    def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
+        """Returns a dictionary of marker objects in this view, keyed by their role."""
+        return self._marker_objects_by_role

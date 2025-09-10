@@ -86,6 +86,7 @@ CAMERA_Y_OFFSET = CustomProperty[float]("camera_y_offset")
 SERIES_NAME = CustomProperty[str]("series_name")
 SKELETON = CustomProperty[str]("skeleton")
 ACTION_NAME = CustomProperty[str]("action_name")
+MARKER_ROLE = CustomProperty[str]("marker_role")
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
     """
@@ -242,6 +243,9 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     # Add "quality" custom property
     marker_obj["quality"] = 1.0
+
+    # Store the marker role as a custom property
+    set_custom_property(BlenderObjRef(marker_obj.name), MARKER_ROLE, name)
 
     # Store original color components as custom properties for drivers
     marker_obj["_original_color_r"] = color[0]

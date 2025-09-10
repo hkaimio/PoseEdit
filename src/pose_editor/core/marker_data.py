@@ -105,24 +105,20 @@ class MarkerData:
             return
         dal.set_fcurves_from_numpy(self.action, columns, start_frame, data)
 
-    def apply_to_view(self, view_root_object_name: str):
+    def apply_to_view(self, person_data_view: "PersonDataView"):
         """Applies this data series' Action to a Person View hierarchy.
 
-        This method iterates through all child marker objects of the view_root.
+        This method iterates through all marker objects in the PersonDataView.
         For each marker, it assigns the shared Action and sets the marker-specific
         Action Slot to activate the correct animation.
 
         Args:
-            view_root_object_name: The name of the root Empty of the Person View
-                                   (e.g., 'PV.Alice.cam1').
+            person_data_view: The PersonDataView object containing the marker objects.
         """
-        view_root = dal.get_object_by_name(view_root_object_name)
-        if self.action is None or view_root is None:
+        if self.action is None:
             # In a real application, might want to log a warning here
             return
 
-        for marker_obj in dal.get_children_of_object(view_root):
-            # The marker object's name should correspond to the slot name
-            marker_name = marker_obj._id
-            if dal.action_has_slot(self.action, marker_name):
-                dal.assign_action_to_object(marker_obj, self.action, marker_name)
+        for marker_role, marker_obj_ref in person_data_view.get_marker_objects().items():
+            if dal.action_has_slot(self.action, marker_role):
+                dal.assign_action_to_object(marker_obj_ref, self.action, marker_role)
