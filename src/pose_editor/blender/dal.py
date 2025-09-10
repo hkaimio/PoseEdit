@@ -555,6 +555,21 @@ def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
         return BlenderObjRef(obj.name)
     return None
 
+def find_object_by_property(prop: CustomProperty[T], value: T) -> Optional["BlenderObjRef"]:
+    """Finds the first object in the scene with a given custom property value.
+
+    Args:
+        prop: The CustomProperty to search for.
+        value: The value the property should have.
+
+    Returns:
+        A BlenderObjRef for the found object, or None.
+    """
+    for obj in bpy.context.scene.objects:
+        if prop._prop_name in obj and obj[prop._prop_name] == value:
+            return BlenderObjRef(obj.name)
+    return None
+
 def get_fcurve_from_action(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
     """Gets an F-Curve from the correct channelbag for a slot.
 

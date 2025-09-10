@@ -1,5 +1,8 @@
 from typing import List, Dict
-from ..blender.dal import BlenderObjRef, create_empty, create_marker, set_fcurve_from_data, add_keyframe, set_custom_property, CAMERA_X_FACTOR, CAMERA_Y_FACTOR, CAMERA_X_OFFSET, CAMERA_Y_OFFSET
+from ..blender.dal import (BlenderObjRef, create_empty, create_marker, 
+                            add_keyframe, set_custom_property, 
+                            CAMERA_X_FACTOR, CAMERA_Y_FACTOR, 
+                            CAMERA_X_OFFSET, CAMERA_Y_OFFSET, SERIES_NAME)
 from .person_data_series import RawPersonData
 from pathlib import Path
 import json
@@ -68,9 +71,9 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     # Create main camera view empty
     camera_view_empty_name = f"View_{name}"
     camera_view._obj = create_empty(camera_view_empty_name)
+    set_custom_property(camera_view._obj, SERIES_NAME, name)
 
     # Calculate transformation factors and offsets
-    # Determine the larger dimension to maintain aspect ratio
     if VIDEO_WIDTH > VIDEO_HEIGHT:
         scale_factor = BLENDER_TARGET_WIDTH / VIDEO_WIDTH
     else:
@@ -79,24 +82,20 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     xfactor = scale_factor
     yfactor = -scale_factor # Negative for Y-axis inversion
 
-    # Calculate scaled dimensions in Blender units
     scaled_blender_width = VIDEO_WIDTH * scale_factor
     scaled_blender_height = VIDEO_HEIGHT * scale_factor
 
-    # Calculate offsets to center the video in Blender
     xoffset = -scaled_blender_width / 2
-    yoffset = scaled_blender_height / 2 # Top of video (y=0) maps to positive Y in Blender
+    yoffset = scaled_blender_height / 2
 
-    # Store these as custom properties on the camera view object
+    # Store transformation factors as custom properties
     set_custom_property(camera_view._obj, CAMERA_X_FACTOR, xfactor)
     set_custom_property(camera_view._obj, CAMERA_Y_FACTOR, yfactor)
     set_custom_property(camera_view._obj, CAMERA_X_OFFSET, xoffset)
     set_custom_property(camera_view._obj, CAMERA_Y_OFFSET, yoffset)
 
-    # Use the provided skeleton object
     marker_ids = {node.id: node.name for node in PreOrderIter(skeleton_obj._skeleton) if node.id is not None}
 
-    # Process JSON files
     json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith('.json')])
     
     pose_data_by_person_and_frame: Dict[int, Dict[int, List[float]]] = {}
@@ -107,7 +106,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
         try:
             frame_num = _extract_frame_number(filename)
         except ValueError:
-            continue # Skip files that don't have a valid frame number
+            continue
         min_frame = min(min_frame, frame_num)
         max_frame = max(max_frame, frame_num)
 
@@ -121,67 +120,54 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                     pose_data_by_person_and_frame[person_idx] = {}
                 pose_data_by_person_and_frame[person_idx][frame_num] = person_data["pose_keypoints_2d"]
 
-    # Create RawPersonData objects and Blender markers
     for person_idx, frames_data in pose_data_by_person_and_frame.items():
-        print(f"Creating RawPersonData for person {person_idx}  of {len(pose_data_by_person_and_frame)}  with {len(frames_data)} frames")
-        raw_person_data = RawPersonData(create_empty(f"{name}_Person{person_idx}", parent_obj=camera_view._obj))
+        raw_person_obj = create_empty(f"{name}_Person{person_idx}", parent_obj=camera_view._obj)
+        set_custom_property(raw_person_obj, SERIES_NAME, f"{name}_Person{person_idx}")
+        raw_person_data = RawPersonData(raw_person_obj)
         raw_person_data._skeleton = skeleton_obj._skeleton
         camera_view._raw_person_data.append(raw_person_data)
 
-        # Prepare data for F-curves
+        # Apply transformation to the parent object
+        raw_person_obj._get_obj().scale = (xfactor, yfactor, 1)
+        raw_person_obj._get_obj().location = (xoffset, yoffset, 0)
+
         marker_fcurve_data: Dict[str, Dict[str, List[tuple[int, List[float]]]]] = {}
         for marker_name in marker_ids.values():
             marker_fcurve_data[marker_name] = {
                 'location': [],
-                '["quality"]': []
+                '["quality"]' : []
             }
 
         if min_frame not in frames_data:
-            # Set quality to -1 to indicate that there is no data
             for marker_name in marker_fcurve_data.keys():
                 marker_fcurve_data[marker_name]['["quality"]'].append((min_frame, [-1.0]))
 
         for frame_num in range(min_frame, max_frame + 1):
             if frame_num not in frames_data:
-                # Handle missing frames if necessary, e.g., interpolate or skip
                 continue
             
             keypoints = frames_data[frame_num]
             for node_id, marker_name in marker_ids.items():
-                # Assuming keypoints are [x1, y1, l1, x2, y2, l2, ...]
-                # and node_id corresponds to the 0-indexed marker in the flattened array
-                # So, actual index in keypoints array is node_id * 3
                 idx = node_id * 3
                 if idx + 2 < len(keypoints):
                     x = keypoints[idx]
                     y = keypoints[idx + 1]
                     likelihood = keypoints[idx + 2]
 
-                    # Apply transformation
-                    blender_x = x * xfactor + xoffset
-                    blender_y = y * yfactor + yoffset
-                    blender_z = 0.0 # 2D data
-
                     if math.isnan(x) or math.isnan(y):
                         marker_fcurve_data[marker_name]['["quality"]'].append((frame_num, [-1.0]))
                     else:
-                        marker_fcurve_data[marker_name]['location'].append((frame_num, [blender_x, blender_y, blender_z]))
+                        # Store raw pixel coordinates
+                        marker_fcurve_data[marker_name]['location'].append((frame_num, [x, y, 0.0]))
                         marker_fcurve_data[marker_name]['["quality"]'].append((frame_num, [likelihood]))
 
-        # Create marker objects and set F-curves
         for marker_name, fcurve_data in marker_fcurve_data.items():
-            # Find the corresponding skeleton node to get its parent for Blender object hierarchy
-            # This part needs refinement based on how you want to parent markers in Blender
-            # For now, parent all markers directly to the RawPersonData empty
-            marker_obj_ref = create_marker(raw_person_data._blenderObj, marker_name, (1.0, 1.0, 0.0, 1.0)) # Default color yellow
+            marker_obj_ref = create_marker(raw_person_data._blenderObj, marker_name, (1.0, 1.0, 0.0, 1.0))
             raw_person_data._markers[marker_name] = marker_obj_ref
 
             for data_path, keyframes in fcurve_data.items():
                 for i in range(len(keyframes)):
                     frame, values = keyframes[i]
                     add_keyframe(marker_obj_ref, frame, {data_path: values})
-                    
-
-    # TODO: Create video plane (optional for now)
 
     return camera_view

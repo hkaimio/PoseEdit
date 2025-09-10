@@ -212,22 +212,27 @@ This chapter details the implementation flow for the initial setup and 2D stitch
         actor User
         User->>UI Panel: Clicks 'Add Camera View'
         UI Panel->>Operator (PE_OT_AddCameraView): invoke() -> opens file browser
-        Operator (PE_OT_AddCameraView)->>Scene Builder: create_camera_view(name, video, pose_dir)
-        Scene Builder->>DAL: create_collection("View: <name>")
-        Scene Builder->>DAL: create_camera_with_video_bg(video_path)
-        Note right of Scene Builder: Load raw track data from JSONs
-        Scene Builder->>Core Facade: parse_raw_tracks(pose_dir)
-        Scene Builder->>Scene Builder: create_raw_track_objects(parsed_data)
-        loop for each raw track
-            Scene Builder->>DAL: create_armature(...)
-            Scene Builder->>DAL: create_fcurves_from_data(...)
+        Operator (PE_OT_AddCameraView)->>Core (camera_view.py): create_camera_view(name, video, pose_dir, skeleton)
+        Core (camera_view.py)->>DAL: create_empty("View: <name>")
+        Core (camera_view.py)->>DAL: set_custom_property(view_empty, SERIES_NAME, name)
+        Note right of Core (camera_view.py): Calculates coordinate transformation factors
+        Core (camera_view.py)->>DAL: set_custom_property(view_empty, "camera_x_factor", ...)
+        Note right of Core (camera_view.py): Loads and parses all raw pose data JSONs from the directory.
+        loop for each detected person
+            Core (camera_view.py)->>DAL: create_empty("<name>_Person<idx>")
+            Note right of Core (camera_view.py): Applies coordinate transformation to person empty's scale and location
+            Core (camera_view.py)->>DAL: set_custom_property(person_empty, SERIES_NAME, ...)
+            loop for each marker in skeleton
+                Core (camera_view.py)->>DAL: create_marker(...)
+                Note right of Core (camera_view.py): Adds keyframes with RAW pixel coordinates
+                Core (camera_view.py)->>DAL: add_keyframe(...)
+            end
         end
     ```
 -   **Interfaces:**
     -   `blender.operators.PE_OT_AddCameraView`: Has an `invoke` method for the file browser and an `execute` method to trigger the process.
-    -   `blender.scene_builder.create_camera_view()`: Orchestrates the creation of all necessary objects for a view.
-    -   `core.project_facade.parse_raw_tracks()`: A pure Python function to read and parse the JSON data files into a simple data structure.
-    -   `blender.dal`: Functions for creating cameras, collections, armatures, and populating their f-curves from data.
+    -   `core.camera_view.create_camera_view()`: Orchestrates the creation of all necessary objects and data processing for a view.
+    -   `blender.dal`: Various functions for creating objects, setting custom properties, and keyframing.
 
 ### 6.2.1. Raw Pose Data Format and Blender Mapping
 This section details the structure of the raw 2D pose data JSON files and how this data is mapped to Blender objects and properties.
@@ -248,47 +253,32 @@ Each JSON file represents a single frame and contains data for one or more perso
   ]
 }
 ```
--   `"version"`: (float) Version of the data format.
--   `"people"`: (array of objects) Contains data for each detected person in the frame.
-    -   `"person_id"`: (array of int) An identifier for the person. The order of persons in this array is consistent across all frames.
-    -   `"pose_keypoints_2d"`: (array of float) A flattened array of 2D marker data. Each marker has three values: `[X coordinate, Y coordinate, Likelihood]`.
-        -   **X, Y Coordinates:** Pixel coordinates from the top-left corner of the video frame.
-        -   **Likelihood:** A confidence score (0.0 to 1.0) for the detected marker.
 
 **Mapping to Blender Data**
 
 The raw 2D pose data is mapped to Blender objects and their properties as follows:
 
--   **Camera View Object:** A top-level Blender Empty object is created for each camera view (e.g., `View_cam_01`). This empty serves as the parent for all objects related to that specific camera view.
--   **Raw Person Data Object:** For each person detected in the raw data, a Blender Empty object is created as a child of the Camera View object (e.g., `View_cam_01_Person0`). This empty represents the raw 2D data for a single person within that camera view.
--   **Marker Spheres:** For each marker defined in the chosen skeleton (e.g., `HALPE_26`), a small UV sphere (Blender Mesh object) is created as a child of the Raw Person Data object.
-    -   **Location:** The `X` and `Y` coordinates from `pose_keypoints_2d` are converted from pixel space to Blender's 3D coordinate system and stored as F-curves on the marker sphere's `location.x` and `location.y` properties. The `Z` coordinate is typically set to 0 for 2D data.
-    -   **Quality (Likelihood):** The `Likelihood` value from `pose_keypoints_2d` is stored as an F-curve on a custom property named `"quality"` on the marker sphere. This property drives the marker's material color, allowing visual feedback on data quality.
-    -   **Material:** Each marker sphere is assigned a node-based material. The `quality` custom property drives a `Value` node, which feeds into a `ColorRamp` node. The `ColorRamp` is configured to show dark red for low quality (below 0.3), grey for medium quality (0.3 to 1.0), and the original marker color for high quality (1.0). This material is then connected to an `Emission` shader for visibility.
+-   **Camera View Object:** A top-level Blender Empty object is created for each camera view (e.g., `View_cam_01`). This empty is identified by a `SERIES_NAME` custom property holding the camera view's name.
+-   **Raw Person Data Object:** For each person detected in the raw data, a Blender Empty object is created as a child of the Camera View object (e.g., `cam1_Person0`). This empty is identified by its own `SERIES_NAME` custom property. The coordinate transformation from video space to Blender space is applied directly to the `scale` and `location` of this object.
+-   **Marker Spheres:** For each marker defined in the chosen skeleton, a small UV sphere is created as a child of the Raw Person Data object.
+    -   **Location:** The raw, untransformed `X` and `Y` pixel coordinates from `pose_keypoints_2d` are stored directly as F-curves on the marker sphere's `location.x` and `location.y` properties. The `Z` coordinate is set to 0.
+    -   **Quality (Likelihood):** The `Likelihood` value is stored as an F-curve on a custom property named `"quality"` on the marker sphere, which in turn drives the marker's material color for visual feedback.
 
-### 6.2.2. Coordinate Transformation and Custom Properties
-To correctly map 2D pixel coordinates (origin top-left, Y-down) to Blender's 3D coordinate system (origin center, Y-up), a transformation is applied. This transformation involves scaling and offsetting the X and Y coordinates.
+### 6.2.2. Coordinate Transformation
+To correctly display the 2D pixel coordinates (origin top-left, Y-down) in Blender's 3D coordinate system (origin center, Y-up), a non-destructive transformation is applied to the parent object of the markers (the Raw Person Data Object).
 
-The transformation factors and offsets are stored as custom properties on the main `CameraView` Blender Empty object (e.g., `View_cam_01`). These properties allow for mapping Blender coordinates back to pixel coordinates if needed.
+This is achieved by setting the `scale` and `location` of the parent object. The original pixel coordinates remain unchanged in the markers' F-curves.
 
--   **`camera_x_factor` (float):** The scaling factor for the X-axis. This is calculated to maintain the video's aspect ratio within a target Blender width.
--   **`camera_y_factor` (float):** The scaling factor for the Y-axis. This is negative to invert the Y-axis (pixel Y-down to Blender Y-up) and is calculated to maintain the video's aspect ratio.
--   **`camera_x_offset` (float):** The offset for the X-axis, used to center the transformed coordinates in Blender.
--   **`camera_y_offset` (float):** The offset for the Y-axis, used to center the transformed coordinates in Blender.
+The transformation factors are calculated as follows and stored as custom properties on the main Camera View Object for reference:
 
-**Transformation Formula:**
-`blender_x = pixel_x * camera_x_factor + camera_x_offset`
-`blender_y = pixel_y * camera_y_factor + camera_y_offset`
+-   **`camera_x_factor` (float):** The scaling factor for the X-axis.
+-   **`camera_y_factor` (float):** The scaling factor for the Y-axis (this is negative to invert the axis).
+-   **`camera_x_offset` (float):** The offset for the X-axis.
+-   **`camera_y_offset` (float):** The offset for the Y-axis.
 
-**Calculation Logic:**
-1.  A `scale_factor` is determined based on the larger dimension of the video (`VIDEO_WIDTH`, `VIDEO_HEIGHT`) and a predefined `BLENDER_TARGET_WIDTH` to ensure the video's aspect ratio is maintained.
-    `scale_factor = BLENDER_TARGET_WIDTH / max(VIDEO_WIDTH, VIDEO_HEIGHT)`
-2.  `camera_x_factor = scale_factor`
-3.  `camera_y_factor = -scale_factor` (negative for Y-axis inversion)
-4.  `scaled_blender_width = VIDEO_WIDTH * scale_factor`
-5.  `scaled_blender_height = VIDEO_HEIGHT * scale_factor`
-6.  `camera_x_offset = -scaled_blender_width / 2`
-7.  `camera_y_offset = scaled_blender_height / 2` (since pixel Y=0 maps to the top of the video, which corresponds to `scaled_blender_height / 2` in Blender's Y-up coordinate system).
+**Transformation Logic:**
+1.  The `scale` of the Raw Person Data Object is set to `(camera_x_factor, camera_y_factor, 1)`.
+2.  The `location` of the Raw Person Data Object is set to `(camera_x_offset, camera_y_offset, 0)`.
 
 **Skeleton Definition (`pose2sim/Pose2Sim/skeletons.py`)**
 The `pose_keypoints_2d` array's structure is determined by the chosen skeleton. For example, the `HALPE_26` skeleton defines the order and meaning of each `[X, Y, Likelihood]` triplet. The `id` attribute of each `anytree.Node` in the skeleton directly corresponds to its 0-based index in the `pose_keypoints_2d` array.
