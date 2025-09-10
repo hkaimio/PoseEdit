@@ -85,6 +85,26 @@ class MarkerData:
             # Set keyframes using DAL
             dal.set_fcurve_keyframes(fcurve, keyframes)
 
+    def set_animation_data_from_numpy(
+        self,
+        columns: List[Tuple[str, str, int]], # (marker_name, property, index)
+        start_frame: int,
+        data: np.ndarray
+    ):
+        """Writes animation data from a NumPy array into the Action's F-Curves.
+
+        This is a high-performance method that passes the entire data array
+        to the Data Access Layer for batch processing.
+
+        Args:
+            columns: A list of (marker_name, property, index) tuples describing each column.
+            start_frame: The starting frame for writing the animation data.
+            data: A NumPy array with shape (frames, columns).
+        """
+        if self.action is None:
+            return
+        dal.set_fcurves_from_numpy(self.action, columns, start_frame, data)
+
     def apply_to_view(self, view_root_object_name: str):
         """Applies this data series' Action to a Person View hierarchy.
 
@@ -103,6 +123,6 @@ class MarkerData:
 
         for marker_obj in dal.get_children_of_object(view_root):
             # The marker object's name should correspond to the slot name
-            marker_name = marker_obj.name
+            marker_name = marker_obj._id
             if dal.action_has_slot(self.action, marker_name):
                 dal.assign_action_to_object(marker_obj, self.action, marker_name)

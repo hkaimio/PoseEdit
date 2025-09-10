@@ -4,6 +4,7 @@
 
 import pytest
 import bpy
+import numpy as np
 
 from pose_editor.blender import dal
 
@@ -143,8 +144,7 @@ class TestDalBlender:
 
     def test_set_fcurve_keyframes(self):
         action = dal.get_or_create_action("KeyframeAction")
-        slot_name = "TestSlot"
-        fcurve = dal.get_or_create_fcurve(action, slot_name, "location", index=1)
+        fcurve = dal.get_or_create_fcurve(action, "TestSlot", "location", index=1)
 
         keyframes = [(1.0, 10.0), (10.0, 20.0), (20.0, 5.0)]
         dal.set_fcurve_keyframes(fcurve, keyframes)
@@ -154,6 +154,7 @@ class TestDalBlender:
             kp = fcurve.keyframe_points[i]
             assert kp.co.x == pytest.approx(frame)
             assert kp.co.y == pytest.approx(value)
+            assert kp.interpolation == 'LINEAR'
 
     def test_assign_action_to_object(self, blender_obj_ref):
         obj = blender_obj_ref._get_obj()
@@ -179,11 +180,20 @@ class TestDalBlender:
 
         assert dal.get_fcurve_from_action(action, slot_name, "location", index=0) is None
 
+    def test_get_or_create_object_with_parent(self, blender_parent_obj):
+        """Tests creating an object with a specified parent."""
+        child_name = "ChildObject"
+        parent_ref = dal.BlenderObjRef(blender_parent_obj.name)
+
+        child_ref = dal.get_or_create_object(child_name, 'EMPTY', parent=parent_ref)
+        child_obj = child_ref._get_obj()
+
+        assert child_obj is not None
+        assert child_obj.parent == blender_parent_obj
+
     def test_sample_fcurve(self):
-        import numpy as np
         action = dal.get_or_create_action("SampleAction")
-        slot_name = "TestSlot"
-        fcurve = dal.get_or_create_fcurve(action, slot_name, "location", index=0)
+        fcurve = dal.get_or_create_fcurve(action, "TestSlot", "location", index=0)
         
         keyframes = [(0, 0), (10, 10)]
         dal.set_fcurve_keyframes(fcurve, keyframes)
@@ -195,3 +205,65 @@ class TestDalBlender:
         assert len(sampled_data) == 11
         expected = np.arange(0.0, 11.0)
         assert np.allclose(sampled_data, expected)
+
+    def test_set_fcurves_from_numpy(self):
+        """Tests the optimized batch function for setting f-curves from numpy data."""
+        action = dal.get_or_create_action("NumpyBatchAction")
+        start_frame = 10
+        
+        # Define the columns and the numpy data array
+        columns = [
+            ("Slot1", "location", 0), # X
+            ("Slot1", "location", 1), # Y
+            ("Slot2", '["quality"]', -1) # Custom property
+        ]
+        data = np.array([
+            [1.0, 2.0, 0.9],  # Frame 10
+            [1.1, 2.2, 0.8],  # Frame 11
+            [np.nan, 2.4, 0.7], # Frame 12 (X is nan)
+            [1.3, np.nan, np.nan], # Frame 13 (Y and quality are nan)
+            [1.4, 2.8, 0.5]   # Frame 14
+        ])
+
+        # Call the function to test
+        dal.set_fcurves_from_numpy(action, columns, start_frame, data)
+
+        # --- Verification ---
+
+        # 1. Verify Slot1, location.x
+        fcurve_x = dal.get_fcurve_from_action(action, "Slot1", "location", 0)
+        assert fcurve_x is not None
+        assert len(fcurve_x.keyframe_points) == 4 # One frame was nan
+        assert fcurve_x.keyframe_points[0].co.x == 10
+        assert fcurve_x.keyframe_points[0].co.y == pytest.approx(1.0)
+        assert fcurve_x.keyframe_points[1].co.x == 11
+        assert fcurve_x.keyframe_points[1].co.y == pytest.approx(1.1)
+        assert fcurve_x.keyframe_points[2].co.x == 13
+        assert fcurve_x.keyframe_points[2].co.y == pytest.approx(1.3)
+        assert fcurve_x.keyframe_points[3].co.x == 14
+        assert fcurve_x.keyframe_points[3].co.y == pytest.approx(1.4)
+
+        # 2. Verify Slot1, location.y
+        fcurve_y = dal.get_fcurve_from_action(action, "Slot1", "location", 1)
+        assert fcurve_y is not None
+        assert len(fcurve_y.keyframe_points) == 4 # One frame was nan
+        assert fcurve_y.keyframe_points[0].co.x == 10
+        assert fcurve_y.keyframe_points[0].co.y == pytest.approx(2.0)
+        assert fcurve_y.keyframe_points[3].co.x == 14
+        assert fcurve_y.keyframe_points[3].co.y == pytest.approx(2.8)
+
+        # 3. Verify Slot2, quality
+        fcurve_q = dal.get_fcurve_from_action(action, "Slot2", '["quality"]', -1)
+        assert fcurve_q is not None
+        assert len(fcurve_q.keyframe_points) == 4 # One frame was nan
+        assert fcurve_q.keyframe_points[0].co.x == 10
+        assert fcurve_q.keyframe_points[0].co.y == pytest.approx(0.9)
+        assert fcurve_q.keyframe_points[1].co.x == 11
+        assert fcurve_q.keyframe_points[1].co.y == pytest.approx(0.8)
+        assert fcurve_q.keyframe_points[2].co.x == 12
+        assert fcurve_q.keyframe_points[2].co.y == pytest.approx(0.7)
+        assert fcurve_q.keyframe_points[3].co.x == 14
+        assert fcurve_q.keyframe_points[3].co.y == pytest.approx(0.5)
+
+        # 4. Check interpolation mode on one keyframe
+        assert fcurve_x.keyframe_points[0].interpolation == 'LINEAR'

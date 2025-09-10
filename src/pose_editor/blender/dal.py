@@ -326,7 +326,12 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     return BlenderObjRef(marker_obj.name)
 
-def get_or_create_object(name: str, obj_type: str, collection_name: Optional[str] = None) -> "BlenderObjRef":
+def get_or_create_object(
+    name: str, 
+    obj_type: str, 
+    collection_name: Optional[str] = None,
+    parent: Optional["BlenderObjRef"] = None
+) -> "BlenderObjRef":
     """Gets an object by name, or creates it if it doesn't exist.
 
     Args:
@@ -334,11 +339,20 @@ def get_or_create_object(name: str, obj_type: str, collection_name: Optional[str
         obj_type: The type of object to create (e.g., 'EMPTY').
         collection_name: The name of the collection to place the object in.
                          If the collection doesn't exist, it will be created.
+        parent: An optional parent for the object.
 
     Returns:
         A BlenderObjRef wrapper for the found or created object.
     """
+    # Note: When parenting, Blender may rename the object if a name collision
+    # occurs under the new parent. We retrieve the name from the final object.
     obj = bpy.data.objects.get(name)
+    
+    if obj and parent:
+        parent_obj = parent._get_obj()
+        if obj.parent != parent_obj:
+            obj.parent = parent_obj
+
     if not obj:
         if obj_type == 'EMPTY':
             obj = bpy.data.objects.new(name, None)
@@ -357,7 +371,13 @@ def get_or_create_object(name: str, obj_type: str, collection_name: Optional[str
                 bpy.context.scene.collection.objects.unlink(obj)
             target_collection.objects.link(obj)
         else:
+            # If no collection is specified, link to the scene's master collection
             bpy.context.scene.collection.objects.link(obj)
+
+        if parent:
+            parent_obj = parent._get_obj()
+            if parent_obj:
+                obj.parent = parent_obj
 
     return BlenderObjRef(obj.name)
 
@@ -553,3 +573,63 @@ def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) ->
     frames = np.arange(start_frame, end_frame + 1)
     values = np.array([fcurve.evaluate(f) for f in frames])
     return values
+
+def set_fcurves_from_numpy(
+    action: bpy.types.Action, 
+    columns: List[Tuple[str, str, int]], 
+    start_frame: int, 
+    data: np.ndarray
+) -> None:
+    """Populates multiple F-Curves in an Action from a single NumPy array.
+
+    This function is optimized to write data in batches. It first creates all
+    necessary F-Curves, then pre-allocates the keyframe points for each curve,
+    and finally iterates through the NumPy data to set the coordinates for each
+    keyframe. This is significantly faster than inserting keyframes one by one.
+
+    Args:
+        action: The Action to add the F-Curves to.
+        columns: A list of tuples, where each tuple defines an F-Curve and 
+                 corresponds to a column in the data array. The tuple format is
+                 (slot_name, data_path, index).
+        start_frame: The starting frame number for the animation data.
+        data: A 2D NumPy array of shape (frames, columns) containing the
+              animation data. A `np.nan` value will result in no keyframe
+              being created for that frame.
+    """
+    if not action or not columns or data.size == 0:
+        return
+
+    num_frames = data.shape[0]
+    
+    # 1. Get or create all F-Curves first and clear existing data.
+    fcurves = []
+    for slot_name, data_path, index in columns:
+        fcurve = get_or_create_fcurve(action, slot_name, data_path, index if index is not None else -1)
+        fcurve.keyframe_points.clear()
+        fcurves.append(fcurve)
+
+    # 2. Pre-calculate the number of valid keyframes for each F-Curve.
+    valid_keyframe_counts = [np.count_nonzero(~np.isnan(data[:, i])) for i in range(data.shape[1])]
+
+    # 3. Add the required number of keyframe points to each F-Curve in a batch.
+    for i, fcurve in enumerate(fcurves):
+        if valid_keyframe_counts[i] > 0:
+            fcurve.keyframe_points.add(count=valid_keyframe_counts[i])
+
+    # 4. Iterate through the data and set the keyframes.
+    keyframe_indices = [0] * len(fcurves)
+    for frame_offset in range(num_frames):
+        current_frame = start_frame + frame_offset
+        for col_idx, fcurve in enumerate(fcurves):
+            value = data[frame_offset, col_idx]
+            if not np.isnan(value):
+                kp_idx = keyframe_indices[col_idx]
+                kp = fcurve.keyframe_points[kp_idx]
+                kp.co = (float(current_frame), value)
+                kp.interpolation = 'LINEAR'
+                keyframe_indices[col_idx] += 1
+
+    # 5. Update all F-Curves.
+    for fcurve in fcurves:
+        fcurve.update()
