@@ -623,6 +623,8 @@ def add_bone_constraint(armature_obj_ref: BlenderObjRef, bone_name: str, constra
     constraint.target = target_obj_ref._get_obj()
     if subtarget_name:
         constraint.subtarget = subtarget_name
+    if constraint_type == 'STRETCH_TO':
+        constraint.rest_length = 1.0
 
 def set_armature_display_stick(armature_obj_ref: BlenderObjRef) -> None:
     """Sets the armature display to 'STICK'.
@@ -635,46 +637,6 @@ def set_armature_display_stick(armature_obj_ref: BlenderObjRef) -> None:
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
     armature_obj.data.display_type = 'STICK'
-
-def create_bone_group(armature_obj_ref: BlenderObjRef, group_name: str, color: tuple[float, float, float, float]) -> None:
-    """Creates a bone group with a specific color.
-
-    Args:
-        armature_obj_ref: The armature object.
-        group_name: The name of the bone group.
-        color: The color for the bone group.
-    """
-    armature_obj = armature_obj_ref._get_obj()
-    if not armature_obj or armature_obj.type != 'ARMATURE':
-        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
-
-    bone_group = armature_obj.pose.bone_groups.new(name=group_name)
-    bone_group.color_set = 'CUSTOM'
-    bone_group.colors.normal = color[:3]
-    bone_group.colors.select = (0.0, 1.0, 0.0) # Green for selected
-    bone_group.colors.active = (1.0, 1.0, 0.0) # Yellow for active
-
-def assign_bone_to_group(armature_obj_ref: BlenderObjRef, bone_name: str, group_name: str) -> None:
-    """Assigns a bone to a bone group.
-
-    Args:
-        armature_obj_ref: The armature object.
-        bone_name: The name of the bone.
-        group_name: The name of the bone group.
-    """
-    armature_obj = armature_obj_ref._get_obj()
-    if not armature_obj or armature_obj.type != 'ARMATURE':
-        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
-
-    bone = armature_obj.pose.bones.get(bone_name)
-    if not bone:
-        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
-
-    bone_group = armature_obj.pose.bone_groups.get(group_name)
-    if not bone_group:
-        raise ValueError(f"Bone group {group_name} not found in armature {armature_obj.name}.")
-
-    bone.bone_group = bone_group
 
 def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> np.ndarray:
     """Samples an F-Curve's values over a given frame range.

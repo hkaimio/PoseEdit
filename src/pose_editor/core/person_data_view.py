@@ -49,6 +49,23 @@ class PersonDataView:
         # Create armature and bones
         self._create_armature()
 
+    def _create_marker_objects(self):
+        """Creates a marker object for each joint in the skeleton."""
+        if self.skeleton is None or self.skeleton._skeleton is None:
+            return
+
+        from anytree import PreOrderIter
+        for node in PreOrderIter(self.skeleton._skeleton):
+            if not (hasattr(node, 'id') and node.id is not None):
+                continue
+
+            marker_name = node.name
+            dal.create_marker(
+                parent=self.view_root_object,
+                name=marker_name,
+                color=self.color
+            )
+
     def _create_armature(self):
         """Creates an armature with bones connecting the markers."""
         armature_name = f"{self.view_name}_Armature"
@@ -61,11 +78,8 @@ class PersonDataView:
 
         dal.set_armature_display_stick(self.armature_object)
 
-        bone_group_name = f"{self.view_name}_BoneGroup"
-        #dal.create_bone_group(self.armature_object, bone_group_name, self.color)
-
         for node in self.skeleton._skeleton.descendants:
-            if node.parent and hasattr(node, 'id') and hasattr(node.parent, 'id'):
+            if node.parent and hasattr(node, 'id') and node.id is not None and hasattr(node.parent, 'id') and node.parent.id is not None:
                 parent_marker_role = node.parent.name
                 child_marker_role = node.name
 
@@ -78,8 +92,6 @@ class PersonDataView:
 
                     dal.add_bone_constraint(self.armature_object, bone_name, 'COPY_LOCATION', parent_marker)
                     dal.add_bone_constraint(self.armature_object, bone_name, 'STRETCH_TO', child_marker)
-
-                    #dal.assign_bone_to_group(self.armature_object, bone_name, bone_group_name)
 
     def _create_marker_objects(self):
         """Creates a marker object for each joint in the skeleton."""
