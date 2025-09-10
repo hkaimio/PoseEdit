@@ -46,12 +46,51 @@ class PersonDataView:
         # Populate the dictionary after creating markers
         self._populate_marker_objects_by_role()
 
+        # Create armature and bones
+        self._create_armature()
+
+    def _create_armature(self):
+        """Creates an armature with bones connecting the markers."""
+        armature_name = f"{self.view_name}_Armature"
+        self.armature_object = dal.get_or_create_object(
+            name=armature_name,
+            obj_type='ARMATURE',
+            collection_name='PersonViews',
+            parent=self.view_root_object
+        )
+
+        dal.set_armature_display_stick(self.armature_object)
+
+        bone_group_name = f"{self.view_name}_BoneGroup"
+        #dal.create_bone_group(self.armature_object, bone_group_name, self.color)
+
+        for node in self.skeleton._skeleton.descendants:
+            if node.parent and hasattr(node, 'id') and hasattr(node.parent, 'id'):
+                parent_marker_role = node.parent.name
+                child_marker_role = node.name
+
+                parent_marker = self._marker_objects_by_role.get(parent_marker_role)
+                child_marker = self._marker_objects_by_role.get(child_marker_role)
+
+                if parent_marker and child_marker:
+                    bone_name = f"{parent_marker_role}-{child_marker_role}"
+                    dal.add_bone(self.armature_object, bone_name, (0, 0, 0), (0, 1, 0))
+
+                    dal.add_bone_constraint(self.armature_object, bone_name, 'COPY_LOCATION', parent_marker)
+                    dal.add_bone_constraint(self.armature_object, bone_name, 'STRETCH_TO', child_marker)
+
+                    #dal.assign_bone_to_group(self.armature_object, bone_name, bone_group_name)
+
     def _create_marker_objects(self):
         """Creates a marker object for each joint in the skeleton."""
         if self.skeleton is None or self.skeleton._skeleton is None:
             return
 
-        for node in self.skeleton._skeleton.descendants:
+        from anytree import PreOrderIter
+        for node in PreOrderIter(self.skeleton._skeleton):
+            if not hasattr(node, 'id'):
+                continue
+
             marker_name = node.name
             dal.create_marker(
                 parent=self.view_root_object,

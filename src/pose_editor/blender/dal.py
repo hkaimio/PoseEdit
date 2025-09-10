@@ -344,7 +344,7 @@ def get_or_create_object(
 
     Args:
         name: The name for the object.
-        obj_type: The type of object to create (e.g., 'EMPTY').
+        obj_type: The type of object to create (e.g., 'EMPTY', 'ARMATURE').
         collection_name: The name of the collection to place the object in.
                          If the collection doesn't exist, it will be created.
         parent: An optional parent for the object.
@@ -364,7 +364,9 @@ def get_or_create_object(
     if not obj:
         if obj_type == 'EMPTY':
             obj = bpy.data.objects.new(name, None)
-        # Add other object types as needed
+        elif obj_type == 'ARMATURE':
+            armature = bpy.data.armatures.new(name)
+            obj = bpy.data.objects.new(name, armature)
         else:
             raise NotImplementedError(f"Object creation for type '{obj_type}' is not implemented.")
 
@@ -576,6 +578,103 @@ def get_scene_frame_range() -> Tuple[int, int]:
         A tuple containing the start and end frame numbers.
     """
     return bpy.context.scene.frame_start, bpy.context.scene.frame_end
+
+def add_bone(armature_obj_ref: BlenderObjRef, bone_name: str, head: Tuple[float, float, float], tail: Tuple[float, float, float]) -> None:
+    """Adds a bone to an armature.
+
+    Args:
+        armature_obj_ref: The armature object to add the bone to.
+        bone_name: The name of the new bone.
+        head: The head position of the bone.
+        tail: The tail position of the bone.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bpy.context.view_layer.objects.active = armature_obj
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    bone = armature_obj.data.edit_bones.new(bone_name)
+    bone.head = head
+    bone.tail = tail
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+def add_bone_constraint(armature_obj_ref: BlenderObjRef, bone_name: str, constraint_type: str, target_obj_ref: BlenderObjRef, subtarget_name: str = None) -> None:
+    """Adds a constraint to a bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: The name of the bone to add the constraint to.
+        constraint_type: The type of constraint to add (e.g., 'COPY_LOCATION', 'STRETCH_TO').
+        target_obj_ref: The target object for the constraint.
+        subtarget_name: The name of the subtarget (e.g., for STRETCH_TO).
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.pose.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    constraint = bone.constraints.new(type=constraint_type)
+    constraint.target = target_obj_ref._get_obj()
+    if subtarget_name:
+        constraint.subtarget = subtarget_name
+
+def set_armature_display_stick(armature_obj_ref: BlenderObjRef) -> None:
+    """Sets the armature display to 'STICK'.
+
+    Args:
+        armature_obj_ref: The armature object.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    armature_obj.data.display_type = 'STICK'
+
+def create_bone_group(armature_obj_ref: BlenderObjRef, group_name: str, color: tuple[float, float, float, float]) -> None:
+    """Creates a bone group with a specific color.
+
+    Args:
+        armature_obj_ref: The armature object.
+        group_name: The name of the bone group.
+        color: The color for the bone group.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone_group = armature_obj.pose.bone_groups.new(name=group_name)
+    bone_group.color_set = 'CUSTOM'
+    bone_group.colors.normal = color[:3]
+    bone_group.colors.select = (0.0, 1.0, 0.0) # Green for selected
+    bone_group.colors.active = (1.0, 1.0, 0.0) # Yellow for active
+
+def assign_bone_to_group(armature_obj_ref: BlenderObjRef, bone_name: str, group_name: str) -> None:
+    """Assigns a bone to a bone group.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: The name of the bone.
+        group_name: The name of the bone group.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.pose.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    bone_group = armature_obj.pose.bone_groups.get(group_name)
+    if not bone_group:
+        raise ValueError(f"Bone group {group_name} not found in armature {armature_obj.name}.")
+
+    bone.bone_group = bone_group
 
 def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> np.ndarray:
     """Samples an F-Curve's values over a given frame range.
