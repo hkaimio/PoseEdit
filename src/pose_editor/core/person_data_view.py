@@ -76,7 +76,7 @@ class PersonDataView:
         Args:
             marker_data: The MarkerData series to connect to.
         """
-        marker_data.apply_to_view(self.view_name)
+        marker_data.apply_to_view(self)
 
     def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
         """Returns a dictionary of marker objects in this view, keyed by their role."""

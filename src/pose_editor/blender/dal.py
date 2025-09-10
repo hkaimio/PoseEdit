@@ -231,7 +231,7 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
         bpy.ops.object.select_all(action='DESELECT')
 
     # Create a UV sphere
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.02, enter_editmode=False, align='WORLD', location=(0, 0, 0))
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=2, enter_editmode=False, align='WORLD', location=(0, 0, 0))
     marker_obj = bpy.context.active_object
 
     # Set parent
