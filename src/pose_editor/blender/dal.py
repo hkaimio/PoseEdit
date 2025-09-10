@@ -12,6 +12,10 @@ class BlenderObjRef:
         self._id = id
         self._obj: bpy.types.Object | None = None
 
+    @property
+    def name(self) -> str:
+        return self._id
+
     def _get_obj(self) -> bpy.types.Object:
         if self._obj is None:
             self._obj = bpy.data.objects.get(self._id)
@@ -443,15 +447,28 @@ def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.t
         slot = action.slots.new(name=slot_name, id_type='OBJECT')
     return slot
 
-def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> bpy.types.FCurve:
-    """Gets or creates an F-Curve on an Action, targeted at a specific slot.
+def _get_or_create_channelbag(action: bpy.types.Action, slot: bpy.types.ActionSlot) -> bpy.types.ActionChannelbag:
+    """
+    Gets or creates the channelbag for a specific action and slot.
+    A channelbag is technically an ActionStripKeyframe.
+    """
+    if not action.layers:
+        layer = action.layers.new("Layer")
+    else:
+        layer = action.layers[0]
 
-    The F-Curve lives directly on the Action data-block. Its association with
-    a slot is defined by its `data_path`, which must be formatted as
-    'slots["PREFIXED_SLOT_NAME"].property'.
+    if not layer.strips:
+        strip = layer.strips.new(type='KEYFRAME')
+    else:
+        strip = layer.strips[0]
+
+    return strip.channelbag(slot, ensure=True)
+
+def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> bpy.types.FCurve:
+    """Gets or creates an F-Curve within the correct channelbag for a slot.
 
     Args:
-        action: The Action to add the F-Curve to.
+        action: The Action data-block.
         slot_name: The user-facing name of the slot to target.
         data_path: The property to animate (e.g., "location").
         index: The array index for vector properties (e.g., 0 for X).
@@ -459,15 +476,12 @@ def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: st
     Returns:
         The found or created FCurve.
     """
-    # Ensure the slot exists, so Blender knows how to resolve the data_path
-    get_or_create_action_slot(action, slot_name)
+    slot = get_or_create_action_slot(action, slot_name)
+    channelbag = _get_or_create_channelbag(action, slot)
     
-    prefixed_slot_name = _get_prefixed_slot_name(slot_name)
-    slotted_data_path = f'slots["{prefixed_slot_name}"].{data_path}'
-    
-    fcurve = action.fcurves.find(slotted_data_path, index=index)
+    fcurve = channelbag.fcurves.find(data_path, index=index)
     if not fcurve:
-        fcurve = action.fcurves.new(slotted_data_path, index=index)
+        fcurve = channelbag.fcurves.new(data_path, index=index)
     return fcurve
 
 def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, float]]) -> None:
@@ -536,7 +550,7 @@ def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
     return None
 
 def get_fcurve_from_action(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
-    """Gets an F-Curve from an Action targeted at a specific slot.
+    """Gets an F-Curve from the correct channelbag for a slot.
 
     Args:
         action: The Action to search within.
@@ -547,9 +561,9 @@ def get_fcurve_from_action(action: bpy.types.Action, slot_name: str, data_path: 
     Returns:
         The found F-Curve, or None if it does not exist.
     """
-    prefixed_slot_name = _get_prefixed_slot_name(slot_name)
-    slotted_data_path = f'slots["{prefixed_slot_name}"].{data_path}'
-    return action.fcurves.find(slotted_data_path, index=index)
+    slot = get_or_create_action_slot(action, slot_name)
+    channelbag = _get_or_create_channelbag(action, slot)
+    return channelbag.fcurves.find(data_path, index=index)
 
 def get_scene_frame_range() -> Tuple[int, int]:
     """Returns the start and end frame of the current scene.

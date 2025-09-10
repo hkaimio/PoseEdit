@@ -118,8 +118,10 @@ class TestMarkerData:
 
         # Create mock children for the view root
         child1_ref = MagicMock()
+        child1_ref._id = "Nose"
         child1_ref.name = "Nose"
         child2_ref = MagicMock()
+        child2_ref._id = "LEye"
         child2_ref.name = "LEye"
         mock_dal.get_children_of_object.return_value = [child1_ref, child2_ref]
 

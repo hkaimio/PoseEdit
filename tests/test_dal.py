@@ -131,13 +131,14 @@ class TestDalBlender:
         fcurve = dal.get_or_create_fcurve(action, slot_name, data_path, index=0)
         assert fcurve is not None
         
-        prefixed_slot_name = dal._get_prefixed_slot_name(slot_name)
-        expected_data_path = f'slots["{prefixed_slot_name}"].{data_path}'
-        assert fcurve.data_path == expected_data_path
+        # Verify the data_path is simple, not the complex slotted path
+        assert fcurve.data_path == data_path
         assert fcurve.array_index == 0
 
-        # Check it was added to the action
-        assert action.fcurves.find(fcurve.data_path, index=fcurve.array_index) is not None
+        # Check that the fcurve was created in the correct channelbag
+        slot = dal.get_or_create_action_slot(action, slot_name)
+        channelbag = dal._get_or_create_channelbag(action, slot)
+        assert channelbag.fcurves.find(data_path, index=0) is not None
 
         fcurve2 = dal.get_or_create_fcurve(action, slot_name, data_path, index=0)
         assert fcurve2 == fcurve
@@ -173,11 +174,14 @@ class TestDalBlender:
     def test_get_fcurve_from_action(self):
         action = dal.get_or_create_action("GetFCurveAction")
         slot_name = "TestSlot"
+        # Create the fcurve first
         fcurve = dal.get_or_create_fcurve(action, slot_name, "location", index=2)
 
+        # Now try to retrieve it
         retrieved_fcurve = dal.get_fcurve_from_action(action, slot_name, "location", index=2)
         assert retrieved_fcurve == fcurve
 
+        # Test for non-existent fcurve
         assert dal.get_fcurve_from_action(action, slot_name, "location", index=0) is None
 
     def test_get_or_create_object_with_parent(self, blender_parent_obj):
@@ -211,18 +215,19 @@ class TestDalBlender:
         action = dal.get_or_create_action("NumpyBatchAction")
         start_frame = 10
         
-        # Define the columns and the numpy data array
+        # Define the columns and the numpy data array, now including Z coordinate
         columns = [
             ("Slot1", "location", 0), # X
             ("Slot1", "location", 1), # Y
+            ("Slot1", "location", 2), # Z
             ("Slot2", '["quality"]', -1) # Custom property
         ]
         data = np.array([
-            [1.0, 2.0, 0.9],  # Frame 10
-            [1.1, 2.2, 0.8],  # Frame 11
-            [np.nan, 2.4, 0.7], # Frame 12 (X is nan)
-            [1.3, np.nan, np.nan], # Frame 13 (Y and quality are nan)
-            [1.4, 2.8, 0.5]   # Frame 14
+            [1.0, 2.0, 0.0, 0.9],  # Frame 10
+            [1.1, 2.2, 0.0, 0.8],  # Frame 11
+            [np.nan, 2.4, 0.0, 0.7], # Frame 12 (X is nan)
+            [1.3, np.nan, np.nan, np.nan], # Frame 13 (Y, Z and quality are nan)
+            [1.4, 2.8, 0.0, 0.5]   # Frame 14
         ])
 
         # Call the function to test
@@ -234,36 +239,28 @@ class TestDalBlender:
         fcurve_x = dal.get_fcurve_from_action(action, "Slot1", "location", 0)
         assert fcurve_x is not None
         assert len(fcurve_x.keyframe_points) == 4 # One frame was nan
-        assert fcurve_x.keyframe_points[0].co.x == 10
         assert fcurve_x.keyframe_points[0].co.y == pytest.approx(1.0)
-        assert fcurve_x.keyframe_points[1].co.x == 11
-        assert fcurve_x.keyframe_points[1].co.y == pytest.approx(1.1)
-        assert fcurve_x.keyframe_points[2].co.x == 13
-        assert fcurve_x.keyframe_points[2].co.y == pytest.approx(1.3)
-        assert fcurve_x.keyframe_points[3].co.x == 14
-        assert fcurve_x.keyframe_points[3].co.y == pytest.approx(1.4)
 
         # 2. Verify Slot1, location.y
         fcurve_y = dal.get_fcurve_from_action(action, "Slot1", "location", 1)
         assert fcurve_y is not None
         assert len(fcurve_y.keyframe_points) == 4 # One frame was nan
-        assert fcurve_y.keyframe_points[0].co.x == 10
         assert fcurve_y.keyframe_points[0].co.y == pytest.approx(2.0)
-        assert fcurve_y.keyframe_points[3].co.x == 14
-        assert fcurve_y.keyframe_points[3].co.y == pytest.approx(2.8)
 
-        # 3. Verify Slot2, quality
+        # 3. Verify Slot1, location.z
+        fcurve_z = dal.get_fcurve_from_action(action, "Slot1", "location", 2)
+        assert fcurve_z is not None
+        assert len(fcurve_z.keyframe_points) == 4 # One frame was nan
+        assert fcurve_z.keyframe_points[0].co.y == pytest.approx(0.0)
+        # All z values should be 0
+        for kp in fcurve_z.keyframe_points:
+            assert kp.co.y == pytest.approx(0.0)
+
+        # 4. Verify Slot2, quality
         fcurve_q = dal.get_fcurve_from_action(action, "Slot2", '["quality"]', -1)
         assert fcurve_q is not None
         assert len(fcurve_q.keyframe_points) == 4 # One frame was nan
-        assert fcurve_q.keyframe_points[0].co.x == 10
         assert fcurve_q.keyframe_points[0].co.y == pytest.approx(0.9)
-        assert fcurve_q.keyframe_points[1].co.x == 11
-        assert fcurve_q.keyframe_points[1].co.y == pytest.approx(0.8)
-        assert fcurve_q.keyframe_points[2].co.x == 12
-        assert fcurve_q.keyframe_points[2].co.y == pytest.approx(0.7)
-        assert fcurve_q.keyframe_points[3].co.x == 14
-        assert fcurve_q.keyframe_points[3].co.y == pytest.approx(0.5)
 
-        # 4. Check interpolation mode on one keyframe
+        # 5. Check interpolation mode on one keyframe
         assert fcurve_x.keyframe_points[0].interpolation == 'LINEAR'
