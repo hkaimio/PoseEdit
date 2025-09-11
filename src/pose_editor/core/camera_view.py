@@ -1,14 +1,17 @@
 from typing import List, Dict
-from ..blender.dal import (BlenderObjRef, create_empty, create_marker, 
-                            add_keyframe, set_custom_property, 
+from ..blender.dal import (BlenderObjRef, create_empty, 
+                            set_custom_property, 
                             CAMERA_X_FACTOR, CAMERA_Y_FACTOR, 
                             CAMERA_X_OFFSET, CAMERA_Y_OFFSET, SERIES_NAME)
 from .person_data_series import RawPersonData
+from .marker_data import MarkerData
+from .person_data_view import PersonDataView
 from pathlib import Path
 import json
 import os
 import re
 import math
+import numpy as np
 from anytree import Node
 from anytree.iterators import PreOrderIter
 from .skeleton import SkeletonBase
@@ -45,7 +48,6 @@ def _extract_frame_number(filename: str) -> int:
     if match:
         return int(match.group(1))
     
-    # Fallback for filenames without extension or different patterns
     numbers = re.findall(r'\d+', filename)
     if numbers:
         return int(numbers[-1])
@@ -68,19 +70,18 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     """
     camera_view = CameraView()
 
-    # Create main camera view empty
     camera_view_empty_name = f"View_{name}"
     camera_view._obj = create_empty(camera_view_empty_name)
     set_custom_property(camera_view._obj, SERIES_NAME, name)
 
-    # Calculate transformation factors and offsets
     if VIDEO_WIDTH > VIDEO_HEIGHT:
         scale_factor = BLENDER_TARGET_WIDTH / VIDEO_WIDTH
     else:
         scale_factor = BLENDER_TARGET_WIDTH / VIDEO_HEIGHT
 
     xfactor = scale_factor
-    yfactor = -scale_factor # Negative for Y-axis inversion
+    yfactor = -scale_factor
+    zfactor = scale_factor
 
     scaled_blender_width = VIDEO_WIDTH * scale_factor
     scaled_blender_height = VIDEO_HEIGHT * scale_factor
@@ -88,17 +89,14 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     xoffset = -scaled_blender_width / 2
     yoffset = scaled_blender_height / 2
 
-    # Store transformation factors as custom properties
     set_custom_property(camera_view._obj, CAMERA_X_FACTOR, xfactor)
     set_custom_property(camera_view._obj, CAMERA_Y_FACTOR, yfactor)
     set_custom_property(camera_view._obj, CAMERA_X_OFFSET, xoffset)
     set_custom_property(camera_view._obj, CAMERA_Y_OFFSET, yoffset)
 
-    marker_ids = {node.id: node.name for node in PreOrderIter(skeleton_obj._skeleton) if node.id is not None}
-
     json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith('.json')])
     
-    pose_data_by_person_and_frame: Dict[int, Dict[int, List[float]]] = {}
+    pose_data_by_person: Dict[int, Dict[int, List[float]]] = {}
     min_frame = float('inf')
     max_frame = float('-inf')
 
@@ -116,58 +114,61 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
         
         if "people" in data:
             for person_idx, person_data in enumerate(data["people"]):
-                if person_idx not in pose_data_by_person_and_frame:
-                    pose_data_by_person_and_frame[person_idx] = {}
-                pose_data_by_person_and_frame[person_idx][frame_num] = person_data["pose_keypoints_2d"]
+                if person_idx not in pose_data_by_person:
+                    pose_data_by_person[person_idx] = {}
+                pose_data_by_person[person_idx][frame_num] = person_data["pose_keypoints_2d"]
 
-    for person_idx, frames_data in pose_data_by_person_and_frame.items():
-        raw_person_obj = create_empty(f"{name}_Person{person_idx}", parent_obj=camera_view._obj)
-        set_custom_property(raw_person_obj, SERIES_NAME, f"{name}_Person{person_idx}")
-        raw_person_data = RawPersonData(raw_person_obj)
-        raw_person_data._skeleton = skeleton_obj._skeleton
-        camera_view._raw_person_data.append(raw_person_data)
+    if not pose_data_by_person:
+        return camera_view
 
-        # Apply transformation to the parent object
-        raw_person_obj._get_obj().scale = (xfactor, yfactor, 1)
-        raw_person_obj._get_obj().location = (xoffset, yoffset, 0)
+    num_frames = int(max_frame - min_frame + 1)
+    num_joints = len(skeleton_obj._skeleton.leaves)
 
-        marker_fcurve_data: Dict[str, Dict[str, List[tuple[int, List[float]]]]] = {}
-        for marker_name in marker_ids.values():
-            marker_fcurve_data[marker_name] = {
-                'location': [],
-                '["quality"]' : []
-            }
+    for person_idx, frames_data in pose_data_by_person.items():
+        if int(person_idx) < 5 or int(person_idx) > 10:
+            continue  # For now, only process person index 5
+        print(f"Processing person {person_idx} with {len(frames_data)} frames...")
+        series_name = f"{name}_person{person_idx}"
+        marker_data = MarkerData(series_name, "COCO_133")
 
-        if min_frame not in frames_data:
-            for marker_name in marker_fcurve_data.keys():
-                marker_fcurve_data[marker_name]['["quality"]'].append((min_frame, [-1.0]))
-
-        for frame_num in range(min_frame, max_frame + 1):
-            if frame_num not in frames_data:
+        columns_to_extract = []
+        for joint_node in PreOrderIter(skeleton_obj._skeleton):
+            if joint_node.id is None:
                 continue
-            
-            keypoints = frames_data[frame_num]
-            for node_id, marker_name in marker_ids.items():
-                idx = node_id * 3
-                if idx + 2 < len(keypoints):
-                    x = keypoints[idx]
-                    y = keypoints[idx + 1]
-                    likelihood = keypoints[idx + 2]
+            joint_name = joint_node.name
+            columns_to_extract.append((joint_name, 'location', 0)) # X
+            columns_to_extract.append((joint_name, 'location', 1)) # Y
+            columns_to_extract.append((joint_name, '["quality"]' , None)) # Quality
 
-                    if math.isnan(x) or math.isnan(y):
-                        marker_fcurve_data[marker_name]['["quality"]'].append((frame_num, [-1.0]))
-                    else:
-                        # Store raw pixel coordinates
-                        marker_fcurve_data[marker_name]['location'].append((frame_num, [x, y, 0.0]))
-                        marker_fcurve_data[marker_name]['["quality"]'].append((frame_num, [likelihood]))
+        np_data = np.full((num_frames, len(columns_to_extract)), np.nan)
 
-        for marker_name, fcurve_data in marker_fcurve_data.items():
-            marker_obj_ref = create_marker(raw_person_data._blenderObj, marker_name, (1.0, 1.0, 0.0, 1.0))
-            raw_person_data._markers[marker_name] = marker_obj_ref
+        for frame_idx, frame_num in enumerate(range(int(min_frame), int(max_frame) + 1)):
+            if frame_num in frames_data:
+                keypoints = frames_data[frame_num]
+                col_idx = 0
+                for joint_node in PreOrderIter(skeleton_obj._skeleton):
+                    if joint_node.id is None:
+                        continue
+                    kp_idx = joint_node.id * 3
+                    if kp_idx + 2 < len(keypoints):
+                        x, y, likelihood = keypoints[kp_idx], keypoints[kp_idx+1], keypoints[kp_idx+2]
+                        
+                        np_data[frame_idx, col_idx] = x
+                        np_data[frame_idx, col_idx + 1] = y
+                        np_data[frame_idx, col_idx + 2] = likelihood
+                    col_idx += 3
 
-            for data_path, keyframes in fcurve_data.items():
-                for i in range(len(keyframes)):
-                    frame, values = keyframes[i]
-                    add_keyframe(marker_obj_ref, frame, {data_path: values})
+        marker_data.set_animation_data_from_numpy(columns_to_extract, start_frame=int(min_frame), data=np_data)
 
+        print(f"Creating PersonDataView for {series_name}...")
+        person_view = PersonDataView(f"PV.{series_name}", skeleton_obj)
+        print(f"Linking PersonDataView {person_view.view_name} to MarkerData series {series_name}...")
+        person_view.connect_to_series(marker_data)
+
+        print(f"Linking PersonDataView {person_view.view_root_object.name} to CameraView {camera_view._obj.name}...")
+        person_view.view_root_object._get_obj().parent = camera_view._obj._get_obj()
+        print(f"Setting scale and location for PersonDataView {person_view.view_root_object.name} sx={xfactor}, sy={yfactor}, ox={xoffset}, oy={yoffset}...")
+        person_view.view_root_object._get_obj().scale = (xfactor, yfactor, zfactor)
+        person_view.view_root_object._get_obj().location = (xoffset, yoffset, 0)
+        print(f"PersonDataView {person_view.view_root_object.name} created and linked to CameraView {camera_view._obj.name}.")
     return camera_view
