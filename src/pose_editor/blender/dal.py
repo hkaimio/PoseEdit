@@ -334,6 +334,75 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     return BlenderObjRef(marker_obj.name)
 
+def create_camera(name: str, collection: bpy.types.Collection = None, parent_obj: BlenderObjRef = None) -> BlenderObjRef:
+    """
+    Creates a new camera object in the scene.
+
+    Args:
+        name: The name of the new camera.
+        collection: The collection to link the camera to. If None, the camera is linked to the scene's master collection.
+        parent_obj: The parent object for the new camera, wrapped in a BlenderObjRef.
+
+    Returns:
+        The new camera object wrapped in a BlenderObjRef.
+    """
+    camera_data = bpy.data.cameras.new(name)
+    camera_object = bpy.data.objects.new(name, camera_data)
+
+    if collection is None:
+        collection = bpy.context.scene.collection
+    collection.objects.link(camera_object)
+    
+    if parent_obj:
+        camera_object.parent = parent_obj._get_obj()
+        camera_object.matrix_parent_inverse.identity()
+
+    return BlenderObjRef(camera_object.name)
+
+def load_movie_clip(filepath: str) -> bpy.types.MovieClip:
+    """
+    Loads a movie clip from a file path.
+
+    Args:
+        filepath: The path to the movie file.
+
+    Returns:
+        The loaded movie clip.
+    """
+    return bpy.data.movieclips.load(filepath)
+
+def set_camera_background(camera_obj_ref: BlenderObjRef, movie_clip: bpy.types.MovieClip) -> None:
+    """
+    Sets the background of a camera to a movie clip.
+
+    Args:
+        camera_obj_ref: The camera object reference.
+        movie_clip: The movie clip to set as the background.
+    """
+    camera_obj = camera_obj_ref._get_obj()
+    if not camera_obj or camera_obj.type != 'CAMERA':
+        raise ValueError(f"Object {camera_obj_ref.name} is not a camera.")
+
+    camera_obj.data.show_background_images = True
+    bg = camera_obj.data.background_images.new()
+    bg.source = 'MOVIE_CLIP'
+    bg.clip = movie_clip
+
+def set_camera_ortho(camera_obj_ref: BlenderObjRef, ortho_scale: float) -> None:
+    """
+    Sets a camera to orthographic projection.
+
+    Args:
+        camera_obj_ref: The camera object reference.
+        ortho_scale: The orthographic scale.
+    """
+    camera_obj = camera_obj_ref._get_obj()
+    if not camera_obj or camera_obj.type != 'CAMERA':
+        raise ValueError(f"Object {camera_obj_ref.name} is not a camera.")
+
+    camera_obj.data.type = 'ORTHO'
+    camera_obj.data.ortho_scale = ortho_scale
+
 def get_or_create_object(
     name: str, 
     obj_type: str, 

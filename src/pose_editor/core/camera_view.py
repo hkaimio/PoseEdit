@@ -1,6 +1,6 @@
 from typing import List, Dict
-from ..blender.dal import (BlenderObjRef, create_empty, 
-                            set_custom_property, 
+from ..blender import dal
+from ..blender.dal import (BlenderObjRef, 
                             CAMERA_X_FACTOR, CAMERA_Y_FACTOR, 
                             CAMERA_X_OFFSET, CAMERA_Y_OFFSET, SERIES_NAME)
 from .person_data_series import RawPersonData
@@ -71,8 +71,8 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     camera_view = CameraView()
 
     camera_view_empty_name = f"View_{name}"
-    camera_view._obj = create_empty(camera_view_empty_name)
-    set_custom_property(camera_view._obj, SERIES_NAME, name)
+    camera_view._obj = dal.create_empty(camera_view_empty_name)
+    dal.set_custom_property(camera_view._obj, SERIES_NAME, name)
 
     if VIDEO_WIDTH > VIDEO_HEIGHT:
         scale_factor = BLENDER_TARGET_WIDTH / VIDEO_WIDTH
@@ -89,10 +89,23 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     xoffset = -scaled_blender_width / 2
     yoffset = scaled_blender_height / 2
 
-    set_custom_property(camera_view._obj, CAMERA_X_FACTOR, xfactor)
-    set_custom_property(camera_view._obj, CAMERA_Y_FACTOR, yfactor)
-    set_custom_property(camera_view._obj, CAMERA_X_OFFSET, xoffset)
-    set_custom_property(camera_view._obj, CAMERA_Y_OFFSET, yoffset)
+    dal.set_custom_property(camera_view._obj, CAMERA_X_FACTOR, xfactor)
+    dal.set_custom_property(camera_view._obj, CAMERA_Y_FACTOR, yfactor)
+    dal.set_custom_property(camera_view._obj, CAMERA_X_OFFSET, xoffset)
+    dal.set_custom_property(camera_view._obj, CAMERA_Y_OFFSET, yoffset)
+
+    # Create camera and set background video
+    camera_name = f"Cam_{name}"
+    camera_obj_ref = dal.create_camera(camera_name, parent_obj=camera_view._obj)
+    
+    # Position the camera to look along the Z-axis
+    camera_obj = camera_obj_ref._get_obj()
+    camera_obj.location = (0, 0, 10) # Positioned away from the scene
+    camera_obj.rotation_euler = (0, 0, 0)
+
+    movie_clip = dal.load_movie_clip(str(video_file))
+    dal.set_camera_background(camera_obj_ref, movie_clip)
+    dal.set_camera_ortho(camera_obj_ref, scaled_blender_width)
 
     json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith('.json')])
     
@@ -125,7 +138,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     num_joints = len(skeleton_obj._skeleton.leaves)
 
     for person_idx, frames_data in pose_data_by_person.items():
-        if int(person_idx) < 5 or int(person_idx) > 10:
+        if int(person_idx) != 5:
             continue  # For now, only process person index 5
         print(f"Processing person {person_idx} with {len(frames_data)} frames...")
         series_name = f"{name}_person{person_idx}"
