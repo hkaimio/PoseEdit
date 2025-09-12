@@ -835,6 +835,38 @@ def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) ->
     return values
 
 
+def get_fcurve_on_object(obj_ref: BlenderObjRef, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
+    """Gets a specific F-Curve from an object's default action.
+
+    Args:
+        obj_ref: The object to get the F-Curve from.
+        data_path: The data path of the property (e.g., '["my_prop"]').
+        index: The array index for vector properties.
+
+    Returns:
+        The found F-Curve, or None.
+    """
+    obj = obj_ref._get_obj()
+    if not obj or not obj.animation_data or not obj.animation_data.action:
+        return None
+    
+    return obj.animation_data.action.fcurves.find(data_path, index=index)
+
+
+def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> List[Tuple[float, float]]:
+    """Extracts all keyframe points from an F-Curve.
+
+    Args:
+        fcurve: The F-Curve to read from.
+
+    Returns:
+        A list of (frame, value) tuples.
+    """
+    if not fcurve:
+        return []
+    return [(kp.co[0], kp.co[1]) for kp in fcurve.keyframe_points]
+
+
 def set_fcurves_from_numpy(
     action: bpy.types.Action, columns: List[Tuple[str, str, int]], start_frame: int, data: np.ndarray
 ) -> None:
