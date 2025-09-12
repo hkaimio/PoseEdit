@@ -642,6 +642,36 @@ def get_scene_frame_range() -> Tuple[int, int]:
     """
     return bpy.context.scene.frame_start, bpy.context.scene.frame_end
 
+
+def add_bones_in_bulk(armature_obj_ref: BlenderObjRef, bones_to_add: List[Tuple[str, Tuple[float, float, float], Tuple[float, float, float]]]) -> None:
+    """
+    Adds multiple bones to an armature in a single Edit Mode session for efficiency.
+
+    Args:
+        armature_obj_ref: The armature object to add the bones to.
+        bones_to_add: A list of tuples, where each tuple contains
+                      (bone_name, head_position, tail_position).
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    # Ensure the armature is the active object
+    bpy.context.view_layer.objects.active = armature_obj
+    # Enter Edit Mode once
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    try:
+        edit_bones = armature_obj.data.edit_bones
+        for bone_name, head, tail in bones_to_add:
+            bone = edit_bones.new(bone_name)
+            bone.head = head
+            bone.tail = tail
+    finally:
+        # Always exit Edit Mode, even if an error occurs
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+
 def add_bone(armature_obj_ref: BlenderObjRef, bone_name: str, head: Tuple[float, float, float], tail: Tuple[float, float, float]) -> None:
     """Adds a bone to an armature.
 

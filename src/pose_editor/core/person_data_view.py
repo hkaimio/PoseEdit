@@ -82,6 +82,7 @@ class PersonDataView:
 
         dal.set_armature_display_stick(self.armature_object)
 
+        bones_to_add = []
         for node in self.skeleton._skeleton.descendants:
             if node.parent and hasattr(node, 'id') and node.id is not None and hasattr(node.parent, 'id') and node.parent.id is not None:
                 parent_marker_role = node.parent.name
@@ -92,8 +93,25 @@ class PersonDataView:
 
                 if parent_marker and child_marker:
                     bone_name = f"{parent_marker_role}-{child_marker_role}"
-                    dal.add_bone(self.armature_object, bone_name, (0, 0, 0), (0, 1, 0))
+                    # Placeholder head/tail, will be positioned by constraints
+                    bones_to_add.append((bone_name, (0, 0, 0), (0, 1, 0)))
 
+        # Create all bones in one go
+        if bones_to_add:
+            dal.add_bones_in_bulk(self.armature_object, bones_to_add)
+
+        # Now, add constraints and drivers in a separate loop
+        for node in self.skeleton._skeleton.descendants:
+            if node.parent and hasattr(node, 'id') and node.id is not None and hasattr(node.parent, 'id') and node.parent.id is not None:
+                parent_marker_role = node.parent.name
+                child_marker_role = node.name
+
+                parent_marker = self._marker_objects_by_role.get(parent_marker_role)
+                child_marker = self._marker_objects_by_role.get(child_marker_role)
+
+                if parent_marker and child_marker:
+                    bone_name = f"{parent_marker_role}-{child_marker_role}"
+                    
                     dal.add_bone_constraint(self.armature_object, bone_name, 'COPY_LOCATION', parent_marker)
                     dal.add_bone_constraint(self.armature_object, bone_name, 'STRETCH_TO', child_marker)
 

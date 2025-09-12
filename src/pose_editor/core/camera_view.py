@@ -132,9 +132,6 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     num_joints = len(skeleton_obj._skeleton.leaves)
 
     for person_idx, frames_data in pose_data_by_person.items():
-        if person_idx != 5:
-            continue
-        print(f"Processing person {person_idx} with {len(frames_data)} frames...")
         series_name = f"{name}_person{person_idx}"
         marker_data = MarkerData(series_name, "COCO_133")
 

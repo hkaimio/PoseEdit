@@ -87,8 +87,9 @@ class TestPersonDataView:
         mock_dal.set_armature_display_stick.assert_called_once()
 
         # Check bone and constraint creation
-        assert mock_dal.add_bone.call_count == 2
-        assert mock_dal.add_bone_constraint.call_count == 4 # 2 bones * 2 constraints
+        mock_dal.add_bones_in_bulk.assert_called_once()
+        # Check that the number of bones to add is correct
+        assert len(mock_dal.add_bones_in_bulk.call_args[0][1]) == 2
         assert mock_dal.add_bone_constraint.call_count == 4 # 2 bones * 2 constraints
 
     @patch('pose_editor.core.person_data_view.dal')
