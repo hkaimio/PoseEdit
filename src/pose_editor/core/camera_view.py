@@ -138,7 +138,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
         columns_to_extract = []
         for joint_node in PreOrderIter(skeleton_obj._skeleton):
-            if joint_node.id is None:
+            if not hasattr(joint_node, 'id') or joint_node.id is None:
                 continue
             joint_name = joint_node.name
             columns_to_extract.append((joint_name, 'location', 0)) # X
@@ -152,7 +152,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                 keypoints = frames_data[frame_num]
                 col_idx = 0
                 for joint_node in PreOrderIter(skeleton_obj._skeleton):
-                    if joint_node.id is None:
+                    if not hasattr(joint_node, 'id') or joint_node.id is None:
                         continue
                     kp_idx = joint_node.id * 3
                     if kp_idx + 2 < len(keypoints):
@@ -161,6 +161,15 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                         np_data[frame_idx, col_idx] = x
                         np_data[frame_idx, col_idx + 1] = y
                         np_data[frame_idx, col_idx + 2] = likelihood
+                    col_idx += 3
+            else:
+                # Person not detected in this frame, set quality to -1
+                col_idx = 0
+                for joint_node in PreOrderIter(skeleton_obj._skeleton):
+                    if not hasattr(joint_node, 'id') or joint_node.id is None:
+                        continue
+                    # The quality is the 3rd value for each joint (x, y, quality)
+                    np_data[frame_idx, col_idx + 2] = -1.0
                     col_idx += 3
 
         marker_data.set_animation_data_from_numpy(columns_to_extract, start_frame=int(min_frame), data=np_data)

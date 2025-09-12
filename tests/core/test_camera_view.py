@@ -3,6 +3,8 @@ from unittest.mock import patch, MagicMock, mock_open
 from pathlib import Path
 from anytree import Node
 
+import numpy as np
+
 from pose_editor.core.camera_view import create_camera_view, _extract_frame_number
 from pose_editor.core.skeleton import SkeletonBase
 
@@ -142,3 +144,69 @@ def test_extract_frame_number_empty_string():
     """
     with pytest.raises(ValueError, match="No frame number found in filename"):
         _extract_frame_number("")
+
+
+@patch("pose_editor.core.camera_view.dal", autospec=True)
+@patch("pose_editor.core.camera_view.MarkerData", autospec=True)
+@patch("pose_editor.core.camera_view.PersonDataView", autospec=True)
+@patch("pose_editor.core.camera_view.os.listdir", autospec=True)
+@patch("pose_editor.core.camera_view.open", new_callable=mock_open)
+@patch("pose_editor.core.camera_view.json.load", autospec=True)
+def test_create_camera_view_missing_person_data(mock_json_load, mock_open_file, mock_listdir, mock_person_data_view, mock_marker_data, mock_dal):
+    """
+    Tests that when a person is not detected in a frame, the quality of their markers is set to -1.
+    """
+    # Arrange
+    # Mock movie clip
+    mock_movie_clip = MagicMock()
+    mock_movie_clip.size = (1920, 1080)
+    mock_dal.load_movie_clip.return_value = mock_movie_clip
+    mock_dal.create_empty.return_value = MagicMock()
+    mock_dal.create_camera.return_value = MagicMock()
+
+    # Configure PersonDataView mock
+    mock_person_view_instance = MagicMock()
+    mock_person_view_instance.view_name = "mock_person_view"
+    mock_root_obj = MagicMock()
+    mock_root_obj.name = "mock_root_obj"
+    mock_blender_obj = MagicMock()
+    mock_root_obj._get_obj.return_value = mock_blender_obj
+    mock_person_view_instance.view_root_object = mock_root_obj
+    mock_person_data_view.return_value = mock_person_view_instance
+
+    # Mock skeleton
+    skeleton = DummySkeleton()
+    # Add one joint to the dummy skeleton
+    from anytree import Node
+    Node("joint1", parent=skeleton._skeleton, id=0)
+
+    # Mock listdir to return 3 frames
+    mock_listdir.return_value = ["frame_0.json", "frame_1.json", "frame_2.json"]
+
+    # Mock json.load to return data for frames 0 and 2, but not 1 for person 0
+    mock_json_load.side_effect = [
+        {"people": [{"pose_keypoints_2d": [10, 20, 0.9]}]}, # frame 0
+        {"people": []}, # frame 1
+        {"people": [{"pose_keypoints_2d": [12, 22, 0.9]}]}, # frame 2
+    ]
+
+    # Act
+    create_camera_view("test_cam", Path("video.mp4"), Path("pose_data"), skeleton)
+
+    # Assert
+    # Check the data passed to set_animation_data_from_numpy
+    marker_data_instance = mock_marker_data.return_value
+    call_args = marker_data_instance.set_animation_data_from_numpy.call_args
+    
+    data = call_args.kwargs['data']
+    
+    # data should have 3 rows (frames)
+    # Frame 0: [10, 20, 0.9]
+    # Frame 1: [nan, nan, -1.0]
+    # Frame 2: [12, 22, 0.9]
+    
+    assert np.isclose(data[0, 2], 0.9)
+    assert np.isnan(data[1, 0])
+    assert np.isnan(data[1, 1])
+    assert np.isclose(data[1, 2], -1.0)
+    assert np.isclose(data[2, 2], 0.9)
