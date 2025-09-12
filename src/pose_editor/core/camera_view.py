@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 Harri Kaimio
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 from typing import List, Dict
 from ..blender import dal
 from ..blender.dal import BlenderObjRef, SERIES_NAME
@@ -15,6 +19,17 @@ from anytree.iterators import PreOrderIter
 from .skeleton import SkeletonBase
 
 BLENDER_TARGET_WIDTH = 10.0  # Blender units
+
+PASTEL_COLORS = [
+    (0.68, 0.78, 0.81, 1.0),  # Light Blue
+    (0.47, 0.87, 0.47, 1.0),  # Light Green
+    (0.96, 0.60, 0.76, 1.0),  # Light Pink
+    (0.99, 0.99, 0.59, 1.0),  # Light Yellow
+    (0.76, 0.69, 0.88, 1.0),  # Light Purple
+    (1.0, 0.70, 0.28, 1.0),  # Light Orange
+    (0.74, 0.93, 0.71, 1.0),  # Mint
+    (1.0, 0.82, 0.86, 1.0),  # Light Coral
+]
 
 
 class CameraView(object):
@@ -193,8 +208,11 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
         marker_data.set_animation_data_from_numpy(columns_to_extract, start_frame=int(min_frame), data=np_data)
 
+        # Assign a consistent color based on the person index
+        color = PASTEL_COLORS[person_idx % len(PASTEL_COLORS)]
+
         print(f"Creating PersonDataView for {series_name}...")
-        person_view = PersonDataView(f"PV.{series_name}", skeleton_obj)
+        person_view = PersonDataView(f"PV.{series_name}", skeleton_obj, color=color)
         print(f"Linking PersonDataView {person_view.view_name} to MarkerData series {series_name}...")
         person_view.connect_to_series(marker_data)
 
