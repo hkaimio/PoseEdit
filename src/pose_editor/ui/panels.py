@@ -63,9 +63,11 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         raw_tracks = [("-1", "-- Select --", ""), ("0", "Person 0", ""), ("1", "Person 1", "")]
 
         # --- Draw UI --- 
+        layout.operator("pose_editor.add_person_instance", text="Add New Real Person")
+
+        # --- Draw UI --- 
         if not stitching_ui_state.items:
             layout.label(text="No Real Persons created yet.")
-            layout.operator("pose_editor.add_person_instance", text="Add New Real Person")
             return
 
         box = layout.box()

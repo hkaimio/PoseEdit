@@ -28,9 +28,19 @@ PASTEL_COLORS = [
     (0.76, 0.69, 0.88, 1.0),  # Light Purple
     (1.0, 0.70, 0.28, 1.0),  # Light Orange
     (0.74, 0.93, 0.71, 1.0),  # Mint
-    (1.0, 0.82, 0.86, 1.0),  # Light Coral
+        (1.0, 0.82, 0.86, 1.0),  # Light Coral
 ]
 
+BRIGHT_COLORS = [
+    (1.0, 0.0, 0.0, 1.0),  # Red
+    (0.0, 1.0, 0.0, 1.0),  # Green
+    (0.0, 0.0, 1.0, 1.0),  # Blue
+    (1.0, 1.0, 0.0, 1.0),  # Yellow
+    (1.0, 0.0, 1.0, 1.0),  # Magenta
+    (0.0, 1.0, 1.0, 1.0),  # Cyan
+    (1.0, 0.5, 0.0, 1.0),  # Orange
+    (0.5, 0.0, 1.0, 1.0),  # Purple
+]
 
 class CameraView(object):
     def __init__(self):

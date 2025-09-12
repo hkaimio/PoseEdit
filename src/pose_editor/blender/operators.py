@@ -152,6 +152,47 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
         item = stitching_ui_state.items.add()
         item.person_name = self.person_name
 
+        # --- Create MarkerData and PersonDataView for the Real Person in each CameraView ---
+        from ..core.camera_view import BLENDER_TARGET_WIDTH, BRIGHT_COLORS
+        from ..core.marker_data import MarkerData
+        from ..core.person_data_view import PersonDataView
+        from ..core.skeleton import COCO133Skeleton
+        from ..pose2sim.skeletons import COCO_133
+
+        # Find all existing CameraView root objects
+        camera_view_refs = dal.find_all_objects_by_property(dal.SERIES_NAME, lambda name: name.startswith("cam")) # Assuming cam views start with "cam"
+        
+        # For now, hardcode skeleton. In future, this should be from PersonDefinition.
+        skeleton_def = COCO_133
+        skeleton = COCO133Skeleton(skeleton_def)
+
+        for i, cam_view_ref in enumerate(camera_view_refs):
+            cam_view_name = dal.get_custom_property(cam_view_ref, dal.SERIES_NAME)
+            
+            # Determine color for this Real Person's view
+            color = BRIGHT_COLORS[i % len(BRIGHT_COLORS)]
+
+            # Create MarkerData for the Real Person in this view
+            real_person_md_name = f"{person_obj_ref.name}.{cam_view_name}"
+            real_person_md = MarkerData(real_person_md_name, skeleton._skeleton.name)
+
+            # Create PersonDataView for the Real Person in this view
+            real_person_pv_name = f"PV.{person_obj_ref.name}.{cam_view_name}"
+            real_person_pv = PersonDataView(real_person_pv_name, skeleton, color=color)
+
+            # Link PersonDataView to MarkerData
+            real_person_pv.connect_to_series(real_person_md)
+
+            # Parent Real Person's PersonDataView to the CameraView's root
+            real_person_pv.view_root_object._get_obj().parent = cam_view_ref._get_obj()
+
+            # Position the Real Person's PersonDataView relative to the CameraView
+            # Offset it to the right of the raw tracks
+            # Assuming raw tracks are at local (0,0,0) within the CameraView
+            # BLENDER_TARGET_WIDTH is the width of the video plane
+            offset_x = BLENDER_TARGET_WIDTH + 1.0 # Offset by width + some padding
+            real_person_pv.view_root_object._get_obj().location = (offset_x, 0, 0)
+
         self.report({'INFO'}, f"Real Person '{self.person_name}' added.")
         return {'FINISHED'}
 
