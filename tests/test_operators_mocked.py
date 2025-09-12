@@ -2,9 +2,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import bpy
-import pytest
 from unittest.mock import Mock, patch
+
 from pose_editor.blender.operators import PE_OT_CreateProject
 
 

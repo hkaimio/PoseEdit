@@ -1,11 +1,11 @@
-import pytest
-from unittest.mock import patch, MagicMock, mock_open
 from pathlib import Path
-from anytree import Node
+from unittest.mock import MagicMock, mock_open, patch
 
 import numpy as np
+import pytest
+from anytree import Node
 
-from pose_editor.core.camera_view import create_camera_view, _extract_frame_number
+from pose_editor.core.camera_view import _extract_frame_number, create_camera_view
 from pose_editor.core.skeleton import SkeletonBase
 
 

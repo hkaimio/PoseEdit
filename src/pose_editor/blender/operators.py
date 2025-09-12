@@ -2,15 +2,16 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import bpy
-from . import scene_builder
+import math
 import os
 from pathlib import Path
-import math
 
-from ..core.camera_view import create_camera_view, BLENDER_TARGET_WIDTH
+import bpy
+
+from ..core.camera_view import BLENDER_TARGET_WIDTH, create_camera_view
 from ..core.skeleton import COCO133Skeleton
 from ..pose2sim.skeletons import COCO_133
+from . import scene_builder
 
 
 class PE_OT_CreateProject(bpy.types.Operator):
@@ -82,7 +83,6 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
         if not views:
             return
 
-        from ..blender import dal
 
         count = len(views)
         if count == 0:
@@ -118,8 +118,8 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
     )
 
     def execute(self, context):
-        from ..core.person_facade import IS_REAL_PERSON_INSTANCE, PERSON_DEFINITION_ID
         from ..blender import dal
+        from ..core.person_facade import IS_REAL_PERSON_INSTANCE, PERSON_DEFINITION_ID
 
         if not self.person_name:
             self.report({"ERROR"}, "Person name cannot be empty.")
@@ -211,8 +211,8 @@ class PE_OT_AssignTrack(bpy.types.Operator):
     bl_description = "Assign the selected raw track to the person instance from the current frame onwards"
 
     def execute(self, context):
-        from ..core.person_facade import RealPersonInstanceFacade
         from ..blender import dal
+        from ..core.person_facade import RealPersonInstanceFacade
 
         start_frame = context.scene.frame_current
         stitching_ui_state = context.scene.pose_editor_stitching_ui

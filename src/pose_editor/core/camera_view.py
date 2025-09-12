@@ -2,20 +2,19 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from typing import List, Dict
-from ..blender import dal
-from ..blender.dal import BlenderObjRef, SERIES_NAME
-from .person_data_series import RawPersonData
-from .marker_data import MarkerData
-from .person_data_view import PersonDataView
-from pathlib import Path
 import json
 import os
 import re
-import math
+from pathlib import Path
+
 import numpy as np
-from anytree import Node
 from anytree.iterators import PreOrderIter
+
+from ..blender import dal
+from ..blender.dal import SERIES_NAME, BlenderObjRef
+from .marker_data import MarkerData
+from .person_data_series import RawPersonData
+from .person_data_view import PersonDataView
 from .skeleton import SkeletonBase
 
 BLENDER_TARGET_WIDTH = 10.0  # Blender units
@@ -43,12 +42,12 @@ BRIGHT_COLORS = [
 ]
 
 
-class CameraView(object):
+class CameraView:
     def __init__(self):
         self._obj: BlenderObjRef | None = None
         self._video_surf: BlenderObjRef | None = None
 
-        self._raw_person_data: List[RawPersonData] = []
+        self._raw_person_data: list[RawPersonData] = []
 
 
 def _extract_frame_number(filename: str) -> int:
@@ -148,7 +147,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
     json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith(".json")])
 
-    pose_data_by_person: Dict[int, Dict[int, List[float]]] = {}
+    pose_data_by_person: dict[int, dict[int, list[float]]] = {}
     min_frame = float("inf")
     max_frame = float("-inf")
 
@@ -161,7 +160,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
         max_frame = max(max_frame, frame_num)
 
         filepath = os.path.join(pose_data_dir, filename)
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             data = json.load(f)
 
         if "people" in data:

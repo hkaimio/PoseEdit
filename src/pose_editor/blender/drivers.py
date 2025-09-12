@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import bpy
 
 
 def get_quality_driven_color_component(

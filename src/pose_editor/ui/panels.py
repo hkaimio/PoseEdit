@@ -53,8 +53,8 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         layout.label(text=f"Active View: {view_name}")
 
         # --- Find Real Persons and Raw Tracks ---
-        from ..core import person_facade
         from ..blender import dal
+        from ..core import person_facade
 
         real_person_refs = dal.find_all_objects_by_property(person_facade.IS_REAL_PERSON_INSTANCE, True)
 

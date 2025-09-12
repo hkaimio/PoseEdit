@@ -2,8 +2,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 # By patching the dal module where it is imported, we can control its behavior
 # for all classes that use it, like RealPersonInstanceFacade and MarkerData.
@@ -15,7 +16,6 @@ def mock_skeleton():
     from anytree import Node
 
     mock_skeleton = MagicMock()
-    from anytree import Node
 
     mock_skeleton = MagicMock()
     mock_skeleton._skeleton = Node("COCO-133", id=-1, children=[Node("Nose", id=0), Node("LEye", id=1)])

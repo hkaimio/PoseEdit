@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import pytest
 import bpy
 import numpy as np
+import pytest
 
 from pose_editor.blender import dal
 

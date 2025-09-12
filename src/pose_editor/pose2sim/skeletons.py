@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
 
 """
@@ -30,7 +29,6 @@ for pre, _, node in RenderTree(model):
 
 ## INIT
 from anytree import Node
-
 
 # ## AUTHORSHIP INFORMATION
 # __author__ = "David Pagnon"

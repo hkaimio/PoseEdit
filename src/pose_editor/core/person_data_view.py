@@ -2,12 +2,11 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from typing import List, Optional
+from typing import Optional
 
+from ..blender import dal
 from .marker_data import MarkerData
 from .skeleton import SkeletonBase
-from ..blender import dal
-from anytree import Node, RenderTree
 
 
 class PersonDataView:

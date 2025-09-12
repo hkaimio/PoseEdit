@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from .marker_data import MarkerData
+
 from ..blender import dal
-from typing import Optional
+from .marker_data import MarkerData
 from .person_data_view import PersonDataView
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
@@ -24,7 +24,7 @@ class RealPersonInstanceFacade:
         # A more robust implementation would not rely on name parsing
         self.person_id = person_instance_obj.name
 
-    def _get_dataseries_for_view(self, view_name: str) -> Optional[dal.BlenderObjRef]:
+    def _get_dataseries_for_view(self, view_name: str) -> dal.BlenderObjRef | None:
         """Finds the data series object for this person in a specific view."""
         # This facade assumes a specific naming convention established by the UI/operators
         ds_name = f"DS.{self.person_id}.{view_name}"
@@ -71,9 +71,6 @@ class RealPersonInstanceFacade:
         skeleton: "SkeletonBase",
     ):
         """Assigns a new source track for a segment of the timeline."""
-        from anytree.iterators import PreOrderIter
-        from .marker_data import MarkerData
-        import numpy as np
 
         end_frame = self.find_next_stitch_frame(view_name, start_frame)
         if end_frame < start_frame:

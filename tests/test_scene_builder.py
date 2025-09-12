@@ -4,8 +4,9 @@
 
 import bpy
 import pytest
-from pose_editor.blender import scene_builder
+
 from pose_editor import register, unregister  # Import register/unregister
+from pose_editor.blender import scene_builder
 
 
 @pytest.fixture

@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from typing import Generic, List, TypeVar, Optional, Tuple, Any
-import numpy as np
+from typing import Generic, Optional, TypeVar
+
 import bpy
-from . import drivers  # Import the new drivers module
+import numpy as np
 
 
 class BlenderObjRef:
@@ -93,7 +93,7 @@ MARKER_ROLE = CustomProperty[str]("marker_role")
 IS_CAMERA_VIEW = CustomProperty[bool]("is_camera_view")
 POSE_EDITOR_OBJECT_TYPE = CustomProperty[str]("pose_editor_object_type")
 CAMERA_VIEW_ID = CustomProperty[str]("camera_view_id")
-COLOR = CustomProperty[Tuple[float, float, float, float]]("color")
+COLOR = CustomProperty[tuple[float, float, float, float]]("color")
 
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
@@ -432,7 +432,7 @@ def set_camera_ortho(camera_obj_ref: BlenderObjRef, ortho_scale: float) -> None:
 
 
 def get_or_create_object(
-    name: str, obj_type: str, collection_name: Optional[str] = None, parent: Optional["BlenderObjRef"] = None
+    name: str, obj_type: str, collection_name: str | None = None, parent: Optional["BlenderObjRef"] = None
 ) -> "BlenderObjRef":
     """Gets an object by name, or creates it if it doesn't exist.
 
@@ -591,7 +591,7 @@ def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: st
     return fcurve
 
 
-def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, float]]) -> None:
+def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: list[tuple[float, float]]) -> None:
     """Populates an F-Curve with keyframes and sets their interpolation to LINEAR.
 
     Args:
@@ -630,7 +630,7 @@ def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, 
     obj.animation_data.action_slot = action.slots[prefixed_name]
 
 
-def get_children_of_object(obj_ref: "BlenderObjRef") -> List["BlenderObjRef"]:
+def get_children_of_object(obj_ref: "BlenderObjRef") -> list["BlenderObjRef"]:
     """Returns a list of direct children objects of a given object.
 
     Args:
@@ -676,7 +676,7 @@ def find_object_by_property(prop: CustomProperty[T], value: T) -> Optional["Blen
     return None
 
 
-def find_all_objects_by_property(prop: CustomProperty[T], value: T) -> List[BlenderObjRef]:
+def find_all_objects_by_property(prop: CustomProperty[T], value: T) -> list[BlenderObjRef]:
     """Finds all objects in the scene with a given custom property value.
 
     Args:
@@ -695,7 +695,7 @@ def find_all_objects_by_property(prop: CustomProperty[T], value: T) -> List[Blen
 
 def get_fcurve_from_action(
     action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1
-) -> Optional[bpy.types.FCurve]:
+) -> bpy.types.FCurve | None:
     """Gets an F-Curve from the correct channelbag for a slot.
 
     Args:
@@ -712,7 +712,7 @@ def get_fcurve_from_action(
     return channelbag.fcurves.find(data_path, index=index)
 
 
-def get_scene_frame_range() -> Tuple[int, int]:
+def get_scene_frame_range() -> tuple[int, int]:
     """Returns the start and end frame of the current scene.
 
     Returns:
@@ -723,7 +723,7 @@ def get_scene_frame_range() -> Tuple[int, int]:
 
 def add_bones_in_bulk(
     armature_obj_ref: BlenderObjRef,
-    bones_to_add: List[Tuple[str, Tuple[float, float, float], Tuple[float, float, float]]],
+    bones_to_add: list[tuple[str, tuple[float, float, float], tuple[float, float, float]]],
 ) -> None:
     """
     Adds multiple bones to an armature in a single Edit Mode session for efficiency.
@@ -754,7 +754,7 @@ def add_bones_in_bulk(
 
 
 def add_bone(
-    armature_obj_ref: BlenderObjRef, bone_name: str, head: Tuple[float, float, float], tail: Tuple[float, float, float]
+    armature_obj_ref: BlenderObjRef, bone_name: str, head: tuple[float, float, float], tail: tuple[float, float, float]
 ) -> None:
     """Adds a bone to an armature.
 
@@ -876,7 +876,7 @@ def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) ->
     return values
 
 
-def get_fcurve_on_object(obj_ref: BlenderObjRef, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
+def get_fcurve_on_object(obj_ref: BlenderObjRef, data_path: str, index: int = -1) -> bpy.types.FCurve | None:
     """Gets a specific F-Curve from an object's default action.
 
     Args:
@@ -894,7 +894,7 @@ def get_fcurve_on_object(obj_ref: BlenderObjRef, data_path: str, index: int = -1
     return obj.animation_data.action.fcurves.find(data_path, index=index)
 
 
-def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> List[Tuple[float, float]]:
+def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> list[tuple[float, float]]:
     """Extracts all keyframe points from an F-Curve.
 
     Args:
@@ -910,7 +910,7 @@ def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> List[Tuple[float, float]]:
 
 def get_fcurve_keyframes_in_range(
     fcurve: bpy.types.FCurve, start_frame: int, end_frame: int
-) -> List[Tuple[float, float]]:
+) -> list[tuple[float, float]]:
     """Extracts keyframe points from an F-Curve within a given frame range.
 
     Args:
@@ -928,7 +928,7 @@ def get_fcurve_keyframes_in_range(
 
 
 def replace_fcurve_keyframes_in_range(
-    fcurve: bpy.types.FCurve, start_frame: int, end_frame: int, new_keyframes: List[Tuple[float, float]]
+    fcurve: bpy.types.FCurve, start_frame: int, end_frame: int, new_keyframes: list[tuple[float, float]]
 ):
     """Replaces keyframes in a given range with a new set of keyframes.
 
@@ -956,7 +956,7 @@ def replace_fcurve_keyframes_in_range(
 
 
 def get_animation_data_as_numpy(
-    action: bpy.types.Action, columns: List[Tuple[str, str, int]], start_frame: int, end_frame: int
+    action: bpy.types.Action, columns: list[tuple[str, str, int]], start_frame: int, end_frame: int
 ) -> np.ndarray:
     """Reads animation data from a slotted Action into a NumPy array.
 
@@ -989,7 +989,7 @@ def get_animation_data_as_numpy(
 
 
 def set_fcurves_from_numpy(
-    action: bpy.types.Action, columns: List[Tuple[str, str, int]], start_frame: int, data: np.ndarray
+    action: bpy.types.Action, columns: list[tuple[str, str, int]], start_frame: int, data: np.ndarray
 ) -> None:
     """Populates multiple F-Curves in an Action from a single NumPy array.
 

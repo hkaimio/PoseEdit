@@ -1,6 +1,5 @@
-from typing import Dict, List
+
 from anytree import Node, findall
-from ..pose2sim import skeletons
 
 
 class SkeletonBase:
@@ -56,7 +55,7 @@ class SkeletonBase:
             return nodes[0].id
         return None
 
-    def calculate_fake_marker_pos(self, name: str, marker_data: Dict[str, List[float]]) -> List[float] | None:
+    def calculate_fake_marker_pos(self, name: str, marker_data: dict[str, list[float]]) -> list[float] | None:
         """
         Placeholder for future implementation to calculate fake marker positions.
 
@@ -78,7 +77,7 @@ class COCO133Skeleton(SkeletonBase):
     def __init__(self, skeleton_def: Node):
         super().__init__(skeleton_def)
 
-    def calculate_fake_marker_pos(self, name: str, marker_data: Dict[str, List[float]]) -> List[float] | None:
+    def calculate_fake_marker_pos(self, name: str, marker_data: dict[str, list[float]]) -> list[float] | None:
         """
         Calculates fake marker positions for 'Hip' and 'Neck' based on other joint data.
 

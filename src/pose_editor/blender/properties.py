@@ -2,9 +2,11 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import bpy
-from ..blender import dal
 import re
+
+import bpy
+
+from ..blender import dal
 
 
 def get_available_tracks(self, context):

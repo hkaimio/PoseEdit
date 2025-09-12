@@ -1,6 +1,4 @@
-import pytest
-from anytree import Node
-from pose_editor.core.skeleton import SkeletonBase, COCO133Skeleton
+from pose_editor.core.skeleton import COCO133Skeleton, SkeletonBase
 from pose_editor.pose2sim import skeletons
 
 

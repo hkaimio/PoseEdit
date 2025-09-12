@@ -4,7 +4,7 @@
 
 import bpy
 import pytest
-from pose_editor.blender.operators import PE_OT_CreateProject
+
 from pose_editor import register, unregister  # Import register/unregister
 
 

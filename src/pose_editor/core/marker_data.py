@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+
 import numpy as np
-from typing import List, Optional, Tuple, Any
 
 # No direct 'import bpy' here! All Blender interactions go through the DAL.
 from ..blender import dal
@@ -25,7 +25,7 @@ class MarkerData:
         action, such as its `series_name` and the `skeleton` type it uses.
     """
 
-    def __init__(self, series_name: str, skeleton_name: Optional[str] = None):
+    def __init__(self, series_name: str, skeleton_name: str | None = None):
         """Initializes the MarkerData object.
 
         This finds or creates the necessary Blender data-blocks (a DataSeries
@@ -56,7 +56,7 @@ class MarkerData:
     def set_animation_data(
         self,
         data: np.ndarray,
-        columns: List[Tuple[str, str, int]],  # (marker_name, property, index)
+        columns: list[tuple[str, str, int]],  # (marker_name, property, index)
         start_frame: int = 0,
     ):
         """Writes animation data from a NumPy array into the Action's F-Curves.
@@ -89,7 +89,7 @@ class MarkerData:
 
     def set_animation_data_from_numpy(
         self,
-        columns: List[Tuple[str, str, int]],  # (marker_name, property, index)
+        columns: list[tuple[str, str, int]],  # (marker_name, property, index)
         start_frame: int,
         data: np.ndarray,
     ):

@@ -2,9 +2,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
+
 import numpy as np
+import pytest
 
 # Mock the entire dal module before importing MarkerData
 # This is a common pattern for testing modules that depend on an unavailable library (like bpy)
@@ -95,14 +96,14 @@ class TestMarkerData:
 
         # Verify that set_fcurve_keyframes was called with the created fcurve
         # and the correctly structured keyframe data
-        keyframes_col0 = list(zip(range(start_frame, start_frame + frames), data[:, 0]))
+        keyframes_col0 = list(zip(range(start_frame, start_frame + frames), data[:, 0], strict=False))
         mock_dal.set_fcurve_keyframes.assert_any_call(mock_fcurve, keyframes_col0)
 
     @patch("pose_editor.core.marker_data.dal")
     def test_apply_to_view(self, mock_dal, mock_action, mock_blender_obj_ref):
         """Test that apply_to_view correctly assigns the action to child objects."""
-        from pose_editor.core.marker_data import MarkerData
         from pose_editor.blender.dal import BlenderObjRef  # Import BlenderObjRef
+        from pose_editor.core.marker_data import MarkerData
         from pose_editor.core.person_data_view import PersonDataView  # Import PersonDataView
 
         # Arrange

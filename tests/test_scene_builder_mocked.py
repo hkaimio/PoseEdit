@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
+
 from pose_editor.blender import scene_builder
 
 
