@@ -78,12 +78,14 @@ class TestPersonDataView:
             skeleton=mock_skeleton,
             color=marker_color,
             camera_view_obj_ref=mock_camera_view_obj_ref,
-            collection=None # Assuming default collection for now
+            collection=None,  # Assuming default collection for now
         )
 
         # Assert
         # Check root object creation
-        mock_dal.get_or_create_object.assert_any_call(name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=mock_camera_view_obj_ref)
+        mock_dal.get_or_create_object.assert_any_call(
+            name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=mock_camera_view_obj_ref
+        )
 
         # Check marker creation
         assert mock_dal.create_marker.call_count == 3
@@ -109,7 +111,7 @@ class TestPersonDataView:
         person_data_view_instance.view_name = view_name
         person_data_view_instance.skeleton = mock_skeleton
         person_data_view_instance.color = marker_color
-        person_data_view_instance.view_root_object = mock_blender_obj_ref # Mock the root object
+        person_data_view_instance.view_root_object = mock_blender_obj_ref  # Mock the root object
 
         # Mock marker objects by role for _populate_marker_objects_by_role
         mock_root_marker_ref = MagicMock()
@@ -150,8 +152,7 @@ class TestPersonDataView:
         # Check that the number of bones to add is correct (RootNode-Nose, RootNode-LEye)
         assert len(mock_dal.add_bones_in_bulk.call_args[0][1]) == 2
         assert mock_dal.add_bone_constraint.call_count == 4  # 2 bones * 2 constraints
-        assert mock_dal.add_bone_driver.call_count == 2 # 2 bones * 1 driver
-        
+        assert mock_dal.add_bone_driver.call_count == 2  # 2 bones * 1 driver
 
     @patch("pose_editor.core.person_data_view.dal")
     def test_connect_to_series(self, mock_dal, mock_skeleton, mock_marker_data):
@@ -172,16 +173,18 @@ class TestPersonDataView:
             lambda obj_ref, prop: "Nose" if obj_ref.name == "Nose_marker_obj" else "LEye"
         )
 
-        mock_view_root_obj_ref = MagicMock() # Mock the root object
-        mock_view_root_obj_ref.name = view_name # Ensure it has a name
-        mock_dal.get_custom_property.side_effect = lambda obj, prop: {
-            mock_view_root_obj_ref: {
-                mock_dal.POSE_EDITOR_OBJECT_TYPE: "PersonDataView",
-                mock_dal.SKELETON: mock_skeleton._skeleton.name,
-                mock_dal.COLOR: marker_color,
-                mock_dal.CAMERA_VIEW_ID: "cam1" # Example camera view ID
-            }
-        }.get(obj, {}).get(prop) # Mock custom properties for from_blender_object
+        mock_view_root_obj_ref = MagicMock()  # Mock the root object
+        mock_view_root_obj_ref.name = view_name  # Ensure it has a name
+        mock_dal.get_custom_property.side_effect = (
+            lambda obj, prop: {
+                mock_view_root_obj_ref: {
+                    mock_dal.POSE_EDITOR_OBJECT_TYPE: "PersonDataView",
+                    mock_dal.SKELETON: mock_skeleton._skeleton.name,
+                    mock_dal.COLOR: marker_color,
+                    mock_dal.CAMERA_VIEW_ID: "cam1",  # Example camera view ID
+                }
+            }.get(obj, {}).get(prop)
+        )  # Mock custom properties for from_blender_object
 
         view = PersonDataView.from_blender_object(mock_view_root_obj_ref)
 
@@ -206,9 +209,9 @@ class TestPersonDataView:
         mock_leye_marker_ref = MagicMock()
         mock_leye_marker_ref.name = "LEye_marker_obj"
         mock_dal.get_children_of_object.return_value = [mock_nose_marker_ref, mock_leye_marker_ref]
-        
-        mock_view_root_obj_ref = MagicMock() # Mock the root object
-        mock_view_root_obj_ref.name = view_name # Ensure it has a name
+
+        mock_view_root_obj_ref = MagicMock()  # Mock the root object
+        mock_view_root_obj_ref.name = view_name  # Ensure it has a name
 
         def combined_get_custom_property_side_effect(obj, prop):
             if obj == mock_view_root_obj_ref:
@@ -217,7 +220,7 @@ class TestPersonDataView:
                     mock_dal.POSE_EDITOR_OBJECT_TYPE: "PersonDataView",
                     mock_dal.SKELETON: mock_skeleton._skeleton.name,
                     mock_dal.COLOR: marker_color,
-                    mock_dal.CAMERA_VIEW_ID: "cam1"
+                    mock_dal.CAMERA_VIEW_ID: "cam1",
                 }.get(prop)
             elif prop == mock_dal.MARKER_ROLE:
                 # Logic for marker roles
@@ -225,7 +228,7 @@ class TestPersonDataView:
                     return "Nose"
                 elif obj == mock_leye_marker_ref:
                     return "LEye"
-            return None # Default for other cases
+            return None  # Default for other cases
 
         mock_dal.get_custom_property.side_effect = combined_get_custom_property_side_effect
 

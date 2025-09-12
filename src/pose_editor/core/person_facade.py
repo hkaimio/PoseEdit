@@ -59,7 +59,7 @@ class RealPersonInstanceFacade:
         keyframes = dal.get_fcurve_keyframes(fcurve)
         for frame, _ in keyframes:
             if frame > start_frame:
-                return int(frame) - 1 # The segment ends the frame before the next stitch
+                return int(frame) - 1  # The segment ends the frame before the next stitch
 
         return scene_end
 
@@ -98,7 +98,7 @@ class RealPersonInstanceFacade:
             joint_name = joint_node.name
             columns_to_copy.append((joint_name, "location", 0))  # X
             columns_to_copy.append((joint_name, "location", 1))  # Y
-            columns_to_copy.append((joint_name, '["quality"]', -1)) # Quality
+            columns_to_copy.append((joint_name, '["quality"]', -1))  # Quality
 
         # 3. Read data from the source action
         print(f"Reading data from {source_md.action.name}...")
@@ -112,15 +112,15 @@ class RealPersonInstanceFacade:
 
         # 4. Write data to the target action
         print(f"Writing data to {target_md.action.name}...")
-        dal.set_fcurves_from_numpy(
-            target_md.action, columns_to_copy, start_frame, source_data_np
-        )
+        dal.set_fcurves_from_numpy(target_md.action, columns_to_copy, start_frame, source_data_np)
         print("Write complete.")
 
         # 5. Set the keyframe for the active_track_index
         target_ds_obj = self._get_dataseries_for_view(view_name)
         if target_ds_obj:
-            print(f"Setting active_track_index keyframe on {target_ds_obj.name} at frame {start_frame} to {source_track_index}")
+            print(
+                f"Setting active_track_index keyframe on {target_ds_obj.name} at frame {start_frame} to {source_track_index}"
+            )
             dal.set_custom_property(target_ds_obj, ACTIVE_TRACK_INDEX, source_track_index)
             dal.add_keyframe(target_ds_obj, start_frame, {'["active_track_index"]': [source_track_index]})
 
@@ -138,25 +138,27 @@ class RealPersonInstanceFacade:
         if real_person_pv is None:
             # Fallback: If for some reason the root object doesn't exist or is not valid, create a new one.
             # This case should ideally not happen if PE_OT_AddPersonInstance worked correctly.
-            print(f"Warning: PersonDataView root object {real_person_pv_name} not found or invalid. Creating a new one.")
+            print(
+                f"Warning: PersonDataView root object {real_person_pv_name} not found or invalid. Creating a new one."
+            )
             # We need to get the collection for the PersonDataView constructor
-            person_views_collection = dal.get_or_create_collection('PersonViews')
+            person_views_collection = dal.get_or_create_collection("PersonViews")
             # We need the camera_view_obj_ref to create a new PersonDataView
             camera_view_obj_ref = dal.get_object_by_name(f"View_{view_name}")
             if camera_view_obj_ref is None:
                 print(f"Error: CameraView {view_name} not found. Cannot create new PersonDataView.")
-                return # Or raise an error
+                return  # Or raise an error
 
             real_person_pv = PersonDataView.create_new(
                 view_name=real_person_pv_name,
-                skeleton=skeleton, # Skeleton is still needed for new creation
-                color=(1.0, 1.0, 1.0, 1.0), # Default color for new creation
+                skeleton=skeleton,  # Skeleton is still needed for new creation
+                color=(1.0, 1.0, 1.0, 1.0),  # Default color for new creation
                 camera_view_obj_ref=camera_view_obj_ref,
-                collection=person_views_collection
+                collection=person_views_collection,
             )
-            if real_person_pv is None: # Should not happen if create_new works
+            if real_person_pv is None:  # Should not happen if create_new works
                 print(f"Error: Failed to create new PersonDataView {real_person_pv_name}.")
-                return # Or raise an error
+                return  # Or raise an error
 
         target_md.apply_to_view(real_person_pv)
         print(f"Re-connected PersonDataView {real_person_pv_name} to action.")

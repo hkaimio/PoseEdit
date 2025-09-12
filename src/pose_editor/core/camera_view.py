@@ -28,7 +28,7 @@ PASTEL_COLORS = [
     (0.76, 0.69, 0.88, 1.0),  # Light Purple
     (1.0, 0.70, 0.28, 1.0),  # Light Orange
     (0.74, 0.93, 0.71, 1.0),  # Mint
-        (1.0, 0.82, 0.86, 1.0),  # Light Coral
+    (1.0, 0.82, 0.86, 1.0),  # Light Coral
 ]
 
 BRIGHT_COLORS = [
@@ -41,6 +41,7 @@ BRIGHT_COLORS = [
     (1.0, 0.5, 0.0, 1.0),  # Orange
     (0.5, 0.0, 1.0, 1.0),  # Purple
 ]
+
 
 class CameraView(object):
     def __init__(self):
@@ -228,7 +229,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
             skeleton=skeleton_obj,
             color=color,
             camera_view_obj_ref=camera_view._obj,
-            collection=None # Or a specific collection if needed
+            collection=None,  # Or a specific collection if needed
         )
         print(f"Linking PersonDataView {person_view.view_name} to MarkerData series {series_name}...")
         person_view.connect_to_series(marker_data)

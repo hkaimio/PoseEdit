@@ -29,7 +29,7 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
     bl_region_type = "UI"
     bl_category = "Pose Editor"
     bl_parent_id = "PE_PT_ProjectPanel"
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_options = {"DEFAULT_CLOSED"}
 
     @classmethod
     def poll(cls, context):
@@ -48,7 +48,7 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         if not active_camera.name.startswith("Cam_"):
             layout.label(text="Active camera is not a Camera View")
             return
-        
+
         view_name = active_camera.name.replace("Cam_", "")
         layout.label(text=f"Active View: {view_name}")
 
@@ -57,15 +57,15 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         from ..blender import dal
 
         real_person_refs = dal.find_all_objects_by_property(person_facade.IS_REAL_PERSON_INSTANCE, True)
-        
+
         # TODO: Find raw tracks for the current view
         # This is a placeholder
         raw_tracks = [("-1", "-- Select --", ""), ("0", "Person 0", ""), ("1", "Person 1", "")]
 
-        # --- Draw UI --- 
+        # --- Draw UI ---
         layout.operator("pose_editor.add_person_instance", text="Add New Real Person")
 
-        # --- Draw UI --- 
+        # --- Draw UI ---
         if not stitching_ui_state.items:
             layout.label(text="No Real Persons created yet.")
             return

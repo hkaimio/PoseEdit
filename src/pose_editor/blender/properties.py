@@ -6,10 +6,11 @@ import bpy
 from ..blender import dal
 import re
 
+
 def get_available_tracks(self, context):
     """Dynamically gets the list of raw tracks for the active camera view."""
     items = [("-1", "-- Select a Track --", "")]
-    
+
     if not context or not context.space_data or not context.space_data.camera:
         return items
 
@@ -30,37 +31,33 @@ def get_available_tracks(self, context):
 
     # Extract the person index from the name (e.g., "PV.cam1_person5" -> "5")
     for name in sorted(raw_track_names):
-        match = re.search(r'person(\d+)$', name)
+        match = re.search(r"person(\d+)$", name)
         if match:
             track_index = match.group(1)
             # The EnumProperty item format is (identifier, display_name, description)
             items.append((track_index, f"Person {track_index}", f"Use raw track from Person {track_index}"))
-            
+
     return items
+
 
 class StitchingUIItem(bpy.types.PropertyGroup):
     """Represents a single row in the stitching UI, for one RealPerson."""
-    
+
     person_name: bpy.props.StringProperty(
-        name="Person Name",
-        description="The name of the RealPersonInstance this row controls"
+        name="Person Name", description="The name of the RealPersonInstance this row controls"
     )
 
     # The `items` for this EnumProperty will be generated dynamically.
     selected_track: bpy.props.EnumProperty(
-        name="Source Track",
-        description="The raw track to use as a source for this person",
-        items=get_available_tracks
+        name="Source Track", description="The raw track to use as a source for this person", items=get_available_tracks
     )
+
 
 class StitchingUIState(bpy.types.PropertyGroup):
     """Holds the state for the entire stitching UI panel."""
 
-    items: bpy.props.CollectionProperty(
-        type=StitchingUIItem
-    )
+    items: bpy.props.CollectionProperty(type=StitchingUIItem)
 
     active_camera_view: bpy.props.StringProperty(
-        name="Active Camera View",
-        description="The camera view currently being displayed in the UI"
+        name="Active Camera View", description="The camera view currently being displayed in the UI"
     )

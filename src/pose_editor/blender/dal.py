@@ -235,7 +235,13 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
         f.keyframe_points.remove(f.keyframe_points[-1])
 
 
-def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float], collection: bpy.types.Collection=None, image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png") -> BlenderObjRef:
+def create_marker(
+    parent: BlenderObjRef,
+    name: str,
+    color: tuple[float, float, float, float],
+    collection: bpy.types.Collection = None,
+    image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png",
+) -> BlenderObjRef:
     """
     Creates a new empty object with an image, to be used as a marker.
 
@@ -257,7 +263,7 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
     marker_obj = bpy.data.objects.new(f"{parent_obj.name}_{name}", None)
     marker_obj.empty_display_type = "IMAGE"
     marker_obj.empty_display_size = 4
-    
+
     # Load the image
     try:
         img = load_image(image_path)
@@ -270,7 +276,7 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     # Set parent
     marker_obj.parent = parent_obj
-    marker_obj.matrix_parent_inverse.identity() # Clear parent inverse to keep local transform
+    marker_obj.matrix_parent_inverse.identity()  # Clear parent inverse to keep local transform
 
     # Set name
     marker_obj.name = f"{parent_obj.name}_{name}"
@@ -288,7 +294,7 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
     marker_obj["_original_color_a"] = color[3]
 
     # Drive the object color with the quality
-    for i in range(4): # R, G, B, A
+    for i in range(4):  # R, G, B, A
         driver = marker_obj.driver_add("color", i).driver
         driver.type = "SCRIPTED"
         driver.expression = f"get_quality_driven_color_component(quality, r, g, b, a, {i})"
@@ -884,7 +890,7 @@ def get_fcurve_on_object(obj_ref: BlenderObjRef, data_path: str, index: int = -1
     obj = obj_ref._get_obj()
     if not obj or not obj.animation_data or not obj.animation_data.action:
         return None
-    
+
     return obj.animation_data.action.fcurves.find(data_path, index=index)
 
 
@@ -902,7 +908,9 @@ def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> List[Tuple[float, float]]:
     return [(kp.co[0], kp.co[1]) for kp in fcurve.keyframe_points]
 
 
-def get_fcurve_keyframes_in_range(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> List[Tuple[float, float]]:
+def get_fcurve_keyframes_in_range(
+    fcurve: bpy.types.FCurve, start_frame: int, end_frame: int
+) -> List[Tuple[float, float]]:
     """Extracts keyframe points from an F-Curve within a given frame range.
 
     Args:
@@ -915,15 +923,13 @@ def get_fcurve_keyframes_in_range(fcurve: bpy.types.FCurve, start_frame: int, en
     """
     if not fcurve:
         return []
-    
-    return [
-        (kp.co[0], kp.co[1]) 
-        for kp in fcurve.keyframe_points 
-        if start_frame <= kp.co[0] <= end_frame
-    ]
+
+    return [(kp.co[0], kp.co[1]) for kp in fcurve.keyframe_points if start_frame <= kp.co[0] <= end_frame]
 
 
-def replace_fcurve_keyframes_in_range(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int, new_keyframes: List[Tuple[float, float]]):
+def replace_fcurve_keyframes_in_range(
+    fcurve: bpy.types.FCurve, start_frame: int, end_frame: int, new_keyframes: List[Tuple[float, float]]
+):
     """Replaces keyframes in a given range with a new set of keyframes.
 
     This function first removes all keyframes within the specified range and then
@@ -944,16 +950,13 @@ def replace_fcurve_keyframes_in_range(fcurve: bpy.types.FCurve, start_frame: int
     # Add the new keyframes
     for frame, value in new_keyframes:
         kp = fcurve.keyframe_points.insert(frame, value)
-        kp.interpolation = 'LINEAR'
-    
+        kp.interpolation = "LINEAR"
+
     fcurve.update()
 
 
 def get_animation_data_as_numpy(
-    action: bpy.types.Action, 
-    columns: List[Tuple[str, str, int]], 
-    start_frame: int, 
-    end_frame: int
+    action: bpy.types.Action, columns: List[Tuple[str, str, int]], start_frame: int, end_frame: int
 ) -> np.ndarray:
     """Reads animation data from a slotted Action into a NumPy array.
 
@@ -981,7 +984,7 @@ def get_animation_data_as_numpy(
             for frame_offset in range(num_frames):
                 frame = start_frame + frame_offset
                 data[frame_offset, col_idx] = fcurve.evaluate(float(frame))
-    
+
     return data
 
 

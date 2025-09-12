@@ -76,7 +76,7 @@ class PersonDataView:
         skeleton: SkeletonBase,
         color: tuple[float, float, float, float],
         camera_view_obj_ref: dal.BlenderObjRef,
-        collection: 'bpy.types.Collection' = None,
+        collection: "bpy.types.Collection" = None,
     ) -> "PersonDataView":
         """Creates a new PersonDataView, including its Blender objects.
 
@@ -102,7 +102,7 @@ class PersonDataView:
         dal.set_custom_property(view_root_object, dal.CAMERA_VIEW_ID, camera_view_obj_ref.name)
 
         # Create a temporary instance to call internal creation methods
-        temp_instance = cls.__new__(cls) # Bypass __init__ for now
+        temp_instance = cls.__new__(cls)  # Bypass __init__ for now
         temp_instance.view_root_object = view_root_object
         temp_instance.view_name = view_name
         temp_instance.skeleton = skeleton
@@ -155,7 +155,9 @@ class PersonDataView:
         return instance
 
     @classmethod
-    def from_existing_blender_object(cls, view_root_obj_ref: dal.BlenderObjRef, skeleton: SkeletonBase) -> "PersonDataView":
+    def from_existing_blender_object(
+        cls, view_root_obj_ref: dal.BlenderObjRef, skeleton: SkeletonBase
+    ) -> "PersonDataView":
         """Builds a PersonDataView instance from existing Blender objects.
 
         This factory method assumes the Blender objects (root Empty, markers, armature)
@@ -177,7 +179,7 @@ class PersonDataView:
         # or can be derived from the first marker's original color properties.
         # For now, we'll use a default color.
         # A more robust solution would store the color on the view_root_object.
-        color = (1.0, 1.0, 1.0, 1.0) # Default color for reconstruction
+        color = (1.0, 1.0, 1.0, 1.0)  # Default color for reconstruction
 
         # Instantiate PersonDataView, telling it NOT to create Blender objects
         instance = cls(view_name, skeleton, color, create_blender_objects=False)
@@ -185,8 +187,8 @@ class PersonDataView:
         # The __init__ with create_blender_objects=False already handles
         # populating _marker_objects_by_role and finding the armature.
         return instance
-    
-    def _create_marker_objects(self, collection: 'bpy.types.Collection'):
+
+    def _create_marker_objects(self, collection: "bpy.types.Collection"):
         """Creates a marker object for each joint in the skeleton."""
         if self.skeleton is None or self.skeleton._skeleton is None:
             return

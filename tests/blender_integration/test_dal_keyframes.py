@@ -6,6 +6,7 @@ import bpy
 import pytest
 from pose_editor.blender import dal
 
+
 @pytest.fixture
 def setup_blender_scene(request):
     """Set up a clean Blender scene for each test."""
@@ -15,7 +16,7 @@ def setup_blender_scene(request):
     bpy.ops.mesh.primitive_cube_add()
     obj = bpy.context.object
     obj.name = "TestObject"
-    
+
     # Create an action and link it
     action = bpy.data.actions.new("TestAction")
     obj.animation_data_create()

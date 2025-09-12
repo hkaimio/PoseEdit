@@ -33,28 +33,28 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
 
     directory: bpy.props.StringProperty(
         name="Path",
-        subtype='DIR_PATH',
+        subtype="DIR_PATH",
     )
 
     def execute(self, context):
         base_dir = Path(self.directory)
         videos_dir = base_dir / "videos"
-        
+
         pose_dir = base_dir / "pose-associated"
         if not pose_dir.is_dir():
             pose_dir = base_dir / "pose"
-        
+
         if not videos_dir.is_dir() or not pose_dir.is_dir():
-            self.report({'ERROR'}, "Videos or pose directory not found.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, "Videos or pose directory not found.")
+            return {"CANCELLED"}
 
         video_files = [f for f in os.listdir(videos_dir) if f.endswith((".mp4", ".avi", ".mov"))]
-        
+
         camera_views = []
         for video_file in video_files:
             camera_name = Path(video_file).stem
             json_dir = pose_dir / f"{camera_name}_json"
-            
+
             if json_dir.is_dir():
                 # For now, we'll hardcode the COCO-133 skeleton.
                 # This should be a user choice later.
@@ -62,10 +62,7 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
                 skeleton = COCO133Skeleton(skeleton_def)
 
                 view = create_camera_view(
-                    name=camera_name,
-                    video_file=videos_dir / video_file,
-                    pose_data_dir=json_dir,
-                    skeleton_obj=skeleton
+                    name=camera_name, video_file=videos_dir / video_file, pose_data_dir=json_dir, skeleton_obj=skeleton
                 )
                 camera_views.append(view)
             else:
@@ -73,12 +70,12 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
 
         self._arrange_views_in_grid(camera_views)
 
-        self.report({'INFO'}, f"Loaded {len(camera_views)} camera views.")
-        return {'FINISHED'}
+        self.report({"INFO"}, f"Loaded {len(camera_views)} camera views.")
+        return {"FINISHED"}
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
+        return {"RUNNING_MODAL"}
 
     def _arrange_views_in_grid(self, views: list):
         """Arranges the camera view root objects in a grid."""
@@ -90,9 +87,9 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
         count = len(views)
         if count == 0:
             return
-            
+
         cols = math.ceil(math.sqrt(count))
-        
+
         # A bit of padding between views
         padding = 2.0
         view_width = BLENDER_TARGET_WIDTH + padding
@@ -100,10 +97,10 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
         for i, view in enumerate(views):
             row = i // cols
             col = i % cols
-            
+
             x = col * view_width
-            y = -row * view_width # Place rows downwards in Y
-            
+            y = -row * view_width  # Place rows downwards in Y
+
             view_obj = view._obj._get_obj()
             if view_obj:
                 view_obj.location = (x, y, 0)
@@ -117,9 +114,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
     bl_description = "Adds a new Real Person Instance to the scene for stitching."
 
     person_name: bpy.props.StringProperty(
-        name="Person Name",
-        description="Name for the new Real Person Instance",
-        default="New Person"
+        name="Person Name", description="Name for the new Real Person Instance", default="New Person"
     )
 
     def execute(self, context):
@@ -127,25 +122,27 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
         from ..blender import dal
 
         if not self.person_name:
-            self.report({'ERROR'}, "Person name cannot be empty.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, "Person name cannot be empty.")
+            return {"CANCELLED"}
 
         # Check if a person with this name already exists
         existing_person = dal.get_object_by_name(self.person_name)
         if existing_person and dal.get_custom_property(existing_person, IS_REAL_PERSON_INSTANCE):
-            self.report({'ERROR'}, f"A Real Person named '{self.person_name}' already exists.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, f"A Real Person named '{self.person_name}' already exists.")
+            return {"CANCELLED"}
 
         # Create the master Empty object for the RealPersonInstance
         person_obj_ref = dal.get_or_create_object(
             name=self.person_name,
-            obj_type='EMPTY',
-            collection_name='RealPersons' # Assuming a collection for RealPersons
+            obj_type="EMPTY",
+            collection_name="RealPersons",  # Assuming a collection for RealPersons
         )
 
         # Set custom properties to identify it as a RealPersonInstance
         dal.set_custom_property(person_obj_ref, IS_REAL_PERSON_INSTANCE, True)
-        dal.set_custom_property(person_obj_ref, PERSON_DEFINITION_ID, self.person_name) # For now, name is also definition ID
+        dal.set_custom_property(
+            person_obj_ref, PERSON_DEFINITION_ID, self.person_name
+        )  # For now, name is also definition ID
 
         # Add this person to the UI state collection
         stitching_ui_state = context.scene.pose_editor_stitching_ui
@@ -161,14 +158,14 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
 
         # Find all existing CameraView root objects
         camera_view_refs = dal.find_all_objects_by_property(dal.IS_CAMERA_VIEW, True)
-        
+
         # For now, hardcode skeleton. In future, this should be from PersonDefinition.
         skeleton_def = COCO_133
         skeleton = COCO133Skeleton(skeleton_def)
 
         for i, cam_view_ref in enumerate(camera_view_refs):
             cam_view_name = dal.get_custom_property(cam_view_ref, dal.SERIES_NAME)
-            
+
             # Determine color for this Real Person's view
             color = BRIGHT_COLORS[i % len(BRIGHT_COLORS)]
 
@@ -183,7 +180,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
                 skeleton=skeleton,
                 color=color,
                 camera_view_obj_ref=cam_view_ref,
-                collection=None # Assuming default collection for now, or pass a specific one if needed
+                collection=None,  # Assuming default collection for now, or pass a specific one if needed
             )
 
             # Link PersonDataView to MarkerData
@@ -196,11 +193,11 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
             # Offset it to the right of the raw tracks
             # Assuming raw tracks are at local (0,0,0) within the CameraView
             # BLENDER_TARGET_WIDTH is the width of the video plane
-            offset_x = BLENDER_TARGET_WIDTH + 1.0 # Offset by width + some padding
+            offset_x = BLENDER_TARGET_WIDTH + 1.0  # Offset by width + some padding
             real_person_pv.view_root_object._get_obj().location = (offset_x, 0, 0)
 
-        self.report({'INFO'}, f"Real Person '{self.person_name}' added.")
-        return {'FINISHED'}
+        self.report({"INFO"}, f"Real Person '{self.person_name}' added.")
+        return {"FINISHED"}
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
@@ -223,8 +220,8 @@ class PE_OT_AssignTrack(bpy.types.Operator):
         # Get active view
         active_camera = context.space_data.camera
         if not active_camera or not active_camera.name.startswith("Cam_"):
-            self.report({'ERROR'}, "No active camera view found.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, "No active camera view found.")
+            return {"CANCELLED"}
         view_name = active_camera.name.replace("Cam_", "")
 
         # TODO: This is a temporary way to get a skeleton. This should
@@ -238,7 +235,7 @@ class PE_OT_AssignTrack(bpy.types.Operator):
                 continue
 
             facade = RealPersonInstanceFacade(person_ref)
-            
+
             current_track_index = facade.get_active_track_index_at_frame(view_name, start_frame)
             selected_track_index = int(item.selected_track)
 
@@ -248,8 +245,8 @@ class PE_OT_AssignTrack(bpy.types.Operator):
                     view_name=view_name,
                     source_track_index=selected_track_index,
                     start_frame=start_frame,
-                    skeleton=skeleton
+                    skeleton=skeleton,
                 )
 
-        self.report({'INFO'}, f"Stitching applied at frame {start_frame}.")
-        return {'FINISHED'}
+        self.report({"INFO"}, f"Stitching applied at frame {start_frame}.")
+        return {"FINISHED"}
