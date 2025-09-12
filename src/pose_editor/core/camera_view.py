@@ -1,8 +1,6 @@
 from typing import List, Dict
 from ..blender import dal
-from ..blender.dal import (BlenderObjRef, 
-                            CAMERA_X_FACTOR, CAMERA_Y_FACTOR, 
-                            CAMERA_X_OFFSET, CAMERA_Y_OFFSET, SERIES_NAME)
+from ..blender.dal import (BlenderObjRef, SERIES_NAME)
 from .person_data_series import RawPersonData
 from .marker_data import MarkerData
 from .person_data_view import PersonDataView
@@ -16,9 +14,6 @@ from anytree import Node
 from anytree.iterators import PreOrderIter
 from .skeleton import SkeletonBase
 
-# Placeholder video resolution and target Blender width
-VIDEO_WIDTH = 1920
-VIDEO_HEIGHT = 1080
 BLENDER_TARGET_WIDTH = 10.0 # Blender units
 
 class CameraView(object):
@@ -74,26 +69,6 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     camera_view._obj = dal.create_empty(camera_view_empty_name)
     dal.set_custom_property(camera_view._obj, SERIES_NAME, name)
 
-    if VIDEO_WIDTH > VIDEO_HEIGHT:
-        scale_factor = BLENDER_TARGET_WIDTH / VIDEO_WIDTH
-    else:
-        scale_factor = BLENDER_TARGET_WIDTH / VIDEO_HEIGHT
-
-    xfactor = scale_factor
-    yfactor = -scale_factor
-    zfactor = scale_factor
-
-    scaled_blender_width = VIDEO_WIDTH * scale_factor
-    scaled_blender_height = VIDEO_HEIGHT * scale_factor
-
-    xoffset = -scaled_blender_width / 2
-    yoffset = scaled_blender_height / 2
-
-    dal.set_custom_property(camera_view._obj, CAMERA_X_FACTOR, xfactor)
-    dal.set_custom_property(camera_view._obj, CAMERA_Y_FACTOR, yfactor)
-    dal.set_custom_property(camera_view._obj, CAMERA_X_OFFSET, xoffset)
-    dal.set_custom_property(camera_view._obj, CAMERA_Y_OFFSET, yoffset)
-
     # Create camera and set background video
     camera_name = f"Cam_{name}"
     camera_obj_ref = dal.create_camera(camera_name, parent_obj=camera_view._obj)
@@ -104,6 +79,25 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     camera_obj.rotation_euler = (0, 0, 0)
 
     movie_clip = dal.load_movie_clip(str(video_file))
+    video_width, video_height = movie_clip.size
+
+    if video_width > video_height:
+        scale_factor = BLENDER_TARGET_WIDTH / video_width
+    else:
+        scale_factor = BLENDER_TARGET_WIDTH / video_height
+
+    xfactor = scale_factor
+    yfactor = -scale_factor
+    zfactor = scale_factor
+
+    scaled_blender_width = video_width * scale_factor
+    scaled_blender_height = video_height * scale_factor
+
+    xoffset = -scaled_blender_width / 2
+    yoffset = scaled_blender_height / 2
+
+    
+
     dal.set_camera_background(camera_obj_ref, movie_clip)
     dal.set_camera_ortho(camera_obj_ref, scaled_blender_width)
 
@@ -138,8 +132,6 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     num_joints = len(skeleton_obj._skeleton.leaves)
 
     for person_idx, frames_data in pose_data_by_person.items():
-        if int(person_idx) != 5:
-            continue  # For now, only process person index 5
         print(f"Processing person {person_idx} with {len(frames_data)} frames...")
         series_name = f"{name}_person{person_idx}"
         marker_data = MarkerData(series_name, "COCO_133")

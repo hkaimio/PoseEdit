@@ -76,12 +76,6 @@ def get_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T]) -> T | 
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     return obj.get(prop._prop_name)
 
-# Specific custom properties for CameraView objects
-CAMERA_X_FACTOR = CustomProperty[float]("camera_x_factor")
-CAMERA_Y_FACTOR = CustomProperty[float]("camera_y_factor")
-CAMERA_X_OFFSET = CustomProperty[float]("camera_x_offset")
-CAMERA_Y_OFFSET = CustomProperty[float]("camera_y_offset")
-
 # Specific custom properties for DataSeries objects
 SERIES_NAME = CustomProperty[str]("series_name")
 SKELETON = CustomProperty[str]("skeleton")

@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "A Blender add-on for editing motion capture pose data."
 requires-python = ">=3.11, <3.12"
 dependencies = [
+    "anytree>=2.13.0",
 ]
 
 [project.optional-dependencies]

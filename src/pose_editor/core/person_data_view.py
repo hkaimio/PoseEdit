@@ -42,11 +42,14 @@ class PersonDataView:
         dal.set_custom_property(self.view_root_object, dal.SKELETON, skeleton._skeleton.name)
 
         # Create marker objects based on the skeleton definition
+        print("Creating marker objects...")
         self._create_marker_objects()
         # Populate the dictionary after creating markers
+        print("Populating marker objects by role...")
         self._populate_marker_objects_by_role()
 
         # Create armature and bones
+        print("Creating armature...")
         self._create_armature()
 
     def _create_marker_objects(self):
