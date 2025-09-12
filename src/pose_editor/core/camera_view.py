@@ -132,6 +132,8 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     num_joints = len(skeleton_obj._skeleton.leaves)
 
     for person_idx, frames_data in pose_data_by_person.items():
+        if person_idx != 5:
+            continue
         print(f"Processing person {person_idx} with {len(frames_data)} frames...")
         series_name = f"{name}_person{person_idx}"
         marker_data = MarkerData(series_name, "COCO_133")
@@ -160,7 +162,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                         
                         np_data[frame_idx, col_idx] = x
                         np_data[frame_idx, col_idx + 1] = y
-                        np_data[frame_idx, col_idx + 2] = likelihood
+                        np_data[frame_idx, col_idx + 2] = likelihood if (x is not None and y is not None and likelihood > 0) else -1.0
                     col_idx += 3
             else:
                 # Person not detected in this frame, set quality to -1
