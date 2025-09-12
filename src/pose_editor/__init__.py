@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import bpy
-from .blender.operators import PE_OT_CreateProject
+from .blender.operators import PE_OT_CreateProject, PE_OT_LoadCameraViews
 from .ui.panels import PE_PT_ProjectPanel
 from .blender.drivers import get_quality_driven_color_component
 
@@ -22,6 +22,7 @@ class PE_OT_dummy(bpy.types.Operator):
 _classes = [
     PE_OT_dummy,
     PE_OT_CreateProject,
+    PE_OT_LoadCameraViews,
     PE_PT_ProjectPanel,
 ]
 
