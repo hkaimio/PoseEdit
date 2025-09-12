@@ -62,23 +62,6 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         # This is a placeholder
         raw_tracks = [("-1", "-- Select --", ""), ("0", "Person 0", ""), ("1", "Person 1", "")]
 
-        # --- Synchronize UI state with scene data ---
-        # Get current persons in the UI
-        ui_person_names = {item.person_name for item in stitching_ui_state.items}
-        # Get current persons in the scene
-        scene_person_names = {ref.name for ref in real_person_refs}
-
-        # Remove persons from UI that are no longer in the scene
-        if ui_person_names - scene_person_names:
-            for i in range(len(stitching_ui_state.items) - 1, -1, -1):
-                if stitching_ui_state.items[i].person_name not in scene_person_names:
-                    stitching_ui_state.items.remove(i)
-        
-        # Add new persons from the scene to the UI
-        for name in scene_person_names - ui_person_names:
-            item = stitching_ui_state.items.add()
-            item.person_name = name
-
         # --- Draw UI --- 
         if not stitching_ui_state.items:
             layout.label(text="No Real Persons created yet.")

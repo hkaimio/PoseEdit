@@ -147,6 +147,11 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
         dal.set_custom_property(person_obj_ref, IS_REAL_PERSON_INSTANCE, True)
         dal.set_custom_property(person_obj_ref, PERSON_DEFINITION_ID, self.person_name) # For now, name is also definition ID
 
+        # Add this person to the UI state collection
+        stitching_ui_state = context.scene.pose_editor_stitching_ui
+        item = stitching_ui_state.items.add()
+        item.person_name = self.person_name
+
         self.report({'INFO'}, f"Real Person '{self.person_name}' added.")
         return {'FINISHED'}
 
