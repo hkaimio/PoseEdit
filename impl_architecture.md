@@ -304,31 +304,59 @@ The `pose_keypoints_2d` array's structure is determined by the chosen skeleton. 
     -   `core.person.PersonLibrary`: Methods to load, find, and create `PersonDefinition`s.
     -   `blender.scene_builder.create_person_instance()`: Creates the Blender objects for the new instance.
 
-### 6.4. Stitching a Timeline
--   **Use Case:** The user specifies that for a given `RealPersonInstance`, the data source should switch from one `RawTrack` to another at the current frame.
--   **Mechanism:** This is a destructive operation that copies F-Curve keyframes from the source `RawTrack` armature to the target `RealPersonInstance` 2D armature. This makes the stitched armature directly editable. The `active_track_index` property is still used as a marker to define the "seams" and determine which source to copy from for a given frame range.
--   **User Interaction:** The user selects a `RealPersonInstance`, a `CameraView`, and a `RawTrack` from UI lists. They move the timeline to the desired frame and click "Switch Source".
+### 6.4. Creating a Real Person Instance
+-   **Use Case:** The user adds a person to the project, either by creating a new reusable definition or by selecting an existing one from the library.
+-   **User Interaction:** Clicks "Add Person Instance". A popup dialog appears, allowing the user to select from a dropdown of existing `PersonDefinition`s or enter a new name to create a new one.
 -   **Sequence Diagram:**
     ```mermaid
     sequenceDiagram
         actor User
-        User->>UI Panel: Clicks 'Switch Source'
-        UI Panel->>Operator (PE_OT_SwitchSource): execute()
-        Operator (PE_OT_SwitchSource)->>Facade (RealPersonInstance): get_stitch_info()
-        Note right of Operator (PE_OT_SwitchSource): Facade uses DAL to read `active_track_index` keyframes and determines the new source track and the frame range to copy.
-        Facade (RealPersonInstance)-->>Operator (PE_OT_SwitchSource): returns {source_track, frame_range}
-        Operator (PE_OT_SwitchSource)->>Facade (RealPersonInstance): copy_animation_from_source(source_track, frame_range)
-        loop for each marker
-            Facade (RealPersonInstance)->>DAL: get_fcurves(source_marker, frame_range)
-            Facade (RealPersonInstance)->>DAL: set_fcurves(target_marker, keyframes)
-        end
+        User->>UI Panel: Clicks 'Add Person Instance'
+        UI Panel->>Operator (PE_OT_AddPersonInstance): invoke() -> opens popup
+        Operator (PE_OT_AddPersonInstance)->>Core Library: person_library.load_from_disk()
+        Note right of Operator (PE_OT_AddPersonInstance): Operator populates UI with person names
+        User->>Operator (PE_OT_AddPersonInstance): Selects person (e.g. 'Alice')
+        Operator (PE_OT_AddPersonInstance)->>Scene Builder: create_person_instance('Alice')
+        Scene Builder->>DAL: create_empty("Alice")
+        Scene Builder->>DAL: set_custom_property(empty, "person_definition_id", "Alice")
     ```
 -   **Interfaces:**
-    -   `blender.operators.PE_OT_SwitchSource`: Orchestrates the entire operation.
-    -   `core.person_facade.RealPersonInstanceFacade.get_stitch_info()`: A method to analyze the `active_track_index` keyframes and determine the correct source and frame range for a copy operation.
-    -   `core.person_facade.RealPersonInstanceFacade.copy_animation_from_source()`: A method that iterates through the markers of a source and target armature.
-    -   `blender.dal.get_fcurves(object, data_path, frame_range)`: Retrieves all F-Curve keyframes for a specific property within a given frame range.
-    -   `blender.dal.set_fcurves(object, data_path, keyframes)`: Clears existing keyframes in a range and inserts a new set.
+    -   `blender.operators.PE_OT_AddPersonInstance`: Manages the popup dialog and selection.
+    -   `core.person.PersonLibrary`: Methods to load, find, and create `PersonDefinition`s.
+    -   `blender.scene_builder.create_person_instance()`: Creates the Blender objects for the new instance.
+
+### 6.5. 2D Identity Stitching
+-   **Use Case:** The user needs to create a single, continuous, and editable 2D pose timeline for a "Real Person" by combining segments from various raw, fragmented tracks that were automatically detected.
+
+-   **Mechanism (Destructive Copy with Keyframed Index):** The workflow combines a non-destructive index with a destructive copy. A keyframed integer property, `active_track_index`, is stored on the `RealPersonInstance`'s data object for each camera view. This property's keyframes define the "seams" or switch points between source tracks. When a user assigns a new source track at a specific frame, the operator performs a destructive copy of the animation data from the source to the target, but only for the duration of that segment (from the current frame to the next keyframe on `active_track_index`). This results in a fully editable timeline while retaining a non-destructive record of the stitch points.
+
+-   **Blender Data Representation:**
+    -   **Source:** A `MarkerData` object representing a raw track (e.g., `MD.cam1_person0`). Its animation is stored in the corresponding `Action` (e.g., `AC.cam1_person0`).
+    -   **Target:** A `MarkerData` object representing a specific view of a `RealPersonInstance` (e.g., `MD.Alice.cam1`). Its animation is stored in its own `Action` (e.g., `AC.Alice.cam1`).
+    -   **Stitch Index:** A custom property `active_track_index` (integer) is added to the target's data-series Empty (`DS.Alice.cam1`). This property is animated with keyframes. The value at any given frame indicates which raw person index (e.g., 0, 1, 2) is the source for that frame.
+
+-   **UI and User Interaction:**
+    1.  The UI panel for stitching is located in the 3D View sidebar.
+    2.  The panel automatically determines the **active camera view** based on the user's current 3D viewport.
+    3.  It lists all `RealPersonInstance`s in the scene.
+    4.  For each `RealPersonInstance`, it displays a dropdown menu (`EnumProperty`) listing all available raw tracks for the active view (e.g., "Person 0", "Person 1"). The dropdown shows the current source track for the active frame.
+    5.  A single button, **"Assign Source at Current Frame"**, triggers the operation for all persons whose dropdown selection has been changed.
+
+-   **Operator Logic (`PE_OT_AssignTrack`):**
+    1.  The operator is called. It gets the current frame from the scene.
+    2.  It identifies the active camera view.
+    3.  It iterates through the `RealPersonInstance`s and their corresponding UI dropdowns.
+    4.  For each person where the selected raw track has changed:
+        a.  It reads the `active_track_index` F-curve for that person to find the frame number of the *next* keyframe after the current one. This determines the `end_frame` of the segment to be copied. If no future keyframe exists, the scene's end frame is used.
+        b.  It inserts a new keyframe on the `active_track_index` property at the `current_frame`, setting its value to the index of the newly selected raw track.
+        c.  It calls a core logic function to copy the animation data from the source `MarkerData` Action to the target `RealPersonInstance`'s `MarkerData` Action, for the range `[current_frame, end_frame]`.
+
+-   **Interfaces:**
+    -   `ui.panels.PE_PT_StitchingPanel`: A new panel with a custom `draw()` method to dynamically display rows for each `RealPersonInstance` and their corresponding `EnumProperty` dropdowns.
+    -   `blender.properties.StitchingPropertyGroup`: A `PropertyGroup` to hold the collection of `EnumProperty` items for the UI.
+    -   `blender.operators.PE_OT_AssignTrack`: The operator that contains the main logic described above.
+    -   `core.person_facade.RealPersonInstanceFacade`: Methods to get/set the `active_track_index` keyframes and to perform the animation copy between `MarkerData` objects.
+    -   `blender.dal`: Functions to read F-curve keyframes within a range (`get_fcurves_from_action`) and write them (`set_fcurves_from_numpy`).
 
 ## 7. Deployment
 This chapter outlines the strategy for packaging and distributing the add-on, including its dependencies.
