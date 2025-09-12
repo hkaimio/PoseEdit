@@ -122,3 +122,17 @@ class RealPersonInstanceFacade:
             print(f"Setting active_track_index keyframe on {target_ds_obj.name} at frame {start_frame} to {source_track_index}")
             dal.set_custom_property(target_ds_obj, ACTIVE_TRACK_INDEX, source_track_index)
             dal.add_keyframe(target_ds_obj, start_frame, {'["active_track_index"]': [source_track_index]})
+
+        # 6. Re-connect the PersonDataView to the now-populated MarkerData
+        # This ensures the markers animate with the new data
+        from .person_data_view import PersonDataView
+        real_person_pv_name = f"PV.{self.person_id}.{view_name}"
+        real_person_pv_obj_ref = dal.get_object_by_name(real_person_pv_name)
+
+        if real_person_pv_obj_ref:
+            # We need to get the collection for the PersonDataView constructor
+            person_views_collection = dal.get_or_create_collection('PersonViews')
+
+            real_person_pv = PersonDataView(real_person_pv_name, skeleton, collection=person_views_collection)
+            target_md.apply_to_view(real_person_pv)
+            print(f"Re-connected PersonDataView {real_person_pv_name} to action.")

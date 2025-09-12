@@ -27,9 +27,7 @@ class PersonDataView:
         `STRETCH_TO` constraints to follow the markers.
     """
 
-    def __init__(
-        self, view_name: str, skeleton: SkeletonBase, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
-    ):
+    def __init__(self, view_name: str, skeleton: SkeletonBase, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0), collection: 'bpy.types.Collection' = None):
         """Initializes the PersonDataView.
 
         This finds or creates the necessary Blender objects for the view
@@ -54,7 +52,7 @@ class PersonDataView:
 
         # Create marker objects based on the skeleton definition
         print("Creating marker objects...")
-        self._create_marker_objects()
+        self._create_marker_objects(collection)
         # Populate the dictionary after creating markers
         print("Populating marker objects by role...")
         self._populate_marker_objects_by_role()
@@ -63,7 +61,7 @@ class PersonDataView:
         print("Creating armature...")
         self._create_armature()
 
-    def _create_marker_objects(self):
+    def _create_marker_objects(self, collection: 'bpy.types.Collection'):
         """Creates a marker object for each joint in the skeleton."""
         if self.skeleton is None or self.skeleton._skeleton is None:
             return
@@ -75,7 +73,7 @@ class PersonDataView:
                 continue
 
             marker_name = node.name
-            dal.create_marker(parent=self.view_root_object, name=marker_name, color=self.color)
+            dal.create_marker(parent=self.view_root_object, name=marker_name, color=self.color, collection=collection)
 
     def _create_armature(self):
         """Creates an armature with bones connecting the markers."""
@@ -139,20 +137,6 @@ class PersonDataView:
                         ("var2", "SINGLE_PROP", child_marker.name, "hide_viewport"),
                     ]
                     dal.add_bone_driver(self.armature_object, bone_name, "hide", expression, variables)
-
-    def _create_marker_objects(self):
-        """Creates a marker object for each joint in the skeleton."""
-        if self.skeleton is None or self.skeleton._skeleton is None:
-            return
-
-        from anytree import PreOrderIter
-
-        for node in PreOrderIter(self.skeleton._skeleton):
-            if not hasattr(node, "id"):
-                continue
-
-            marker_name = node.name
-            dal.create_marker(parent=self.view_root_object, name=marker_name, color=self.color)
 
     def _populate_marker_objects_by_role(self):
         """Populates the _marker_objects_by_role dictionary by reading custom properties."""

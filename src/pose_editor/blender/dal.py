@@ -112,6 +112,23 @@ def create_collection(name: str, parent_collection: bpy.types.Collection = None)
     return collection
 
 
+def get_or_create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
+    """
+    Gets a collection by name, or creates it if it doesn't exist.
+
+    Args:
+        name: The name of the collection.
+        parent_collection: The parent collection. If None, the collection is created in the scene's master collection.
+
+    Returns:
+        The found or created collection.
+    """
+    collection = bpy.data.collections.get(name)
+    if not collection:
+        collection = create_collection(name, parent_collection)
+    return collection
+
+
 def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj: BlenderObjRef = None) -> BlenderObjRef:
     """
     Creates a new empty object in the scene.
@@ -215,12 +232,7 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
         f.keyframe_points.remove(f.keyframe_points[-1])
 
 
-def create_marker(
-    parent: BlenderObjRef,
-    name: str,
-    color: tuple[float, float, float, float],
-    image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png",
-) -> BlenderObjRef:
+def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float], collection: bpy.types.Collection=None, image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png") -> BlenderObjRef:
     """
     Creates a new empty object with an image, to be used as a marker.
 
@@ -228,6 +240,7 @@ def create_marker(
         parent: The parent BlenderObjRef for the marker.
         name: The name of the marker, which will be appended to the parent's name.
         color: A tuple (R, G, B, A) representing the emission color of the marker.
+        collection: The collection to link the marker to.
         image_path: The path to the image file to use for the empty.
 
     Returns:
@@ -241,7 +254,7 @@ def create_marker(
     marker_obj = bpy.data.objects.new(f"{parent_obj.name}_{name}", None)
     marker_obj.empty_display_type = "IMAGE"
     marker_obj.empty_display_size = 4
-
+    
     # Load the image
     try:
         img = load_image(image_path)
@@ -249,11 +262,12 @@ def create_marker(
     except RuntimeError as e:
         print(f"Could not load marker image: {e}")
 
-    bpy.context.collection.objects.link(marker_obj)
+    if collection:
+        collection.objects.link(marker_obj)
 
     # Set parent
     marker_obj.parent = parent_obj
-    marker_obj.matrix_parent_inverse.identity()  # Clear parent inverse to keep local transform
+    marker_obj.matrix_parent_inverse.identity() # Clear parent inverse to keep local transform
 
     # Set name
     marker_obj.name = f"{parent_obj.name}_{name}"
@@ -271,7 +285,7 @@ def create_marker(
     marker_obj["_original_color_a"] = color[3]
 
     # Drive the object color with the quality
-    for i in range(4):  # R, G, B, A
+    for i in range(4): # R, G, B, A
         driver = marker_obj.driver_add("color", i).driver
         driver.type = "SCRIPTED"
         driver.expression = f"get_quality_driven_color_component(quality, r, g, b, a, {i})"
