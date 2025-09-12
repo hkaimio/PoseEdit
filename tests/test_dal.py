@@ -65,18 +65,29 @@ class TestDalBlender:
         assert empty_name in bpy.data.objects
         assert empty_name in bpy.context.scene.collection.objects
 
-    def test_create_marker_success(self, blender_obj_ref, blender_parent_obj):
+    def test_create_marker_success(self, blender_obj_ref, blender_parent_obj, tmp_path):
+        # Create a dummy image file for the test
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        test_image_path = assets_dir / "test_marker.png"
+        
+        # Create a minimal 1x1 black PNG
+        png_data = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+        test_image_path.write_bytes(png_data)
+
         marker_name = "TestMarker"
         marker_color = (1.0, 0.0, 0.0, 1.0) # Red
 
-        result_ref = dal.create_marker(blender_obj_ref, marker_name, marker_color)
+        result_ref = dal.create_marker(blender_obj_ref, marker_name, marker_color, image_path=str(test_image_path))
 
         marker_obj = result_ref._get_obj()
         assert marker_obj is not None
         assert marker_obj.parent == blender_parent_obj
         assert marker_obj.name == f"{blender_parent_obj.name}_{marker_name}"
-        assert marker_obj.type == 'MESH'
-        assert marker_obj.data.materials[0].name == f"MarkerMaterial_{blender_parent_obj.name}_{marker_name}"
+        assert marker_obj.type == 'EMPTY'
+        assert marker_obj.empty_display_type == 'IMAGE'
+        assert marker_obj.data is not None
+        assert marker_obj.data.name == "test_marker.png"
         # Assert that the MARKER_ROLE custom property is set
         assert dal.get_custom_property(result_ref, dal.MARKER_ROLE) == marker_name
         

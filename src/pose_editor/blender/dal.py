@@ -202,15 +202,15 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
         f.keyframe_points.remove(f.keyframe_points[-1])
 
 
-def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float]) -> BlenderObjRef:
+def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float], image_path: str = "C:/Users/HarriKaimio/projects/pose-editor/assets/marker-32x32.png") -> BlenderObjRef:
     """
-    Creates a small UV sphere as a child of the given object, sets its name,
-    and assigns an emission material with the specified color.
+    Creates a new empty object with an image, to be used as a marker.
 
     Args:
         parent: The parent BlenderObjRef for the marker.
         name: The name of the marker, which will be appended to the parent's name.
         color: A tuple (R, G, B, A) representing the emission color of the marker.
+        image_path: The path to the image file to use for the empty.
 
     Returns:
         The newly created marker object wrapped in a BlenderObjRef.
@@ -219,14 +219,19 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
     if not parent_obj:
         raise ValueError(f"Parent object with ID {parent._id} not found.")
 
-    # Ensure the active object is not the parent to avoid issues with primitive_uv_sphere_add
-    # This is a common pattern when using bpy.ops to ensure the operator acts as expected.
-    if bpy.context.active_object and bpy.context.active_object == parent_obj:
-        bpy.ops.object.select_all(action='DESELECT')
+    # Create an empty with an image
+    marker_obj = bpy.data.objects.new(f"{parent_obj.name}_{name}", None)
+    marker_obj.empty_display_type = 'IMAGE'
+    marker_obj.empty_display_size = 4
+    
+    # Load the image
+    try:
+        img = load_image(image_path)
+        marker_obj.data = img
+    except RuntimeError as e:
+        print(f"Could not load marker image: {e}")
 
-    # Create a UV sphere
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=2, enter_editmode=False, align='WORLD', location=(0, 0, 0))
-    marker_obj = bpy.context.active_object
+    bpy.context.collection.objects.link(marker_obj)
 
     # Set parent
     marker_obj.parent = parent_obj
@@ -240,80 +245,6 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     # Store the marker role as a custom property
     set_custom_property(BlenderObjRef(marker_obj.name), MARKER_ROLE, name)
-
-    # Store original color components as custom properties for drivers
-    marker_obj["_original_color_r"] = color[0]
-    marker_obj["_original_color_g"] = color[1]
-    marker_obj["_original_color_b"] = color[2]
-    marker_obj["_original_color_a"] = color[3]
-
-    # Create and assign material
-    mat_name = f"MarkerMaterial_{parent_obj.name}_{name}"
-    material = bpy.data.materials.new(name=mat_name)
-    material.use_nodes = True
-    # Clear existing nodes
-    material.node_tree.nodes.clear()
-
-    # Create nodes
-    value_node = material.node_tree.nodes.new(type='ShaderNodeValue')
-    color_ramp_node = material.node_tree.nodes.new(type='ShaderNodeValToRGB')
-    emission_node = material.node_tree.nodes.new(type='ShaderNodeEmission')
-    material_output_node = material.node_tree.nodes.new(type='ShaderNodeOutputMaterial')
-
-    # Position nodes (optional, for better readability in Blender's shader editor)
-    value_node.location = (-800, 0)
-    color_ramp_node.location = (-400, 0)
-    emission_node.location = (0, 0)
-    material_output_node.location = (400, 0)
-
-    # Set up driver for Value node
-    driver = value_node.outputs[0].driver_add('default_value').driver # 'value' input
-    #driver.type = 'SCRIPTED'
-    driver.expression = 'quality' # Use the 'quality' custom property directly
-
-    # Add variable to the driver
-    var_quality = driver.variables.new()
-    var_quality.name = 'quality'
-    var_quality.type = 'SINGLE_PROP'
-    var_quality.targets[0].id = marker_obj
-    var_quality.targets[0].data_path = '["quality"]'
-
-    # Configure ColorRamp stops
-    # Clear default stops
-    while len(color_ramp_node.color_ramp.elements) > 1:
-        color_ramp_node.color_ramp.elements.remove(color_ramp_node.color_ramp.elements[0])
-
-    # Add new stops
-    # Stop 1: at 0.0, color #390007FF (dark red)
-    element = color_ramp_node.color_ramp.elements[0]
-    element.position = 0.0
-    element.color = (0.2235, 0.0, 0.0275, 1.0) # #390007FF in RGBA (0-1 range)
-
-    # Stop 2: at 0.3, same color #390007FF
-    element = color_ramp_node.color_ramp.elements.new(0.3)
-    element.color = (0.2235, 0.0, 0.0275, 1.0)
-
-    # Stop 3: at 0.301, color #7f7f7fff (grey)
-    element = color_ramp_node.color_ramp.elements.new(0.301)
-    element.color = (0.498, 0.498, 0.498, 1.0) # #7f7f7fff in RGBA (0-1 range)
-
-    # Stop 4: at 1.0, the target color (from function argument)
-    element = color_ramp_node.color_ramp.elements.new(1.0)
-    element.color = color # Use the 'color' argument directly
-
-    # Link nodes
-    links = material.node_tree.links
-    links.new(value_node.outputs[0], color_ramp_node.inputs[0]) # Value to ColorRamp Fac
-    links.new(color_ramp_node.outputs[0], emission_node.inputs[0]) # ColorRamp Color to Emission Color
-    links.new(emission_node.outputs[0], material_output_node.inputs[0]) # Emission to Material Output Surface
-
-    # Set Emission Strength
-    emission_node.inputs['Strength'].default_value = 1.0
-
-    if marker_obj.data.materials:
-        marker_obj.data.materials[0] = material
-    else:
-        marker_obj.data.materials.append(material)
 
     # Add driver for hide_viewport based on "quality"
     driver = marker_obj.driver_add('hide_viewport').driver
@@ -364,6 +295,18 @@ def load_movie_clip(filepath: str) -> bpy.types.MovieClip:
         The loaded movie clip.
     """
     return bpy.data.movieclips.load(filepath)
+
+def load_image(filepath: str) -> bpy.types.Image:
+    """
+    Loads an image from a file path.
+
+    Args:
+        filepath: The path to the image file.
+
+    Returns:
+        The loaded image.
+    """
+    return bpy.data.images.load(filepath, check_existing=True)
 
 def set_camera_background(camera_obj_ref: BlenderObjRef, movie_clip: bpy.types.MovieClip) -> None:
     """
