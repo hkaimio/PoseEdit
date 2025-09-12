@@ -6,11 +6,13 @@ import pytest
 from unittest.mock import MagicMock, patch, call
 from anytree import Node
 
+
 # Mock the dal module before importing the class to be tested
 @pytest.fixture(autouse=True)
 def mock_dal_module():
-    with patch.dict('sys.modules', {'pose_editor.blender.dal': MagicMock()}):
+    with patch.dict("sys.modules", {"pose_editor.blender.dal": MagicMock()}):
         yield
+
 
 @pytest.fixture
 def mock_skeleton():
@@ -22,10 +24,12 @@ def mock_skeleton():
     mock._skeleton = root
     return mock
 
+
 @pytest.fixture
 def mock_marker_data():
     """Creates a mock MarkerData object."""
     return MagicMock()
+
 
 @pytest.fixture
 def mock_blender_obj_ref():
@@ -34,9 +38,9 @@ def mock_blender_obj_ref():
     mock_ref.name = "MockBlenderObj"
     return mock_ref
 
-class TestPersonDataView:
 
-    @patch('pose_editor.core.person_data_view.dal')
+class TestPersonDataView:
+    @patch("pose_editor.core.person_data_view.dal")
     def test_init_creates_objects_and_armature(self, mock_dal, mock_skeleton, mock_blender_obj_ref):
         """Test that __init__ creates the root empty, markers, and armature."""
         from pose_editor.core.person_data_view import PersonDataView
@@ -52,7 +56,11 @@ class TestPersonDataView:
         mock_nose_marker_ref.name = "Nose_marker_obj"
         mock_leye_marker_ref = MagicMock()
         mock_leye_marker_ref.name = "LEye_marker_obj"
-        mock_dal.get_children_of_object.return_value = [mock_root_marker_ref, mock_nose_marker_ref, mock_leye_marker_ref]
+        mock_dal.get_children_of_object.return_value = [
+            mock_root_marker_ref,
+            mock_nose_marker_ref,
+            mock_leye_marker_ref,
+        ]
 
         def get_prop_se(obj_ref, prop):
             if obj_ref.name == "RootNode_marker_obj":
@@ -60,6 +68,7 @@ class TestPersonDataView:
             if obj_ref.name == "Nose_marker_obj":
                 return "Nose"
             return "LEye"
+
         mock_dal.get_custom_property.side_effect = get_prop_se
 
         # Act
@@ -67,11 +76,7 @@ class TestPersonDataView:
 
         # Assert
         # Check root object creation
-        mock_dal.get_or_create_object.assert_any_call(
-            name=view_name,
-            obj_type='EMPTY',
-            collection_name='PersonViews'
-        )
+        mock_dal.get_or_create_object.assert_any_call(name=view_name, obj_type="EMPTY", collection_name="PersonViews")
 
         # Check marker creation
         assert mock_dal.create_marker.call_count == 3
@@ -79,10 +84,7 @@ class TestPersonDataView:
         # Check armature creation
         armature_name = f"{view_name}_Armature"
         mock_dal.get_or_create_object.assert_any_call(
-            name=armature_name,
-            obj_type='ARMATURE',
-            collection_name='PersonViews',
-            parent=mock_blender_obj_ref
+            name=armature_name, obj_type="ARMATURE", collection_name="PersonViews", parent=mock_blender_obj_ref
         )
         mock_dal.set_armature_display_stick.assert_called_once()
 
@@ -90,9 +92,9 @@ class TestPersonDataView:
         mock_dal.add_bones_in_bulk.assert_called_once()
         # Check that the number of bones to add is correct
         assert len(mock_dal.add_bones_in_bulk.call_args[0][1]) == 2
-        assert mock_dal.add_bone_constraint.call_count == 4 # 2 bones * 2 constraints
+        assert mock_dal.add_bone_constraint.call_count == 4  # 2 bones * 2 constraints
 
-    @patch('pose_editor.core.person_data_view.dal')
+    @patch("pose_editor.core.person_data_view.dal")
     def test_connect_to_series(self, mock_dal, mock_skeleton, mock_marker_data):
         """Test that connect_to_series calls apply_to_view on the marker data object."""
         from pose_editor.core.person_data_view import PersonDataView
@@ -107,7 +109,9 @@ class TestPersonDataView:
         mock_leye_marker_ref = MagicMock()
         mock_leye_marker_ref.name = "LEye_marker_obj"
         mock_dal.get_children_of_object.return_value = [mock_nose_marker_ref, mock_leye_marker_ref]
-        mock_dal.get_custom_property.side_effect = lambda obj_ref, prop: "Nose" if obj_ref.name == "Nose_marker_obj" else "LEye"
+        mock_dal.get_custom_property.side_effect = (
+            lambda obj_ref, prop: "Nose" if obj_ref.name == "Nose_marker_obj" else "LEye"
+        )
 
         view = PersonDataView(view_name, mock_skeleton, color=marker_color)
 
@@ -117,7 +121,7 @@ class TestPersonDataView:
         # Assert
         mock_marker_data.apply_to_view.assert_called_once_with(view)
 
-    @patch('pose_editor.core.person_data_view.dal')
+    @patch("pose_editor.core.person_data_view.dal")
     def test_get_marker_objects(self, mock_dal, mock_skeleton, mock_blender_obj_ref):
         """Test that get_marker_objects returns the internally stored dictionary."""
         from pose_editor.core.person_data_view import PersonDataView
@@ -132,7 +136,9 @@ class TestPersonDataView:
         mock_leye_marker_ref = MagicMock()
         mock_leye_marker_ref.name = "LEye_marker_obj"
         mock_dal.get_children_of_object.return_value = [mock_nose_marker_ref, mock_leye_marker_ref]
-        mock_dal.get_custom_property.side_effect = lambda obj_ref, prop: "Nose" if obj_ref.name == "Nose_marker_obj" else "LEye"
+        mock_dal.get_custom_property.side_effect = (
+            lambda obj_ref, prop: "Nose" if obj_ref.name == "Nose_marker_obj" else "LEye"
+        )
 
         view = PersonDataView(view_name, mock_skeleton, color=marker_color)
 
@@ -140,9 +146,5 @@ class TestPersonDataView:
         marker_objects_dict = view.get_marker_objects()
 
         # Assert
-        assert marker_objects_dict == {
-            "Nose": mock_nose_marker_ref,
-            "LEye": mock_leye_marker_ref
-        }
+        assert marker_objects_dict == {"Nose": mock_nose_marker_ref, "LEye": mock_leye_marker_ref}
         mock_dal.get_children_of_object.assert_called_once()
-

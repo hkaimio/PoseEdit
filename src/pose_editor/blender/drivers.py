@@ -4,7 +4,10 @@
 
 import bpy
 
-def get_quality_driven_color_component(quality: float, original_r: float, original_g: float, original_b: float, original_a: float, channel_index: int) -> float:
+
+def get_quality_driven_color_component(
+    quality: float, original_r: float, original_g: float, original_b: float, original_a: float, channel_index: int
+) -> float:
     """
     Calculates a single color component based on the quality value and original color.
 
@@ -20,22 +23,23 @@ def get_quality_driven_color_component(quality: float, original_r: float, origin
         The calculated color component value.
     """
     original_color = [original_r, original_g, original_b, original_a]
-    dark_red = [0.5, 0.0, 0.0, 1.0] # Dark red for quality < 0.3
-    grey = [0.5, 0.5, 0.5, 1.0]     # Grey for quality = 0.3
+    dark_red = [0.5, 0.0, 0.0, 1.0]  # Dark red for quality < 0.3
+    grey = [0.5, 0.5, 0.5, 1.0]  # Grey for quality = 0.3
 
     if quality >= 1.0:
         return original_color[channel_index]
     elif quality < 0.3:
         return dark_red[channel_index]
-    else: # 0.3 <= quality < 1.0, linear interpolation
+    else:  # 0.3 <= quality < 1.0, linear interpolation
         # Normalize quality to range [0, 1] for interpolation between grey and original
         # quality_norm = (quality - 0.3) / (1.0 - 0.3)
         # Simplified: quality_norm = (quality - 0.3) / 0.7
         t = (quality - 0.3) / 0.7
-        
+
         # Interpolate between grey and original color
         interpolated_value = grey[channel_index] * (1 - t) + original_color[channel_index] * t
         return interpolated_value
+
 
 # Register the function in Blender's driver namespace
 # This part would typically be handled in the add-on's register function

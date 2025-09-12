@@ -4,7 +4,8 @@
 
 import bpy
 import pytest
-from pose_editor import register, unregister # Import register/unregister functions
+from pose_editor import register, unregister  # Import register/unregister functions
+
 
 def test_install_addon():
     """

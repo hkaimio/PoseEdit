@@ -4,13 +4,15 @@
 
 import bpy
 
+
 class PE_PT_ProjectPanel(bpy.types.Panel):
     """Creates a Panel in the 3D Viewport sidebar."""
+
     bl_label = "Pose Editor"
     bl_idname = "PE_PT_ProjectPanel"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = 'Pose Editor'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Pose Editor"
 
     def draw(self, context):
         layout = self.layout

@@ -1,6 +1,6 @@
 from typing import List, Dict
 from ..blender import dal
-from ..blender.dal import (BlenderObjRef, SERIES_NAME)
+from ..blender.dal import BlenderObjRef, SERIES_NAME
 from .person_data_series import RawPersonData
 from .marker_data import MarkerData
 from .person_data_view import PersonDataView
@@ -14,7 +14,8 @@ from anytree import Node
 from anytree.iterators import PreOrderIter
 from .skeleton import SkeletonBase
 
-BLENDER_TARGET_WIDTH = 10.0 # Blender units
+BLENDER_TARGET_WIDTH = 10.0  # Blender units
+
 
 class CameraView(object):
     def __init__(self):
@@ -22,6 +23,7 @@ class CameraView(object):
         self._video_surf: BlenderObjRef | None = None
 
         self._raw_person_data: List[RawPersonData] = []
+
 
 def _extract_frame_number(filename: str) -> int:
     """
@@ -39,15 +41,16 @@ def _extract_frame_number(filename: str) -> int:
     Raises:
         ValueError: If no frame number can be extracted.
     """
-    match = re.search(r'(\d+)\.\w+', filename)
+    match = re.search(r"(\d+)\.\w+", filename)
     if match:
         return int(match.group(1))
-    
-    numbers = re.findall(r'\d+', filename)
+
+    numbers = re.findall(r"\d+", filename)
     if numbers:
         return int(numbers[-1])
-    
+
     raise ValueError(f"No frame number found in filename: {filename}")
+
 
 def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleton_obj: SkeletonBase) -> CameraView:
     """
@@ -89,10 +92,10 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     # Create camera and set background video
     camera_name = f"Cam_{name}"
     camera_obj_ref = dal.create_camera(camera_name, parent_obj=camera_view._obj)
-    
+
     # Position the camera to look along the Z-axis
     camera_obj = camera_obj_ref._get_obj()
-    camera_obj.location = (0, 0, 10) # Positioned away from the scene
+    camera_obj.location = (0, 0, 10)  # Positioned away from the scene
     camera_obj.rotation_euler = (0, 0, 0)
 
     movie_clip = dal.load_movie_clip(str(video_file))
@@ -113,16 +116,14 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     xoffset = -scaled_blender_width / 2
     yoffset = scaled_blender_height / 2
 
-    
-
     dal.set_camera_background(camera_obj_ref, movie_clip)
     dal.set_camera_ortho(camera_obj_ref, scaled_blender_width)
 
-    json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith('.json')])
-    
+    json_files = sorted([f for f in os.listdir(pose_data_dir) if f.endswith(".json")])
+
     pose_data_by_person: Dict[int, Dict[int, List[float]]] = {}
-    min_frame = float('inf')
-    max_frame = float('-inf')
+    min_frame = float("inf")
+    max_frame = float("-inf")
 
     for filename in json_files:
         try:
@@ -133,9 +134,9 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
         max_frame = max(max_frame, frame_num)
 
         filepath = os.path.join(pose_data_dir, filename)
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             data = json.load(f)
-        
+
         if "people" in data:
             for person_idx, person_data in enumerate(data["people"]):
                 if person_idx not in pose_data_by_person:
@@ -154,12 +155,12 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
         columns_to_extract = []
         for joint_node in PreOrderIter(skeleton_obj._skeleton):
-            if not hasattr(joint_node, 'id') or joint_node.id is None:
+            if not hasattr(joint_node, "id") or joint_node.id is None:
                 continue
             joint_name = joint_node.name
-            columns_to_extract.append((joint_name, 'location', 0)) # X
-            columns_to_extract.append((joint_name, 'location', 1)) # Y
-            columns_to_extract.append((joint_name, '["quality"]' , None)) # Quality
+            columns_to_extract.append((joint_name, "location", 0))  # X
+            columns_to_extract.append((joint_name, "location", 1))  # Y
+            columns_to_extract.append((joint_name, '["quality"]', None))  # Quality
 
         np_data = np.full((num_frames, len(columns_to_extract)), np.nan)
 
@@ -168,21 +169,23 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                 keypoints = frames_data[frame_num]
                 col_idx = 0
                 for joint_node in PreOrderIter(skeleton_obj._skeleton):
-                    if not hasattr(joint_node, 'id') or joint_node.id is None:
+                    if not hasattr(joint_node, "id") or joint_node.id is None:
                         continue
                     kp_idx = joint_node.id * 3
                     if kp_idx + 2 < len(keypoints):
-                        x, y, likelihood = keypoints[kp_idx], keypoints[kp_idx+1], keypoints[kp_idx+2]
-                        
+                        x, y, likelihood = keypoints[kp_idx], keypoints[kp_idx + 1], keypoints[kp_idx + 2]
+
                         np_data[frame_idx, col_idx] = x
                         np_data[frame_idx, col_idx + 1] = y
-                        np_data[frame_idx, col_idx + 2] = likelihood if (x is not None and y is not None and likelihood > 0) else -1.0
+                        np_data[frame_idx, col_idx + 2] = (
+                            likelihood if (x is not None and y is not None and likelihood > 0) else -1.0
+                        )
                     col_idx += 3
             else:
                 # Person not detected in this frame, set quality to -1
                 col_idx = 0
                 for joint_node in PreOrderIter(skeleton_obj._skeleton):
-                    if not hasattr(joint_node, 'id') or joint_node.id is None:
+                    if not hasattr(joint_node, "id") or joint_node.id is None:
                         continue
                     # The quality is the 3rd value for each joint (x, y, quality)
                     np_data[frame_idx, col_idx + 2] = -1.0
@@ -197,8 +200,12 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
         print(f"Linking PersonDataView {person_view.view_root_object.name} to CameraView {camera_view._obj.name}...")
         person_view.view_root_object._get_obj().parent = camera_view._obj._get_obj()
-        print(f"Setting scale and location for PersonDataView {person_view.view_root_object.name} sx={xfactor}, sy={yfactor}, ox={xoffset}, oy={yoffset}...")
+        print(
+            f"Setting scale and location for PersonDataView {person_view.view_root_object.name} sx={xfactor}, sy={yfactor}, ox={xoffset}, oy={yoffset}..."
+        )
         person_view.view_root_object._get_obj().scale = (xfactor, yfactor, zfactor)
         person_view.view_root_object._get_obj().location = (xoffset, yoffset, 0)
-        print(f"PersonDataView {person_view.view_root_object.name} created and linked to CameraView {camera_view._obj.name}.")
+        print(
+            f"PersonDataView {person_view.view_root_object.name} created and linked to CameraView {camera_view._obj.name}."
+        )
     return camera_view

@@ -17,11 +17,13 @@ bl_info = {
     "category": "Animation",
 }
 
+
 def register():
-    bpy.app.driver_namespace['get_quality_driven_color_component'] = drivers.get_quality_driven_color_component
+    bpy.app.driver_namespace["get_quality_driven_color_component"] = drivers.get_quality_driven_color_component
     print("Pose Editor Addon Registered")
 
+
 def unregister():
-    if 'get_quality_driven_color_component' in bpy.app.driver_namespace:
-        del bpy.app.driver_namespace['get_quality_driven_color_component']
+    if "get_quality_driven_color_component" in bpy.app.driver_namespace:
+        del bpy.app.driver_namespace["get_quality_driven_color_component"]
     print("Pose Editor Addon Unregistered")

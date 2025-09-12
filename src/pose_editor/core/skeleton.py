@@ -2,6 +2,7 @@ from typing import Dict, List
 from anytree import Node, findall
 from ..pose2sim import skeletons
 
+
 class SkeletonBase:
     """
     Represents a skeleton structure and provides methods to query joint information.
@@ -31,7 +32,7 @@ class SkeletonBase:
         """
         if joint_id is None:
             return None
-        
+
         nodes = findall(self._skeleton, lambda node: node.id == joint_id)
         if len(nodes) == 1:
             return nodes[0].name
@@ -103,5 +104,5 @@ class COCO133Skeleton(SkeletonBase):
                 # Calculate midpoint for 2D or 3D coordinates
                 midpoint = [(rshoulder_data[i] + lshoulder_data[i]) / 2 for i in range(len(rshoulder_data))]
                 return midpoint
-        
+
         return super().calculate_fake_marker_pos(name, marker_data)

@@ -5,10 +5,11 @@
 from typing import Generic, List, TypeVar, Optional, Tuple, Any
 import numpy as np
 import bpy
-from . import drivers # Import the new drivers module
+from . import drivers  # Import the new drivers module
+
 
 class BlenderObjRef:
-    def __init__(self, id:str):
+    def __init__(self, id: str):
         self._id = id
         self._obj: bpy.types.Object | None = None
 
@@ -21,8 +22,9 @@ class BlenderObjRef:
             self._obj = bpy.data.objects.get(self._id)
         return self._obj
 
+
 class CollectionRef:
-    def __init__(self, id:str):
+    def __init__(self, id: str):
         self._id = id
         self._collection: bpy.types.Collection | None = None
 
@@ -31,12 +33,16 @@ class CollectionRef:
             self._collection = bpy.data.collections.get(self._id)
         return self._collection
 
-T = TypeVar('T')
+
+T = TypeVar("T")
+
+
 class CustomProperty(Generic[T]):
     """
     A generic class to identify and describe custom properties on Blender objects,
     providing type hints for their values.
     """
+
     def __init__(self, prop_name: str):
         """
         Initializes a CustomProperty.
@@ -45,6 +51,7 @@ class CustomProperty(Generic[T]):
             prop_name: The name of the custom property.
         """
         self._prop_name = prop_name
+
 
 def set_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T], value: T) -> None:
     """
@@ -59,6 +66,7 @@ def set_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T], value: 
     if not obj:
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     obj[prop._prop_name] = value
+
 
 def get_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T]) -> T | None:
     """
@@ -76,11 +84,13 @@ def get_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T]) -> T | 
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     return obj.get(prop._prop_name)
 
+
 # Specific custom properties for DataSeries objects
 SERIES_NAME = CustomProperty[str]("series_name")
 SKELETON = CustomProperty[str]("skeleton")
 ACTION_NAME = CustomProperty[str]("action_name")
 MARKER_ROLE = CustomProperty[str]("marker_role")
+
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
     """
@@ -95,10 +105,11 @@ def create_collection(name: str, parent_collection: bpy.types.Collection = None)
     """
     if parent_collection is None:
         parent_collection = bpy.context.scene.collection
-    
+
     collection = bpy.data.collections.new(name)
     parent_collection.children.link(collection)
     return collection
+
 
 def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj: BlenderObjRef = None) -> BlenderObjRef:
     """
@@ -116,12 +127,13 @@ def create_empty(name: str, collection: bpy.types.Collection = None, parent_obj:
     if collection is None:
         collection = bpy.context.scene.collection
     collection.objects.link(empty)
-    
+
     if parent_obj:
         empty.parent = parent_obj._get_obj()
         empty.matrix_parent_inverse.identity()  # Clear parent inverse to keep local transform
 
     return BlenderObjRef(empty.name)
+
 
 def add_keyframe(obj_ref: BlenderObjRef, frame: int, values: dict[str, any]) -> None:
     """
@@ -185,7 +197,7 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
     for i in range(len(keyframes)):
         frame, values = keyframes[i]
         for j in range(len(fcurves)):
-            if(j < len(values)):
+            if j < len(values):
                 fcurves[j].keyframe_points[i].co = (frame, values[j])
             else:
                 print(f"Warning: Not enough values for F-curve index {j} at frame {frame}")
@@ -197,12 +209,17 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
     # Hack to force update
     max_keyframe = keyframes[-1][0]
     print(data_path)
-    blender_object.keyframe_insert(data_path, frame=max_keyframe+1)
+    blender_object.keyframe_insert(data_path, frame=max_keyframe + 1)
     for f in fcurves:
         f.keyframe_points.remove(f.keyframe_points[-1])
 
 
-def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float], image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png") -> BlenderObjRef:
+def create_marker(
+    parent: BlenderObjRef,
+    name: str,
+    color: tuple[float, float, float, float],
+    image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png",
+) -> BlenderObjRef:
     """
     Creates a new empty object with an image, to be used as a marker.
 
@@ -221,9 +238,9 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     # Create an empty with an image
     marker_obj = bpy.data.objects.new(f"{parent_obj.name}_{name}", None)
-    marker_obj.empty_display_type = 'IMAGE'
+    marker_obj.empty_display_type = "IMAGE"
     marker_obj.empty_display_size = 4
-    
+
     # Load the image
     try:
         img = load_image(image_path)
@@ -235,7 +252,7 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     # Set parent
     marker_obj.parent = parent_obj
-    marker_obj.matrix_parent_inverse.identity() # Clear parent inverse to keep local transform
+    marker_obj.matrix_parent_inverse.identity()  # Clear parent inverse to keep local transform
 
     # Set name
     marker_obj.name = f"{parent_obj.name}_{name}"
@@ -253,55 +270,58 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
     marker_obj["_original_color_a"] = color[3]
 
     # Drive the object color with the quality
-    for i in range(4): # R, G, B, A
-        driver = marker_obj.driver_add('color', i).driver
-        driver.type = 'SCRIPTED'
+    for i in range(4):  # R, G, B, A
+        driver = marker_obj.driver_add("color", i).driver
+        driver.type = "SCRIPTED"
         driver.expression = f"get_quality_driven_color_component(quality, r, g, b, a, {i})"
 
         var_quality = driver.variables.new()
-        var_quality.name = 'quality'
-        var_quality.type = 'SINGLE_PROP'
+        var_quality.name = "quality"
+        var_quality.type = "SINGLE_PROP"
         var_quality.targets[0].id = marker_obj
         var_quality.targets[0].data_path = '["quality"]'
 
         var_r = driver.variables.new()
-        var_r.name = 'r'
-        var_r.type = 'SINGLE_PROP'
+        var_r.name = "r"
+        var_r.type = "SINGLE_PROP"
         var_r.targets[0].id = marker_obj
         var_r.targets[0].data_path = '["_original_color_r"]'
 
         var_g = driver.variables.new()
-        var_g.name = 'g'
-        var_g.type = 'SINGLE_PROP'
+        var_g.name = "g"
+        var_g.type = "SINGLE_PROP"
         var_g.targets[0].id = marker_obj
         var_g.targets[0].data_path = '["_original_color_g"]'
 
         var_b = driver.variables.new()
-        var_b.name = 'b'
-        var_b.type = 'SINGLE_PROP'
+        var_b.name = "b"
+        var_b.type = "SINGLE_PROP"
         var_b.targets[0].id = marker_obj
         var_b.targets[0].data_path = '["_original_color_b"]'
 
         var_a = driver.variables.new()
-        var_a.name = 'a'
-        var_a.type = 'SINGLE_PROP'
+        var_a.name = "a"
+        var_a.type = "SINGLE_PROP"
         var_a.targets[0].id = marker_obj
         var_a.targets[0].data_path = '["_original_color_a"]'
 
     # Add driver for hide_viewport based on "quality"
-    driver = marker_obj.driver_add('hide_viewport').driver
-    driver.type = 'SCRIPTED'
-    driver.expression = 'quality < 0'
+    driver = marker_obj.driver_add("hide_viewport").driver
+    driver.type = "SCRIPTED"
+    driver.expression = "quality < 0"
 
     var_quality_hide = driver.variables.new()
-    var_quality_hide.name = 'quality'
-    var_quality_hide.type = 'SINGLE_PROP'
+    var_quality_hide.name = "quality"
+    var_quality_hide.type = "SINGLE_PROP"
     var_quality_hide.targets[0].id = marker_obj
     var_quality_hide.targets[0].data_path = '["quality"]'
 
     return BlenderObjRef(marker_obj.name)
 
-def create_camera(name: str, collection: bpy.types.Collection = None, parent_obj: BlenderObjRef = None) -> BlenderObjRef:
+
+def create_camera(
+    name: str, collection: bpy.types.Collection = None, parent_obj: BlenderObjRef = None
+) -> BlenderObjRef:
     """
     Creates a new camera object in the scene.
 
@@ -319,12 +339,13 @@ def create_camera(name: str, collection: bpy.types.Collection = None, parent_obj
     if collection is None:
         collection = bpy.context.scene.collection
     collection.objects.link(camera_object)
-    
+
     if parent_obj:
         camera_object.parent = parent_obj._get_obj()
         camera_object.matrix_parent_inverse.identity()
 
     return BlenderObjRef(camera_object.name)
+
 
 def load_movie_clip(filepath: str) -> bpy.types.MovieClip:
     """
@@ -338,6 +359,7 @@ def load_movie_clip(filepath: str) -> bpy.types.MovieClip:
     """
     return bpy.data.movieclips.load(filepath)
 
+
 def load_image(filepath: str) -> bpy.types.Image:
     """
     Loads an image from a file path.
@@ -350,6 +372,7 @@ def load_image(filepath: str) -> bpy.types.Image:
     """
     return bpy.data.images.load(filepath, check_existing=True)
 
+
 def set_camera_background(camera_obj_ref: BlenderObjRef, movie_clip: bpy.types.MovieClip) -> None:
     """
     Sets the background of a camera to a movie clip.
@@ -359,13 +382,14 @@ def set_camera_background(camera_obj_ref: BlenderObjRef, movie_clip: bpy.types.M
         movie_clip: The movie clip to set as the background.
     """
     camera_obj = camera_obj_ref._get_obj()
-    if not camera_obj or camera_obj.type != 'CAMERA':
+    if not camera_obj or camera_obj.type != "CAMERA":
         raise ValueError(f"Object {camera_obj_ref.name} is not a camera.")
 
     camera_obj.data.show_background_images = True
     bg = camera_obj.data.background_images.new()
-    bg.source = 'MOVIE_CLIP'
+    bg.source = "MOVIE_CLIP"
     bg.clip = movie_clip
+
 
 def set_camera_ortho(camera_obj_ref: BlenderObjRef, ortho_scale: float) -> None:
     """
@@ -376,17 +400,15 @@ def set_camera_ortho(camera_obj_ref: BlenderObjRef, ortho_scale: float) -> None:
         ortho_scale: The orthographic scale.
     """
     camera_obj = camera_obj_ref._get_obj()
-    if not camera_obj or camera_obj.type != 'CAMERA':
+    if not camera_obj or camera_obj.type != "CAMERA":
         raise ValueError(f"Object {camera_obj_ref.name} is not a camera.")
 
-    camera_obj.data.type = 'ORTHO'
+    camera_obj.data.type = "ORTHO"
     camera_obj.data.ortho_scale = ortho_scale
 
+
 def get_or_create_object(
-    name: str, 
-    obj_type: str, 
-    collection_name: Optional[str] = None,
-    parent: Optional["BlenderObjRef"] = None
+    name: str, obj_type: str, collection_name: Optional[str] = None, parent: Optional["BlenderObjRef"] = None
 ) -> "BlenderObjRef":
     """Gets an object by name, or creates it if it doesn't exist.
 
@@ -403,16 +425,16 @@ def get_or_create_object(
     # Note: When parenting, Blender may rename the object if a name collision
     # occurs under the new parent. We retrieve the name from the final object.
     obj = bpy.data.objects.get(name)
-    
+
     if obj and parent:
         parent_obj = parent._get_obj()
         if obj.parent != parent_obj:
             obj.parent = parent_obj
 
     if not obj:
-        if obj_type == 'EMPTY':
+        if obj_type == "EMPTY":
             obj = bpy.data.objects.new(name, None)
-        elif obj_type == 'ARMATURE':
+        elif obj_type == "ARMATURE":
             armature = bpy.data.armatures.new(name)
             obj = bpy.data.objects.new(name, armature)
         else:
@@ -423,7 +445,7 @@ def get_or_create_object(
             if not target_collection:
                 target_collection = bpy.data.collections.new(collection_name)
                 bpy.context.scene.collection.children.link(target_collection)
-            
+
             # Unlink from default scene collection if linking to a specific one
             if obj.name in bpy.context.scene.collection.objects:
                 bpy.context.scene.collection.objects.unlink(obj)
@@ -439,6 +461,7 @@ def get_or_create_object(
 
     return BlenderObjRef(obj.name)
 
+
 def get_or_create_action(action_name: str) -> bpy.types.Action:
     """Gets an Action data-block by name, or creates it if it doesn't exist.
 
@@ -452,6 +475,7 @@ def get_or_create_action(action_name: str) -> bpy.types.Action:
     if not action:
         action = bpy.data.actions.new(action_name)
     return action
+
 
 def _get_prefixed_slot_name(slot_name: str) -> str:
     """Returns the name of the slot with Blender's internal prefix.
@@ -467,6 +491,7 @@ def _get_prefixed_slot_name(slot_name: str) -> str:
     """
     return f"OB{slot_name}"
 
+
 def action_has_slot(action: bpy.types.Action, slot_name: str) -> bool:
     """Checks if an Action has a specific slot, checking by its prefixed name.
 
@@ -480,6 +505,7 @@ def action_has_slot(action: bpy.types.Action, slot_name: str) -> bool:
     prefixed_name = _get_prefixed_slot_name(slot_name)
     return prefixed_name in action.slots
 
+
 def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.types.ActionSlot:
     """Gets a slot from an action, or creates it if it doesn't exist.
 
@@ -489,7 +515,7 @@ def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.t
     Args:
         action: The action to get the slot from.
         slot_name: The desired user-facing name for the slot.
-    
+
     Returns:
         The found or created ActionSlot.
     """
@@ -498,8 +524,9 @@ def get_or_create_action_slot(action: bpy.types.Action, slot_name: str) -> bpy.t
     if not slot:
         # Pass the UN-PREFIXED name to new(). Blender handles creating the
         # correct key (e.g., "OB" + slot_name) internally.
-        slot = action.slots.new(name=slot_name, id_type='OBJECT')
+        slot = action.slots.new(name=slot_name, id_type="OBJECT")
     return slot
+
 
 def _get_or_create_channelbag(action: bpy.types.Action, slot: bpy.types.ActionSlot) -> bpy.types.ActionChannelbag:
     """
@@ -512,11 +539,12 @@ def _get_or_create_channelbag(action: bpy.types.Action, slot: bpy.types.ActionSl
         layer = action.layers[0]
 
     if not layer.strips:
-        strip = layer.strips.new(type='KEYFRAME')
+        strip = layer.strips.new(type="KEYFRAME")
     else:
         strip = layer.strips[0]
 
     return strip.channelbag(slot, ensure=True)
+
 
 def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> bpy.types.FCurve:
     """Gets or creates an F-Curve within the correct channelbag for a slot.
@@ -532,11 +560,12 @@ def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: st
     """
     slot = get_or_create_action_slot(action, slot_name)
     channelbag = _get_or_create_channelbag(action, slot)
-    
+
     fcurve = channelbag.fcurves.find(data_path, index=index)
     if not fcurve:
         fcurve = channelbag.fcurves.new(data_path, index=index)
     return fcurve
+
 
 def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, float]]) -> None:
     """Populates an F-Curve with keyframes and sets their interpolation to LINEAR.
@@ -548,8 +577,9 @@ def set_fcurve_keyframes(fcurve: bpy.types.FCurve, keyframes: List[Tuple[float, 
     fcurve.keyframe_points.clear()
     for frame, value in keyframes:
         kp = fcurve.keyframe_points.insert(frame, value)
-        kp.interpolation = 'LINEAR'
+        kp.interpolation = "LINEAR"
     fcurve.update()
+
 
 def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, slot_name: str) -> None:
     """Assigns a shared Action and a specific ActionSlot to an object.
@@ -567,13 +597,14 @@ def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, 
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     if not obj.animation_data:
         obj.animation_data_create()
-    
+
     obj.animation_data.action = action
-    
+
     # Ensure the slot is created before assigning
     get_or_create_action_slot(action, slot_name)
     prefixed_name = _get_prefixed_slot_name(slot_name)
     obj.animation_data.action_slot = action.slots[prefixed_name]
+
 
 def get_children_of_object(obj_ref: "BlenderObjRef") -> List["BlenderObjRef"]:
     """Returns a list of direct children objects of a given object.
@@ -589,6 +620,7 @@ def get_children_of_object(obj_ref: "BlenderObjRef") -> List["BlenderObjRef"]:
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
     return [BlenderObjRef(child.name) for child in obj.children]
 
+
 def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
     """Returns a Blender object by its name, wrapped in a BlenderObjRef.
 
@@ -602,6 +634,7 @@ def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
     if obj:
         return BlenderObjRef(obj.name)
     return None
+
 
 def find_object_by_property(prop: CustomProperty[T], value: T) -> Optional["BlenderObjRef"]:
     """Finds the first object in the scene with a given custom property value.
@@ -618,7 +651,10 @@ def find_object_by_property(prop: CustomProperty[T], value: T) -> Optional["Blen
             return BlenderObjRef(obj.name)
     return None
 
-def get_fcurve_from_action(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> Optional[bpy.types.FCurve]:
+
+def get_fcurve_from_action(
+    action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1
+) -> Optional[bpy.types.FCurve]:
     """Gets an F-Curve from the correct channelbag for a slot.
 
     Args:
@@ -634,6 +670,7 @@ def get_fcurve_from_action(action: bpy.types.Action, slot_name: str, data_path: 
     channelbag = _get_or_create_channelbag(action, slot)
     return channelbag.fcurves.find(data_path, index=index)
 
+
 def get_scene_frame_range() -> Tuple[int, int]:
     """Returns the start and end frame of the current scene.
 
@@ -643,7 +680,10 @@ def get_scene_frame_range() -> Tuple[int, int]:
     return bpy.context.scene.frame_start, bpy.context.scene.frame_end
 
 
-def add_bones_in_bulk(armature_obj_ref: BlenderObjRef, bones_to_add: List[Tuple[str, Tuple[float, float, float], Tuple[float, float, float]]]) -> None:
+def add_bones_in_bulk(
+    armature_obj_ref: BlenderObjRef,
+    bones_to_add: List[Tuple[str, Tuple[float, float, float], Tuple[float, float, float]]],
+) -> None:
     """
     Adds multiple bones to an armature in a single Edit Mode session for efficiency.
 
@@ -653,13 +693,13 @@ def add_bones_in_bulk(armature_obj_ref: BlenderObjRef, bones_to_add: List[Tuple[
                       (bone_name, head_position, tail_position).
     """
     armature_obj = armature_obj_ref._get_obj()
-    if not armature_obj or armature_obj.type != 'ARMATURE':
+    if not armature_obj or armature_obj.type != "ARMATURE":
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
     # Ensure the armature is the active object
     bpy.context.view_layer.objects.active = armature_obj
     # Enter Edit Mode once
-    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.object.mode_set(mode="EDIT")
 
     try:
         edit_bones = armature_obj.data.edit_bones
@@ -669,10 +709,12 @@ def add_bones_in_bulk(armature_obj_ref: BlenderObjRef, bones_to_add: List[Tuple[
             bone.tail = tail
     finally:
         # Always exit Edit Mode, even if an error occurs
-        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.mode_set(mode="OBJECT")
 
 
-def add_bone(armature_obj_ref: BlenderObjRef, bone_name: str, head: Tuple[float, float, float], tail: Tuple[float, float, float]) -> None:
+def add_bone(
+    armature_obj_ref: BlenderObjRef, bone_name: str, head: Tuple[float, float, float], tail: Tuple[float, float, float]
+) -> None:
     """Adds a bone to an armature.
 
     Args:
@@ -682,19 +724,26 @@ def add_bone(armature_obj_ref: BlenderObjRef, bone_name: str, head: Tuple[float,
         tail: The tail position of the bone.
     """
     armature_obj = armature_obj_ref._get_obj()
-    if not armature_obj or armature_obj.type != 'ARMATURE':
+    if not armature_obj or armature_obj.type != "ARMATURE":
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
     bpy.context.view_layer.objects.active = armature_obj
-    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.object.mode_set(mode="EDIT")
 
     bone = armature_obj.data.edit_bones.new(bone_name)
     bone.head = head
     bone.tail = tail
 
-    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode="OBJECT")
 
-def add_bone_constraint(armature_obj_ref: BlenderObjRef, bone_name: str, constraint_type: str, target_obj_ref: BlenderObjRef, subtarget_name: str = None) -> None:
+
+def add_bone_constraint(
+    armature_obj_ref: BlenderObjRef,
+    bone_name: str,
+    constraint_type: str,
+    target_obj_ref: BlenderObjRef,
+    subtarget_name: str = None,
+) -> None:
     """Adds a constraint to a bone.
 
     Args:
@@ -705,7 +754,7 @@ def add_bone_constraint(armature_obj_ref: BlenderObjRef, bone_name: str, constra
         subtarget_name: The name of the subtarget (e.g., for STRETCH_TO).
     """
     armature_obj = armature_obj_ref._get_obj()
-    if not armature_obj or armature_obj.type != 'ARMATURE':
+    if not armature_obj or armature_obj.type != "ARMATURE":
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
     bone = armature_obj.pose.bones.get(bone_name)
@@ -716,8 +765,9 @@ def add_bone_constraint(armature_obj_ref: BlenderObjRef, bone_name: str, constra
     constraint.target = target_obj_ref._get_obj()
     if subtarget_name:
         constraint.subtarget = subtarget_name
-    if constraint_type == 'STRETCH_TO':
+    if constraint_type == "STRETCH_TO":
         constraint.rest_length = 1.0
+
 
 def set_armature_display_stick(armature_obj_ref: BlenderObjRef) -> None:
     """Sets the armature display to 'STICK'.
@@ -726,12 +776,19 @@ def set_armature_display_stick(armature_obj_ref: BlenderObjRef) -> None:
         armature_obj_ref: The armature object.
     """
     armature_obj = armature_obj_ref._get_obj()
-    if not armature_obj or armature_obj.type != 'ARMATURE':
+    if not armature_obj or armature_obj.type != "ARMATURE":
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
-    armature_obj.data.display_type = 'STICK'
+    armature_obj.data.display_type = "STICK"
 
-def add_bone_driver(armature_obj_ref: BlenderObjRef, bone_name: str, data_path: str, expression: str, variables: list[tuple[str, str, str, str]]) -> None:
+
+def add_bone_driver(
+    armature_obj_ref: BlenderObjRef,
+    bone_name: str,
+    data_path: str,
+    expression: str,
+    variables: list[tuple[str, str, str, str]],
+) -> None:
     """Adds a driver to a bone property.
 
     Args:
@@ -743,7 +800,7 @@ def add_bone_driver(armature_obj_ref: BlenderObjRef, bone_name: str, data_path: 
                    (var_name, var_type, target_id, data_path)
     """
     armature_obj = armature_obj_ref._get_obj()
-    if not armature_obj or armature_obj.type != 'ARMATURE':
+    if not armature_obj or armature_obj.type != "ARMATURE":
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
     bone = armature_obj.data.bones.get(bone_name)
@@ -751,7 +808,7 @@ def add_bone_driver(armature_obj_ref: BlenderObjRef, bone_name: str, data_path: 
         raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
 
     driver = bone.driver_add(data_path).driver
-    driver.type = 'SCRIPTED'
+    driver.type = "SCRIPTED"
     driver.expression = expression
 
     for var_name, var_type, target_id, target_data_path in variables:
@@ -760,6 +817,7 @@ def add_bone_driver(armature_obj_ref: BlenderObjRef, bone_name: str, data_path: 
         var.type = var_type
         var.targets[0].id = bpy.data.objects.get(target_id)
         var.targets[0].data_path = target_data_path
+
 
 def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> np.ndarray:
     """Samples an F-Curve's values over a given frame range.
@@ -776,11 +834,9 @@ def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) ->
     values = np.array([fcurve.evaluate(f) for f in frames])
     return values
 
+
 def set_fcurves_from_numpy(
-    action: bpy.types.Action, 
-    columns: List[Tuple[str, str, int]], 
-    start_frame: int, 
-    data: np.ndarray
+    action: bpy.types.Action, columns: List[Tuple[str, str, int]], start_frame: int, data: np.ndarray
 ) -> None:
     """Populates multiple F-Curves in an Action from a single NumPy array.
 
@@ -791,7 +847,7 @@ def set_fcurves_from_numpy(
 
     Args:
         action: The Action to add the F-Curves to.
-        columns: A list of tuples, where each tuple defines an F-Curve and 
+        columns: A list of tuples, where each tuple defines an F-Curve and
                  corresponds to a column in the data array. The tuple format is
                  (slot_name, data_path, index).
         start_frame: The starting frame number for the animation data.
@@ -803,7 +859,7 @@ def set_fcurves_from_numpy(
         return
 
     num_frames = data.shape[0]
-    
+
     # 1. Get or create all F-Curves first and clear existing data.
     fcurves = []
     for slot_name, data_path, index in columns:
@@ -829,7 +885,7 @@ def set_fcurves_from_numpy(
                 kp_idx = keyframe_indices[col_idx]
                 kp = fcurve.keyframe_points[kp_idx]
                 kp.co = (float(current_frame), value)
-                kp.interpolation = 'LINEAR'
+                kp.interpolation = "LINEAR"
                 keyframe_indices[col_idx] += 1
 
     # 5. Update all F-Curves.

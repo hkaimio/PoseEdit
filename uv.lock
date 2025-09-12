@@ -284,6 +284,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "bpy" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -298,7 +299,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "bpy", specifier = "==4.5.0" }]
+dev = [
+    { name = "bpy", specifier = "==4.5.0" },
+    { name = "ruff", specifier = ">=0.12.12" },
+]
 
 [[package]]
 name = "pygments"

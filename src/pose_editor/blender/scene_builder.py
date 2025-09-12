@@ -4,6 +4,7 @@
 
 from . import dal
 
+
 def create_project_structure():
     """
     Creates the basic collection structure for a new project.

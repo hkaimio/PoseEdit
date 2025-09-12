@@ -6,8 +6,9 @@ import pytest
 from unittest.mock import Mock, patch
 from pose_editor.blender import scene_builder
 
-@patch('pose_editor.blender.dal.create_collection')
-@patch('pose_editor.blender.dal.create_empty')
+
+@patch("pose_editor.blender.dal.create_collection")
+@patch("pose_editor.blender.dal.create_empty")
 def test_create_project_structure_mocked(mock_create_empty, mock_create_collection):
     """
     Tests that create_project_structure calls DAL functions with correct arguments.

@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Any
 # No direct 'import bpy' here! All Blender interactions go through the DAL.
 from ..blender import dal
 
+
 class MarkerData:
     """A facade for a marker data series (model layer).
 
@@ -32,7 +33,7 @@ class MarkerData:
 
         Args:
             series_name: A unique name for this data series (e.g., "cam1_person0_raw").
-            skeleton_name: The name of the skeleton definition used for this data 
+            skeleton_name: The name of the skeleton definition used for this data
                            series (e.g., "HALPE_26").
         """
         self.series_name = series_name
@@ -42,9 +43,7 @@ class MarkerData:
 
         # Find or create the DataSeries Empty that holds metadata
         self.data_series_object = dal.get_or_create_object(
-            name=self.data_series_object_name,
-            obj_type='EMPTY',
-            collection_name='DataSeries'
+            name=self.data_series_object_name, obj_type="EMPTY", collection_name="DataSeries"
         )
         # Set metadata on the Empty
         dal.set_custom_property(self.data_series_object, dal.SERIES_NAME, series_name)
@@ -57,8 +56,8 @@ class MarkerData:
     def set_animation_data(
         self,
         data: np.ndarray,
-        columns: List[Tuple[str, str, int]], # (marker_name, property, index)
-        start_frame: int = 0
+        columns: List[Tuple[str, str, int]],  # (marker_name, property, index)
+        start_frame: int = 0,
     ):
         """Writes animation data from a NumPy array into the Action's F-Curves.
 
@@ -76,12 +75,7 @@ class MarkerData:
 
         for col_idx, (marker_name, prop, index) in enumerate(columns):
             # Get or create the F-Curve on the action, targeted at the correct slot
-            fcurve = dal.get_or_create_fcurve(
-                action=self.action,
-                slot_name=marker_name,
-                data_path=prop,
-                index=index
-            )
+            fcurve = dal.get_or_create_fcurve(action=self.action, slot_name=marker_name, data_path=prop, index=index)
 
             # Prepare keyframe data for this column
             keyframes = []
@@ -95,9 +89,9 @@ class MarkerData:
 
     def set_animation_data_from_numpy(
         self,
-        columns: List[Tuple[str, str, int]], # (marker_name, property, index)
+        columns: List[Tuple[str, str, int]],  # (marker_name, property, index)
         start_frame: int,
-        data: np.ndarray
+        data: np.ndarray,
     ):
         """Writes animation data from a NumPy array into the Action's F-Curves.
 

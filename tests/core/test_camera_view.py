@@ -9,7 +9,6 @@ from pose_editor.core.camera_view import create_camera_view, _extract_frame_numb
 from pose_editor.core.skeleton import SkeletonBase
 
 
-
 class DummySkeleton(SkeletonBase):
     def __init__(self):
         self._skeleton = Node("Root")
@@ -26,9 +25,7 @@ class DummySkeleton(SkeletonBase):
     new_callable=mock_open,
     read_data='{"people":[]}',
 )
-def test_create_camera_view_scaling_landscape(
-    mock_open_file, mock_listdir, mock_person_data_view, mock_dal
-):
+def test_create_camera_view_scaling_landscape(mock_open_file, mock_listdir, mock_person_data_view, mock_dal):
     # Arrange
     mock_movie_clip = MagicMock()
     mock_movie_clip.size = (1280, 720)
@@ -53,8 +50,6 @@ def test_create_camera_view_scaling_landscape(
     xoffset = -(video_width * scale_factor) / 2
     yoffset = (video_height * scale_factor) / 2
 
-
-
     scaled_blender_width = video_width * scale_factor
     mock_dal.set_camera_ortho.assert_called_once_with(
         mock_dal.create_camera.return_value, pytest.approx(scaled_blender_width)
@@ -69,9 +64,7 @@ def test_create_camera_view_scaling_landscape(
     new_callable=mock_open,
     read_data='{"people":[]}',
 )
-def test_create_camera_view_scaling_portrait(
-    mock_open_file, mock_listdir, mock_person_data_view, mock_dal
-):
+def test_create_camera_view_scaling_portrait(mock_open_file, mock_listdir, mock_person_data_view, mock_dal):
     # Arrange
     mock_movie_clip = MagicMock()
     mock_movie_clip.size = (1080, 1920)
@@ -95,8 +88,6 @@ def test_create_camera_view_scaling_portrait(
     yfactor = -scale_factor
     xoffset = -(video_width * scale_factor) / 2
     yoffset = (video_height * scale_factor) / 2
-
-
 
     scaled_blender_width = video_width * scale_factor
     mock_dal.set_camera_ortho.assert_called_once_with(
@@ -152,7 +143,9 @@ def test_extract_frame_number_empty_string():
 @patch("pose_editor.core.camera_view.os.listdir", autospec=True)
 @patch("pose_editor.core.camera_view.open", new_callable=mock_open)
 @patch("pose_editor.core.camera_view.json.load", autospec=True)
-def test_create_camera_view_missing_person_data(mock_json_load, mock_open_file, mock_listdir, mock_person_data_view, mock_marker_data, mock_dal):
+def test_create_camera_view_missing_person_data(
+    mock_json_load, mock_open_file, mock_listdir, mock_person_data_view, mock_marker_data, mock_dal
+):
     """
     Tests that when a person is not detected in a frame, the quality of their markers is set to -1.
     """
@@ -178,6 +171,7 @@ def test_create_camera_view_missing_person_data(mock_json_load, mock_open_file, 
     skeleton = DummySkeleton()
     # Add one joint to the dummy skeleton
     from anytree import Node
+
     Node("joint1", parent=skeleton._skeleton, id=0)
 
     # Mock listdir to return 3 frames
@@ -185,9 +179,9 @@ def test_create_camera_view_missing_person_data(mock_json_load, mock_open_file, 
 
     # Mock json.load to return data for frames 0 and 2, but not 1 for person 0
     mock_json_load.side_effect = [
-        {"people": [{"pose_keypoints_2d": [10, 20, 0.9]}]}, # frame 0
-        {"people": []}, # frame 1
-        {"people": [{"pose_keypoints_2d": [12, 22, 0.9]}]}, # frame 2
+        {"people": [{"pose_keypoints_2d": [10, 20, 0.9]}]},  # frame 0
+        {"people": []},  # frame 1
+        {"people": [{"pose_keypoints_2d": [12, 22, 0.9]}]},  # frame 2
     ]
 
     # Act
@@ -197,14 +191,14 @@ def test_create_camera_view_missing_person_data(mock_json_load, mock_open_file, 
     # Check the data passed to set_animation_data_from_numpy
     marker_data_instance = mock_marker_data.return_value
     call_args = marker_data_instance.set_animation_data_from_numpy.call_args
-    
-    data = call_args.kwargs['data']
-    
+
+    data = call_args.kwargs["data"]
+
     # data should have 3 rows (frames)
     # Frame 0: [10, 20, 0.9]
     # Frame 1: [nan, nan, -1.0]
     # Frame 2: [12, 22, 0.9]
-    
+
     assert np.isclose(data[0, 2], 0.9)
     assert np.isnan(data[1, 0])
     assert np.isnan(data[1, 1])
