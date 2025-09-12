@@ -395,6 +395,32 @@ Step 4: Complete the Core Logic (in person_facade.py)
       (src/pose_editor/blender/dal.py). Specifically:
   So, in short: the facade decides what to copy and where, and the DAL performs the actual, optimized copy operation within Blender's data.
 
+The copying must be done at the keyframe level, not by sampling the evaluated curve.
+
+Here is the corrected and more precise plan for where the copying will happen:
+
+##### The Corrected Data Copying Plan
+
+The data copying will still be orchestrated by the `assign_source_track_for_segment` method in the RealPersonInstanceFacade, but its internal
+logic will be different. Instead of creating a dense NumPy array, it will loop through each animation channel and copy only the keyframes that
+actually exist within the desired segment.
+
+Here's the refined workflow:
+
+
+1. Loop Through Each Channel: The assign_source_track_for_segment method will iterate through every property that needs to be copied (e.g., Nose
+    location.x, Nose location.y, Nose quality, LEye location.x, etc.).
+2. Get Source Keyframes in Range: For each channel, it will call a new Data Access Layer function, let's call it
+    `dal.get_fcurve_keyframes_in_range(fcurve, start_frame, end_frame)`. This function will read a source F-Curve and return only the keyframe
+    points that exist within the [start_frame, end_frame] segment.
+3. Replace Target Keyframes in Range: The facade will then call another new DAL function, `dal.replace_fcurve_keyframes_in_range(fcurve, 
+    start_frame, end_frame, new_keyframes)`. This function will:
+To summarize, the copying happens here:
+    Orchestration*: assign_source_track_for_segment in person_facade.py will loop through each animatable property.
+    Execution*: New, precise DAL functions (get_fcurve_keyframes_in_range and replace_fcurve_keyframes_in_range) will handle the reading and
+writing of the keyframes themselves for each property, one at a time.
+
+
 ## 7. Deployment
 This chapter outlines the strategy for packaging and distributing the add-on, including its dependencies.
 

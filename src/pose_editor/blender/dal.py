@@ -884,6 +884,53 @@ def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> List[Tuple[float, float]]:
     return [(kp.co[0], kp.co[1]) for kp in fcurve.keyframe_points]
 
 
+def get_fcurve_keyframes_in_range(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> List[Tuple[float, float]]:
+    """Extracts keyframe points from an F-Curve within a given frame range.
+
+    Args:
+        fcurve: The F-Curve to read from.
+        start_frame: The starting frame of the range (inclusive).
+        end_frame: The ending frame of the range (inclusive).
+
+    Returns:
+        A list of (frame, value) tuples within the specified range.
+    """
+    if not fcurve:
+        return []
+    
+    return [
+        (kp.co[0], kp.co[1]) 
+        for kp in fcurve.keyframe_points 
+        if start_frame <= kp.co[0] <= end_frame
+    ]
+
+
+def replace_fcurve_keyframes_in_range(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int, new_keyframes: List[Tuple[float, float]]):
+    """Replaces keyframes in a given range with a new set of keyframes.
+
+    This function first removes all keyframes within the specified range and then
+    inserts the new ones.
+
+    Args:
+        fcurve: The F-Curve to modify.
+        start_frame: The starting frame of the range to clear (inclusive).
+        end_frame: The ending frame of the range to clear (inclusive).
+        new_keyframes: A list of (frame, value) tuples to insert.
+    """
+    # Remove existing keyframes in the specified range
+    # Iterate backwards when removing items from a list
+    for kp in reversed(fcurve.keyframe_points):
+        if start_frame <= kp.co[0] <= end_frame:
+            fcurve.keyframe_points.remove(kp)
+
+    # Add the new keyframes
+    for frame, value in new_keyframes:
+        kp = fcurve.keyframe_points.insert(frame, value)
+        kp.interpolation = 'LINEAR'
+    
+    fcurve.update()
+
+
 def get_animation_data_as_numpy(
     action: bpy.types.Action, 
     columns: List[Tuple[str, str, int]], 

@@ -117,5 +117,42 @@ class PE_OT_AssignTrack(bpy.types.Operator):
     bl_description = "Assign the selected raw track to the person instance from the current frame onwards"
 
     def execute(self, context):
-        self.report({'INFO'}, "Stitching not yet implemented.")
-        return {'CANCELLED'}
+        from ..core.person_facade import RealPersonInstanceFacade
+        from ..blender import dal
+
+        start_frame = context.scene.frame_current
+        stitching_ui_state = context.scene.pose_editor_stitching_ui
+
+        # Get active view
+        active_camera = context.space_data.camera
+        if not active_camera or not active_camera.name.startswith("Cam_"):
+            self.report({'ERROR'}, "No active camera view found.")
+            return {'CANCELLED'}
+        view_name = active_camera.name.replace("Cam_", "")
+
+        # TODO: This is a temporary way to get a skeleton. This should
+        # be retrieved from the RealPersonInstance in the future.
+        skeleton_def = COCO_133
+        skeleton = COCO133Skeleton(skeleton_def)
+
+        for item in stitching_ui_state.items:
+            person_ref = dal.get_object_by_name(item.person_name)
+            if not person_ref:
+                continue
+
+            facade = RealPersonInstanceFacade(person_ref)
+            
+            current_track_index = facade.get_active_track_index_at_frame(view_name, start_frame)
+            selected_track_index = int(item.selected_track)
+
+            if selected_track_index != -1 and selected_track_index != current_track_index:
+                print(f"Assigning track {selected_track_index} to {item.person_name} at frame {start_frame}")
+                facade.assign_source_track_for_segment(
+                    view_name=view_name,
+                    source_track_index=selected_track_index,
+                    start_frame=start_frame,
+                    skeleton=skeleton
+                )
+
+        self.report({'INFO'}, f"Stitching applied at frame {start_frame}.")
+        return {'FINISHED'}

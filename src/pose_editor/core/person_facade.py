@@ -91,7 +91,7 @@ class RealPersonInstanceFacade:
 
         # 2. Define the columns of data to be copied
         columns_to_copy: List[Tuple[str, str, int]] = []
-        for joint_node in PreOrderIter(skeleton._skeleton):
+        for joint_node in skeleton._skeleton.descendants:
             if not hasattr(joint_node, "id") or joint_node.id is None:
                 continue
             joint_name = joint_node.name

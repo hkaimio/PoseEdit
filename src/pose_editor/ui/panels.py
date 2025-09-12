@@ -14,7 +14,8 @@ class PE_PT_ProjectPanel(bpy.types.Panel):
     bl_region_type = "UI"
     bl_category = "Pose Editor"
 
-    layout = self.layout
+    def draw(self, context):
+        layout = self.layout
         layout.operator("pose_editor.create_project")
         layout.operator("pose_editor.load_camera_views")
 
