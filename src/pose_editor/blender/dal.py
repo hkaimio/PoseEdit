@@ -91,6 +91,9 @@ SKELETON = CustomProperty[str]("skeleton")
 ACTION_NAME = CustomProperty[str]("action_name")
 MARKER_ROLE = CustomProperty[str]("marker_role")
 IS_CAMERA_VIEW = CustomProperty[bool]("is_camera_view")
+POSE_EDITOR_OBJECT_TYPE = CustomProperty[str]("pose_editor_object_type")
+CAMERA_VIEW_ID = CustomProperty[str]("camera_view_id")
+COLOR = CustomProperty[Tuple[float, float, float, float]]("color")
 
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:

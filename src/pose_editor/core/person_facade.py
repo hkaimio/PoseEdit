@@ -5,6 +5,7 @@
 from .marker_data import MarkerData
 from ..blender import dal
 from typing import Optional
+from .person_data_view import PersonDataView
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
 IS_REAL_PERSON_INSTANCE = dal.CustomProperty[bool]("is_real_person_instance")
@@ -125,14 +126,37 @@ class RealPersonInstanceFacade:
 
         # 6. Re-connect the PersonDataView to the now-populated MarkerData
         # This ensures the markers animate with the new data
-        from .person_data_view import PersonDataView
         real_person_pv_name = f"PV.{self.person_id}.{view_name}"
         real_person_pv_obj_ref = dal.get_object_by_name(real_person_pv_name)
 
-        if real_person_pv_obj_ref:
+        # 6. Re-connect the PersonDataView to the now-populated MarkerData
+        # This ensures the markers animate with the new data
+        real_person_pv_name = f"PV.{self.person_id}.{view_name}"
+        real_person_pv_obj_ref = dal.get_object_by_name(real_person_pv_name)
+
+        real_person_pv = PersonDataView.from_blender_object(real_person_pv_obj_ref) if real_person_pv_obj_ref else None
+        if real_person_pv is None:
+            # Fallback: If for some reason the root object doesn't exist or is not valid, create a new one.
+            # This case should ideally not happen if PE_OT_AddPersonInstance worked correctly.
+            print(f"Warning: PersonDataView root object {real_person_pv_name} not found or invalid. Creating a new one.")
             # We need to get the collection for the PersonDataView constructor
             person_views_collection = dal.get_or_create_collection('PersonViews')
+            # We need the camera_view_obj_ref to create a new PersonDataView
+            camera_view_obj_ref = dal.get_object_by_name(f"View_{view_name}")
+            if camera_view_obj_ref is None:
+                print(f"Error: CameraView {view_name} not found. Cannot create new PersonDataView.")
+                return # Or raise an error
 
-            real_person_pv = PersonDataView(real_person_pv_name, skeleton, collection=person_views_collection)
-            target_md.apply_to_view(real_person_pv)
-            print(f"Re-connected PersonDataView {real_person_pv_name} to action.")
+            real_person_pv = PersonDataView.create_new(
+                view_name=real_person_pv_name,
+                skeleton=skeleton, # Skeleton is still needed for new creation
+                color=(1.0, 1.0, 1.0, 1.0), # Default color for new creation
+                camera_view_obj_ref=camera_view_obj_ref,
+                collection=person_views_collection
+            )
+            if real_person_pv is None: # Should not happen if create_new works
+                print(f"Error: Failed to create new PersonDataView {real_person_pv_name}.")
+                return # Or raise an error
+
+        target_md.apply_to_view(real_person_pv)
+        print(f"Re-connected PersonDataView {real_person_pv_name} to action.")

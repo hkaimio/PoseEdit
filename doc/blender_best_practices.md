@@ -2,7 +2,13 @@
 
 This document outlines best practices discovered during the development of the Pose Editor add-on, particularly those related to performance and stability.
 
-## 1. Avoid Rapid Mode Switching in Loops
+## 1. Do not make assumptions about object names
+
+**NEVER** assume that Blended names object with the name you give to it. Blender is free to change the given name to something else if there is e.g. naming conflict and also use might cahnge the object name (although in case of this extension this is and acceptable risk.)
+
+## 2. Avoid Rapid Mode Switching in Loops
+
+**Problem:**
 
 **Problem:**
 

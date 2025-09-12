@@ -223,7 +223,13 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
         color = PASTEL_COLORS[person_idx % len(PASTEL_COLORS)]
 
         print(f"Creating PersonDataView for {series_name}...")
-        person_view = PersonDataView(f"PV.{series_name}", skeleton_obj, color=color)
+        person_view = PersonDataView.create_new(
+            view_name=f"PV.{series_name}",
+            skeleton=skeleton_obj,
+            color=color,
+            camera_view_obj_ref=camera_view._obj,
+            collection=None # Or a specific collection if needed
+        )
         print(f"Linking PersonDataView {person_view.view_name} to MarkerData series {series_name}...")
         person_view.connect_to_series(marker_data)
 

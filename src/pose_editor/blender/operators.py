@@ -178,7 +178,13 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
 
             # Create PersonDataView for the Real Person in this view
             real_person_pv_name = f"PV.{person_obj_ref.name}.{cam_view_name}"
-            real_person_pv = PersonDataView(real_person_pv_name, skeleton, color=color)
+            real_person_pv = PersonDataView.create_new(
+                view_name=real_person_pv_name,
+                skeleton=skeleton,
+                color=color,
+                camera_view_obj_ref=cam_view_ref,
+                collection=None # Assuming default collection for now, or pass a specific one if needed
+            )
 
             # Link PersonDataView to MarkerData
             real_person_pv.connect_to_series(real_person_md)
