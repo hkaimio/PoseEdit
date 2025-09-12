@@ -14,6 +14,16 @@ class PersonDataView:
 
     Manages a 'Person View' root Empty and its hierarchy of marker Empties,
     which visually represent the animation data from a MarkerData series.
+
+    Blender Representation:
+    -   **Root Object**: A main Empty object (e.g., `PV.cam1_person0_raw`) in the
+        `PersonViews` collection. This object acts as the parent for all visual
+        components of this person-view.
+    -   **Marker Objects**: For each joint in the skeleton, a child Empty is
+        created. These are the objects that are ultimately animated.
+    -   **Armature Object**: A child Armature object is created with bones
+        connecting the marker objects. The bones use `COPY_LOCATION` and
+        `STRETCH_TO` constraints to follow the markers.
     """
 
     def __init__(self, view_name: str, skeleton: SkeletonBase, color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)):

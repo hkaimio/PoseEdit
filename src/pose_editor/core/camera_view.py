@@ -51,8 +51,25 @@ def _extract_frame_number(filename: str) -> int:
 
 def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleton_obj: SkeletonBase) -> CameraView:
     """
-    Loads raw pose data from JSON files for a single camera view, creates Blender objects
-    to represent the camera view and raw person data, and links them.
+    Loads raw pose data from JSON files for a single camera view.
+
+    This function orchestrates the creation of all necessary Blender objects
+    to represent the camera view, its associated raw person data tracks, and the
+    visual representation of that data.
+
+    Blender Representation of a Camera View:
+    -   A main Empty object named `View_<name>` is created to act as the root for
+        all objects related to this camera view.
+    -   A Blender Camera object (`Cam_<name>`) is created and parented to the
+        view root. It is configured to display the specified video file as its
+        background.
+    -   For each person track found in the pose data, this function creates:
+        1.  A `MarkerData` instance, which creates a slotted `Action` to hold
+            the animation keyframes.
+        2.  A `PersonDataView` instance, which creates the visible armature and
+            marker objects.
+        3.  The `PersonDataView`'s root object is parented to the main
+            `View_<name>` Empty.
 
     Args:
         name: The name of the camera view.

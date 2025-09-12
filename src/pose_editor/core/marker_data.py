@@ -14,6 +14,14 @@ class MarkerData:
     Manages a DataSeries Empty and its associated slotted Action, providing
     methods to set and retrieve animation data without directly interacting
     with Blender's `bpy` module.
+
+    Blender Representation:
+    -   **Data-Block**: A Blender `Action` data-block (e.g., `AC.cam1_person0_raw`).
+        This action stores all the F-Curves for the marker animations using the
+        Slotted Actions API.
+    -   **Scene Object**: A corresponding Empty object (e.g., `DS.cam1_person0_raw`)
+        is created in the `DataSeries` collection to hold metadata about the
+        action, such as its `series_name` and the `skeleton` type it uses.
     """
 
     def __init__(self, series_name: str, skeleton_name: Optional[str] = None):
