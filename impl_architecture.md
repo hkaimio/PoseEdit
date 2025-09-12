@@ -358,6 +358,21 @@ The `pose_keypoints_2d` array's structure is determined by the chosen skeleton. 
     -   `core.person_facade.RealPersonInstanceFacade`: Methods to get/set the `active_track_index` keyframes and to perform the animation copy between `MarkerData` objects.
     -   `blender.dal`: Functions to read F-curve keyframes within a range (`get_fcurves_from_action`) and write them (`set_fcurves_from_numpy`).
 
+#### Stitching implementation  plan
+
+  First, I'll define the necessary PropertyGroup to store the UI state. This will involve creating a group to hold the dropdown selection for a
+  single person and then a CollectionProperty to manage a list of these groups, one for each "Real Person".
+
+
+   * Deliverable: A new file src/pose_editor/blender/properties.py with the required PropertyGroup classes.
+  Step 2: Implement the Core Stitching Logic (in person_facade.py)
+   * Deliverable:
+  Step 3: Implement the UI Panel (in panels.py)
+   * Deliverable: A new PE_PT_StitchingPanel class. Its draw method will be responsible for:
+   * Deliverable: A new PE_OT_AssignTrack operator. When executed, it will:
+  This step-by-step approach ensures that each part of the feature is built on a tested and verified foundation, making the whole process more
+  robust and manageable.
+
 ## 7. Deployment
 This chapter outlines the strategy for packaging and distributing the add-on, including its dependencies.
 
