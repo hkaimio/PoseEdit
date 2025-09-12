@@ -202,7 +202,7 @@ def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list
         f.keyframe_points.remove(f.keyframe_points[-1])
 
 
-def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float], image_path: str = "C:/Users/HarriKaimio/projects/pose-editor/assets/marker-32x32.png") -> BlenderObjRef:
+def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, float, float], image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png") -> BlenderObjRef:
     """
     Creates a new empty object with an image, to be used as a marker.
 
@@ -245,6 +245,48 @@ def create_marker(parent: BlenderObjRef, name: str, color: tuple[float, float, f
 
     # Store the marker role as a custom property
     set_custom_property(BlenderObjRef(marker_obj.name), MARKER_ROLE, name)
+
+    # Store original color components as custom properties for drivers
+    marker_obj["_original_color_r"] = color[0]
+    marker_obj["_original_color_g"] = color[1]
+    marker_obj["_original_color_b"] = color[2]
+    marker_obj["_original_color_a"] = color[3]
+
+    # Drive the object color with the quality
+    for i in range(4): # R, G, B, A
+        driver = marker_obj.driver_add('color', i).driver
+        driver.type = 'SCRIPTED'
+        driver.expression = f"get_quality_driven_color_component(quality, r, g, b, a, {i})"
+
+        var_quality = driver.variables.new()
+        var_quality.name = 'quality'
+        var_quality.type = 'SINGLE_PROP'
+        var_quality.targets[0].id = marker_obj
+        var_quality.targets[0].data_path = '["quality"]'
+
+        var_r = driver.variables.new()
+        var_r.name = 'r'
+        var_r.type = 'SINGLE_PROP'
+        var_r.targets[0].id = marker_obj
+        var_r.targets[0].data_path = '["_original_color_r"]'
+
+        var_g = driver.variables.new()
+        var_g.name = 'g'
+        var_g.type = 'SINGLE_PROP'
+        var_g.targets[0].id = marker_obj
+        var_g.targets[0].data_path = '["_original_color_g"]'
+
+        var_b = driver.variables.new()
+        var_b.name = 'b'
+        var_b.type = 'SINGLE_PROP'
+        var_b.targets[0].id = marker_obj
+        var_b.targets[0].data_path = '["_original_color_b"]'
+
+        var_a = driver.variables.new()
+        var_a.name = 'a'
+        var_a.type = 'SINGLE_PROP'
+        var_a.targets[0].id = marker_obj
+        var_a.targets[0].data_path = '["_original_color_a"]'
 
     # Add driver for hide_viewport based on "quality"
     driver = marker_obj.driver_add('hide_viewport').driver
@@ -658,6 +700,36 @@ def set_armature_display_stick(armature_obj_ref: BlenderObjRef) -> None:
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
     armature_obj.data.display_type = 'STICK'
+
+def add_bone_driver(armature_obj_ref: BlenderObjRef, bone_name: str, data_path: str, expression: str, variables: list[tuple[str, str, str, str]]) -> None:
+    """Adds a driver to a bone property.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: The name of the bone.
+        data_path: The property to drive (e.g., 'hide').
+        expression: The driver expression.
+        variables: A list of tuples, where each tuple defines a driver variable:
+                   (var_name, var_type, target_id, data_path)
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.data.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    driver = bone.driver_add(data_path).driver
+    driver.type = 'SCRIPTED'
+    driver.expression = expression
+
+    for var_name, var_type, target_id, target_data_path in variables:
+        var = driver.variables.new()
+        var.name = var_name
+        var.type = var_type
+        var.targets[0].id = bpy.data.objects.get(target_id)
+        var.targets[0].data_path = target_data_path
 
 def sample_fcurve(fcurve: bpy.types.FCurve, start_frame: int, end_frame: int) -> np.ndarray:
     """Samples an F-Curve's values over a given frame range.

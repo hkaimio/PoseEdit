@@ -78,6 +78,7 @@ class PersonDataView:
             collection_name='PersonViews',
             parent=self.view_root_object
         )
+        self.armature_object._get_obj().color = self.color
 
         dal.set_armature_display_stick(self.armature_object)
 
@@ -95,6 +96,14 @@ class PersonDataView:
 
                     dal.add_bone_constraint(self.armature_object, bone_name, 'COPY_LOCATION', parent_marker)
                     dal.add_bone_constraint(self.armature_object, bone_name, 'STRETCH_TO', child_marker)
+
+                    # Add driver to hide bone
+                    expression = "var1 or var2"
+                    variables = [
+                        ('var1', 'SINGLE_PROP', parent_marker.name, 'hide_viewport'),
+                        ('var2', 'SINGLE_PROP', child_marker.name, 'hide_viewport')
+                    ]
+                    dal.add_bone_driver(self.armature_object, bone_name, 'hide', expression, variables)
 
     def _create_marker_objects(self):
         """Creates a marker object for each joint in the skeleton."""
