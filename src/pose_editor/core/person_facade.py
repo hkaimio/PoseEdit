@@ -8,6 +8,8 @@ from typing import Optional
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
 IS_REAL_PERSON_INSTANCE = dal.CustomProperty[bool]("is_real_person_instance")
+ACTIVE_TRACK_INDEX = dal.CustomProperty[int]("active_track_index")
+
 
 class RealPersonInstanceFacade:
     """A facade for a Real Person Instance.
@@ -18,30 +20,105 @@ class RealPersonInstanceFacade:
 
     def __init__(self, person_instance_obj: dal.BlenderObjRef):
         self.obj = person_instance_obj
+        # A more robust implementation would not rely on name parsing
+        self.person_id = person_instance_obj.name
 
-    def get_marker_data_for_view(self, view_name: str) -> Optional[MarkerData]:
-        """Gets the MarkerData object for this person in a specific camera view."""
-        # This is a placeholder implementation. A more robust version would
-        # search through collections or use custom properties to find the correct
-        # MarkerData object.
-        series_name = f"{view_name}_person{self.obj.name}" # This assumes a naming convention
-        return MarkerData(series_name)
+    def _get_dataseries_for_view(self, view_name: str) -> Optional[dal.BlenderObjRef]:
+        """Finds the data series object for this person in a specific view."""
+        # This facade assumes a specific naming convention established by the UI/operators
+        ds_name = f"DS.{self.person_id}.{view_name}"
+        return dal.get_object_by_name(ds_name)
+
+    def get_active_track_index_at_frame(self, view_name: str, frame: int) -> int:
+        """Gets the value of the active_track_index at a specific frame."""
+        ds_obj = self._get_dataseries_for_view(view_name)
+        if not ds_obj:
+            return -1
+
+        fcurve = dal.get_fcurve_on_object(ds_obj, '["active_track_index"]', index=-1)
+        if not fcurve:
+            # If no fcurve, try to get the static value
+            val = dal.get_custom_property(ds_obj, ACTIVE_TRACK_INDEX)
+            return val if val is not None else -1
+
+        return int(fcurve.evaluate(frame))
+
+    def find_next_stitch_frame(self, view_name: str, start_frame: int) -> int:
+        """Finds the frame of the next stitch point after the start_frame."""
+        ds_obj = self._get_dataseries_for_view(view_name)
+        scene_start, scene_end = dal.get_scene_frame_range()
+
+        if not ds_obj:
+            return scene_end
+
+        fcurve = dal.get_fcurve_on_object(ds_obj, '["active_track_index"]', index=-1)
+        if not fcurve:
+            return scene_end
+
+        keyframes = dal.get_fcurve_keyframes(fcurve)
+        for frame, _ in keyframes:
+            if frame > start_frame:
+                return int(frame) - 1 # The segment ends the frame before the next stitch
+
+        return scene_end
 
     def assign_source_track_for_segment(
-        self, 
-        view_name: str, 
-        source_track_index: int, 
-        start_frame: int
+        self,
+        view_name: str,
+        source_track_index: int,
+        start_frame: int,
+        skeleton: "SkeletonBase",
     ):
-        """Assigns a new source track for a segment of the timeline.
+        """Assigns a new source track for a segment of the timeline."""
+        from anytree.iterators import PreOrderIter
+        from .marker_data import MarkerData
+        import numpy as np
 
-        This involves setting a keyframe on the `active_track_index` property
-        and copying the animation data from the source track's action to this
-        person's action for the determined frame range.
+        end_frame = self.find_next_stitch_frame(view_name, start_frame)
+        if end_frame < start_frame:
+            print(f"End frame {end_frame} is before start frame {start_frame}, aborting stitch.")
+            return
 
-        Args:
-            view_name: The name of the camera view to perform the stitch in.
-            source_track_index: The integer index of the raw track to use as a source.
-            start_frame: The frame at which the switch should occur.
-        """
-        pass # To be implemented
+        print(f"Stitching segment for {self.person_id} in view {view_name} from frame {start_frame} to {end_frame}.")
+        print(f"Source track index: {source_track_index}")
+
+        # 1. Get Target and Source MarkerData objects
+        target_ds_name = f"{self.person_id}.{view_name}"
+        target_md = MarkerData(target_ds_name, skeleton._skeleton.name)
+
+        source_ds_name = f"{view_name}_person{source_track_index}"
+        source_md = MarkerData(source_ds_name, skeleton._skeleton.name)
+
+        # 2. Define the columns of data to be copied
+        columns_to_copy: List[Tuple[str, str, int]] = []
+        for joint_node in PreOrderIter(skeleton._skeleton):
+            if not hasattr(joint_node, "id") or joint_node.id is None:
+                continue
+            joint_name = joint_node.name
+            columns_to_copy.append((joint_name, "location", 0))  # X
+            columns_to_copy.append((joint_name, "location", 1))  # Y
+            columns_to_copy.append((joint_name, '["quality"]', -1)) # Quality
+
+        # 3. Read data from the source action
+        print(f"Reading data from {source_md.action.name}...")
+        source_data_np = dal.get_animation_data_as_numpy(
+            source_md.action,
+            columns_to_copy,
+            start_frame,
+            end_frame,
+        )
+        print(f"Read {source_data_np.shape} data array from source.")
+
+        # 4. Write data to the target action
+        print(f"Writing data to {target_md.action.name}...")
+        dal.set_fcurves_from_numpy(
+            target_md.action, columns_to_copy, start_frame, source_data_np
+        )
+        print("Write complete.")
+
+        # 5. Set the keyframe for the active_track_index
+        target_ds_obj = self._get_dataseries_for_view(view_name)
+        if target_ds_obj:
+            print(f"Setting active_track_index keyframe on {target_ds_obj.name} at frame {start_frame} to {source_track_index}")
+            dal.set_custom_property(target_ds_obj, ACTIVE_TRACK_INDEX, source_track_index)
+            dal.add_keyframe(target_ds_obj, start_frame, {'["active_track_index"]': [source_track_index]})

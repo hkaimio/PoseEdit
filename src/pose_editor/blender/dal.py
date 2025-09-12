@@ -884,6 +884,42 @@ def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> List[Tuple[float, float]]:
     return [(kp.co[0], kp.co[1]) for kp in fcurve.keyframe_points]
 
 
+def get_animation_data_as_numpy(
+    action: bpy.types.Action, 
+    columns: List[Tuple[str, str, int]], 
+    start_frame: int, 
+    end_frame: int
+) -> np.ndarray:
+    """Reads animation data from a slotted Action into a NumPy array.
+
+    This is the counterpart to `set_fcurves_from_numpy`.
+
+    Args:
+        action: The Action to read data from.
+        columns: A list of (slot_name, data_path, index) tuples describing what to read.
+        start_frame: The first frame of the range to read (inclusive).
+        end_frame: The last frame of the range to read (inclusive).
+
+    Returns:
+        A 2D NumPy array of shape (frames, columns) with the animation data.
+    """
+    if not action or not columns:
+        return np.array([])
+
+    num_frames = end_frame - start_frame + 1
+    num_columns = len(columns)
+    data = np.full((num_frames, num_columns), np.nan)
+
+    for col_idx, (slot_name, data_path, index) in enumerate(columns):
+        fcurve = get_fcurve_from_action(action, slot_name, data_path, index if index is not None else -1)
+        if fcurve:
+            for frame_offset in range(num_frames):
+                frame = start_frame + frame_offset
+                data[frame_offset, col_idx] = fcurve.evaluate(float(frame))
+    
+    return data
+
+
 def set_fcurves_from_numpy(
     action: bpy.types.Action, columns: List[Tuple[str, str, int]], start_frame: int, data: np.ndarray
 ) -> None:

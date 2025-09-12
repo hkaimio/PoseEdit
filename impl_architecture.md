@@ -373,6 +373,28 @@ The `pose_keypoints_2d` array's structure is determined by the chosen skeleton. 
   This step-by-step approach ensures that each part of the feature is built on a tested and verified foundation, making the whole process more
   robust and manageable.
 
+Step 4: Complete the Core Logic (in person_facade.py)
+  The RealPersonInstanceFacade is the brain of this operation. I will fully implement the methods we sketched out earlier.
+
+
+   * `get_active_track_index_at_frame(view_name, frame)`: This method will find the active_track_index F-curve on the person's data object for the
+     specified view and evaluate its value at the given frame. This tells us which raw track is currently the source.
+  The PE_OT_AssignTrack operator will be the bridge between the UI and the core logic.
+
+
+   * I will replace the placeholder code in its execute method with the following logic:
+   * The get_available_tracks function in properties.py will be properly implemented to inspect the scene, find the raw tracks associated with the
+     active camera view, and return them as a list for the dropdown menu.
+  By completing these three steps, the entire feature will be functional, from the user interface to the underlying data manipulation.
+
+  The actual data copying will happen in two main places, following the architectural layers we've established:
+
+   1. The Orchestration (The "How"): The logic for the copy operation will be orchestrated inside the `assign_source_track_for_segment` method of
+      the `RealPersonInstanceFacade` class (in src/pose_editor/core/person_facade.py). This method will be responsible for:
+   2. The Execution (The "Do"): The low-level reading and writing of the animation data will be handled by functions in the Data Access Layer
+      (src/pose_editor/blender/dal.py). Specifically:
+  So, in short: the facade decides what to copy and where, and the DAL performs the actual, optimized copy operation within Blender's data.
+
 ## 7. Deployment
 This chapter outlines the strategy for packaging and distributing the add-on, including its dependencies.
 
