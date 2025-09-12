@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import bpy
-from .blender.operators import PE_OT_CreateProject, PE_OT_LoadCameraViews
-from .ui.panels import PE_PT_ProjectPanel
+from .blender.operators import PE_OT_CreateProject, PE_OT_LoadCameraViews, PE_OT_AssignTrack
+from .ui.panels import PE_PT_ProjectPanel, PE_PT_StitchingPanel
 from .blender.drivers import get_quality_driven_color_component
 from .blender.properties import StitchingUIItem, StitchingUIState
 
@@ -25,8 +25,10 @@ _classes = [
     PE_OT_CreateProject,
     PE_OT_LoadCameraViews,
     PE_PT_ProjectPanel,
+    PE_PT_StitchingPanel,
     StitchingUIItem,
     StitchingUIState,
+    PE_OT_AssignTrack,
 ]
 
 

@@ -6,6 +6,9 @@ from .marker_data import MarkerData
 from ..blender import dal
 from typing import Optional
 
+PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
+IS_REAL_PERSON_INSTANCE = dal.CustomProperty[bool]("is_real_person_instance")
+
 class RealPersonInstanceFacade:
     """A facade for a Real Person Instance.
 

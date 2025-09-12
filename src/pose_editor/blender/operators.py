@@ -95,7 +95,7 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
         
         # A bit of padding between views
         padding = 2.0
-        view_width = BLENDER_TARGET_WIDTH + padding
+        view_width = dal.BLENDER_TARGET_WIDTH + padding
 
         for i, view in enumerate(views):
             row = i // cols
@@ -107,3 +107,15 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
             view_obj = view._obj._get_obj()
             if view_obj:
                 view_obj.location = (x, y, 0)
+
+
+class PE_OT_AssignTrack(bpy.types.Operator):
+    """Assigns a raw track as the source for a Real Person segment."""
+
+    bl_idname = "pose_editor.assign_track"
+    bl_label = "Assign Raw Track"
+    bl_description = "Assign the selected raw track to the person instance from the current frame onwards"
+
+    def execute(self, context):
+        self.report({'INFO'}, "Stitching not yet implemented.")
+        return {'CANCELLED'}

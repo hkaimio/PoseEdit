@@ -652,6 +652,23 @@ def find_object_by_property(prop: CustomProperty[T], value: T) -> Optional["Blen
     return None
 
 
+def find_all_objects_by_property(prop: CustomProperty[T], value: T) -> List[BlenderObjRef]:
+    """Finds all objects in the scene with a given custom property value.
+
+    Args:
+        prop: The CustomProperty to search for.
+        value: The value the property should have.
+
+    Returns:
+        A list of BlenderObjRef wrappers for the found objects.
+    """
+    found_objects = []
+    for obj in bpy.context.scene.objects:
+        if prop._prop_name in obj and obj[prop._prop_name] == value:
+            found_objects.append(BlenderObjRef(obj.name))
+    return found_objects
+
+
 def get_fcurve_from_action(
     action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1
 ) -> Optional[bpy.types.FCurve]:
