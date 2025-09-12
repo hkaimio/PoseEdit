@@ -90,6 +90,7 @@ SERIES_NAME = CustomProperty[str]("series_name")
 SKELETON = CustomProperty[str]("skeleton")
 ACTION_NAME = CustomProperty[str]("action_name")
 MARKER_ROLE = CustomProperty[str]("marker_role")
+IS_CAMERA_VIEW = CustomProperty[bool]("is_camera_view")
 
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:

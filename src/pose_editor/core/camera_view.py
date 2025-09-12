@@ -113,6 +113,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     camera_view_empty_name = f"View_{name}"
     camera_view._obj = dal.create_empty(camera_view_empty_name)
     dal.set_custom_property(camera_view._obj, SERIES_NAME, name)
+    dal.set_custom_property(camera_view._obj, dal.IS_CAMERA_VIEW, True)
 
     # Create camera and set background video
     camera_name = f"Cam_{name}"

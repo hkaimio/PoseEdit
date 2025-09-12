@@ -160,7 +160,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
         from ..pose2sim.skeletons import COCO_133
 
         # Find all existing CameraView root objects
-        camera_view_refs = dal.find_all_objects_by_property(dal.SERIES_NAME, lambda name: name.startswith("cam")) # Assuming cam views start with "cam"
+        camera_view_refs = dal.find_all_objects_by_property(dal.IS_CAMERA_VIEW, True)
         
         # For now, hardcode skeleton. In future, this should be from PersonDefinition.
         skeleton_def = COCO_133
