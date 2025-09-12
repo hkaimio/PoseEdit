@@ -82,7 +82,7 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         # --- Draw UI --- 
         if not stitching_ui_state.items:
             layout.label(text="No Real Persons created yet.")
-            # TODO: Add an "Add Real Person" button here
+            layout.operator("pose_editor.add_person_instance", text="Add New Real Person")
             return
 
         box = layout.box()

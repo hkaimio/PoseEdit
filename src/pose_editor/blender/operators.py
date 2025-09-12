@@ -95,7 +95,7 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
         
         # A bit of padding between views
         padding = 2.0
-        view_width = dal.BLENDER_TARGET_WIDTH + padding
+        view_width = BLENDER_TARGET_WIDTH + padding
 
         for i, view in enumerate(views):
             row = i // cols
@@ -107,6 +107,51 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
             view_obj = view._obj._get_obj()
             if view_obj:
                 view_obj.location = (x, y, 0)
+
+
+class PE_OT_AddPersonInstance(bpy.types.Operator):
+    """Adds a new Real Person Instance to the scene."""
+
+    bl_idname = "pose_editor.add_person_instance"
+    bl_label = "Add Real Person"
+    bl_description = "Adds a new Real Person Instance to the scene for stitching."
+
+    person_name: bpy.props.StringProperty(
+        name="Person Name",
+        description="Name for the new Real Person Instance",
+        default="New Person"
+    )
+
+    def execute(self, context):
+        from ..core.person_facade import IS_REAL_PERSON_INSTANCE, PERSON_DEFINITION_ID
+        from ..blender import dal
+
+        if not self.person_name:
+            self.report({'ERROR'}, "Person name cannot be empty.")
+            return {'CANCELLED'}
+
+        # Check if a person with this name already exists
+        existing_person = dal.get_object_by_name(self.person_name)
+        if existing_person and dal.get_custom_property(existing_person, IS_REAL_PERSON_INSTANCE):
+            self.report({'ERROR'}, f"A Real Person named '{self.person_name}' already exists.")
+            return {'CANCELLED'}
+
+        # Create the master Empty object for the RealPersonInstance
+        person_obj_ref = dal.get_or_create_object(
+            name=self.person_name,
+            obj_type='EMPTY',
+            collection_name='RealPersons' # Assuming a collection for RealPersons
+        )
+
+        # Set custom properties to identify it as a RealPersonInstance
+        dal.set_custom_property(person_obj_ref, IS_REAL_PERSON_INSTANCE, True)
+        dal.set_custom_property(person_obj_ref, PERSON_DEFINITION_ID, self.person_name) # For now, name is also definition ID
+
+        self.report({'INFO'}, f"Real Person '{self.person_name}' added.")
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
 
 
 class PE_OT_AssignTrack(bpy.types.Operator):
