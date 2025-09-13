@@ -6,6 +6,11 @@ import pytest
 from anytree import Node
 
 from pose_editor.core.camera_view import (
+    CAMERA_X_OFFSET,
+    CAMERA_X_SCALE,
+    CAMERA_Y_OFFSET,
+    CAMERA_Y_SCALE,
+    CAMERA_Z_SCALE,
     CameraView,
     _extract_frame_number,
     create_camera_view,
@@ -21,6 +26,37 @@ class DummySkeleton(SkeletonBase):
         return None
 
 
+class TestCameraView:
+    @patch("pose_editor.core.camera_view.dal", autospec=True)
+    def test_get_transform(self, mock_dal):
+        # Arrange
+        cv = CameraView()
+        cv._obj = MagicMock()
+
+        def get_prop_side_effect(obj, prop):
+            if prop == CAMERA_X_SCALE:
+                return 0.1
+            if prop == CAMERA_Y_SCALE:
+                return -0.2
+            if prop == CAMERA_Z_SCALE:
+                return 0.3
+            if prop == CAMERA_X_OFFSET:
+                return 10.0
+            if prop == CAMERA_Y_OFFSET:
+                return -20.0
+            return None
+
+        mock_dal.get_custom_property.side_effect = get_prop_side_effect
+
+        # Act
+        scale = cv.get_transform_scale()
+        location = cv.get_transform_location()
+
+        # Assert
+        assert scale == (0.1, -0.2, 0.3)
+        assert location == (10.0, -20.0, 0.0)
+
+
 @patch("pose_editor.core.camera_view.dal", autospec=True)
 @patch("pose_editor.core.camera_view.PersonDataView", autospec=True)
 @patch("pose_editor.core.camera_view.os.listdir", autospec=True)
@@ -29,7 +65,9 @@ class DummySkeleton(SkeletonBase):
     new_callable=mock_open,
     read_data='{"people":[]}',
 )
-def test_create_camera_view_scaling_landscape(mock_open_file, mock_listdir, mock_person_data_view, mock_dal):
+def test_create_camera_view_scaling_landscape(
+    mock_open_file, mock_listdir, mock_person_data_view, mock_dal
+):
     # Arrange
     mock_movie_clip = MagicMock()
     mock_movie_clip.size = (1280, 720)
@@ -62,11 +100,21 @@ def test_create_camera_view_scaling_landscape(mock_open_file, mock_listdir, mock
     )
 
     # Assert that the transform properties were saved
-    mock_dal.set_custom_property.assert_any_call(camera_view_empty_mock, "camera_x_scale", xfactor)
-    mock_dal.set_custom_property.assert_any_call(camera_view_empty_mock, "camera_y_scale", yfactor)
-    mock_dal.set_custom_property.assert_any_call(camera_view_empty_mock, "camera_z_scale", zfactor)
-    mock_dal.set_custom_property.assert_any_call(camera_view_empty_mock, "camera_x_offset", xoffset)
-    mock_dal.set_custom_property.assert_any_call(camera_view_empty_mock, "camera_y_offset", yoffset)
+    mock_dal.set_custom_property.assert_any_call(
+        camera_view_empty_mock, CAMERA_X_SCALE, xfactor
+    )
+    mock_dal.set_custom_property.assert_any_call(
+        camera_view_empty_mock, CAMERA_Y_SCALE, yfactor
+    )
+    mock_dal.set_custom_property.assert_any_call(
+        camera_view_empty_mock, CAMERA_Z_SCALE, zfactor
+    )
+    mock_dal.set_custom_property.assert_any_call(
+        camera_view_empty_mock, CAMERA_X_OFFSET, xoffset
+    )
+    mock_dal.set_custom_property.assert_any_call(
+        camera_view_empty_mock, CAMERA_Y_OFFSET, yoffset
+    )
 
 
 @patch("pose_editor.core.camera_view.dal", autospec=True)
@@ -77,7 +125,9 @@ def test_create_camera_view_scaling_landscape(mock_open_file, mock_listdir, mock
     new_callable=mock_open,
     read_data='{"people":[]}',
 )
-def test_create_camera_view_scaling_portrait(mock_open_file, mock_listdir, mock_person_data_view, mock_dal):
+def test_create_camera_view_scaling_portrait(
+    mock_open_file, mock_listdir, mock_person_data_view, mock_dal
+):
     # Arrange
     mock_movie_clip = MagicMock()
     mock_movie_clip.size = (1080, 1920)
@@ -96,11 +146,6 @@ def test_create_camera_view_scaling_portrait(mock_open_file, mock_listdir, mock_
 
     video_width, video_height = mock_movie_clip.size
     scale_factor = BLENDER_TARGET_WIDTH / video_height
-
-    xfactor = scale_factor
-    yfactor = -scale_factor
-    xoffset = -(video_width * scale_factor) / 2
-    yoffset = (video_height * scale_factor) / 2
 
     scaled_blender_width = video_width * scale_factor
     mock_dal.set_camera_ortho.assert_called_once_with(
@@ -157,7 +202,12 @@ def test_extract_frame_number_empty_string():
 @patch("pose_editor.core.camera_view.open", new_callable=mock_open)
 @patch("pose_editor.core.camera_view.json.load", autospec=True)
 def test_create_camera_view_missing_person_data(
-    mock_json_load, mock_open_file, mock_listdir, mock_person_data_view, mock_marker_data, mock_dal
+    mock_json_load,
+    mock_open_file,
+    mock_listdir,
+    mock_person_data_view,
+    mock_marker_data,
+    mock_dal,
 ):
     """
     Tests that when a person is not detected in a frame, the quality of their markers is set to -1.
@@ -217,27 +267,3 @@ def test_create_camera_view_missing_person_data(
     assert np.isnan(data[1, 1])
     assert np.isclose(data[1, 2], -1.0)
     assert np.isclose(data[2, 2], 0.9)
-
-
-class TestCameraView:
-    @patch("pose_editor.core.camera_view.dal", autospec=True)
-    def test_get_transform(self, mock_dal):
-        # Arrange
-        cv = CameraView()
-        cv._obj = MagicMock()
-
-        mock_dal.get_custom_property.side_effect = lambda obj, key: {
-            "camera_x_scale": 0.1,
-            "camera_y_scale": -0.2,
-            "camera_z_scale": 0.3,
-            "camera_x_offset": 10.0,
-            "camera_y_offset": -20.0,
-        }.get(key)
-
-        # Act
-        scale = cv.get_transform_scale()
-        location = cv.get_transform_location()
-
-        # Assert
-        assert scale == (0.1, -0.2, 0.3)
-        assert location == (10.0, -20.0, 0.0)

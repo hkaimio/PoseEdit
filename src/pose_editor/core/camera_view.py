@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -11,7 +13,7 @@ import numpy as np
 from anytree.iterators import PreOrderIter
 
 from ..blender import dal
-from ..blender.dal import SERIES_NAME, BlenderObjRef
+from ..blender.dal import SERIES_NAME, BlenderObjRef, CustomProperty
 from .marker_data import MarkerData
 from .person_data_series import RawPersonData
 from .person_data_view import PersonDataView
@@ -41,6 +43,12 @@ BRIGHT_COLORS = [
     (0.5, 0.0, 1.0, 1.0),  # Purple
 ]
 
+CAMERA_X_SCALE = CustomProperty[float]("camera_x_scale")
+CAMERA_Y_SCALE = CustomProperty[float]("camera_y_scale")
+CAMERA_Z_SCALE = CustomProperty[float]("camera_z_scale")
+CAMERA_X_OFFSET = CustomProperty[float]("camera_x_offset")
+CAMERA_Y_OFFSET = CustomProperty[float]("camera_y_offset")
+
 
 class CameraView:
     def __init__(self):
@@ -49,38 +57,37 @@ class CameraView:
 
         self._raw_person_data: list[RawPersonData] = []
 
+    @classmethod
+    def from_blender_obj(cls, obj_ref: BlenderObjRef) -> CameraView:
+        """Creates a CameraView instance from a Blender object reference."""
+        if not obj_ref or not dal.get_custom_property(obj_ref, dal.IS_CAMERA_VIEW):
+            raise ValueError("Object is not a valid CameraView.")
+
+        view = cls()
+        view._obj = obj_ref
+        return view
+
+    @classmethod
+    def get_all(cls) -> list[CameraView]:
+        """Returns all CameraView instances in the current scene."""
+        camera_view_refs = dal.find_all_objects_by_property(dal.IS_CAMERA_VIEW, True)
+        return [cls.from_blender_obj(ref) for ref in camera_view_refs]
+
     def get_transform_scale(self) -> tuple[float, float, float]:
         """Returns the scale transformation for this camera view."""
         if not self._obj:
             return (1.0, 1.0, 1.0)
-        x_scale = dal.get_custom_property(self._obj, "camera_x_scale", 1.0)
-        y_scale = dal.get_custom_property(self._obj, "camera_y_scale", 1.0)
-        z_scale = dal.get_custom_property(self._obj, "camera_z_scale", 1.0)
+        x_scale = dal.get_custom_property(self._obj, CAMERA_X_SCALE) or 1.0
+        y_scale = dal.get_custom_property(self._obj, CAMERA_Y_SCALE) or 1.0
+        z_scale = dal.get_custom_property(self._obj, CAMERA_Z_SCALE) or 1.0
         return (x_scale, y_scale, z_scale)
 
     def get_transform_location(self) -> tuple[float, float, float]:
         """Returns the location transformation for this camera view."""
         if not self._obj:
             return (0.0, 0.0, 0.0)
-        x_offset = dal.get_custom_property(self._obj, "camera_x_offset", 0.0)
-        y_offset = dal.get_custom_property(self._obj, "camera_y_offset", 0.0)
-        return (x_offset, y_offset, 0.0)
-
-    def get_transform_scale(self) -> tuple[float, float, float]:
-        """Returns the scale transformation for this camera view."""
-        if not self._obj:
-            return (1.0, 1.0, 1.0)
-        x_scale = dal.get_custom_property(self._obj, "camera_x_scale") or 1.0
-        y_scale = dal.get_custom_property(self._obj, "camera_y_scale") or 1.0
-        z_scale = dal.get_custom_property(self._obj, "camera_z_scale") or 1.0
-        return (x_scale, y_scale, z_scale)
-
-    def get_transform_location(self) -> tuple[float, float, float]:
-        """Returns the location transformation for this camera view."""
-        if not self._obj:
-            return (0.0, 0.0, 0.0)
-        x_offset = dal.get_custom_property(self._obj, "camera_x_offset") or 0.0
-        y_offset = dal.get_custom_property(self._obj, "camera_y_offset") or 0.0
+        x_offset = dal.get_custom_property(self._obj, CAMERA_X_OFFSET) or 0.0
+        y_offset = dal.get_custom_property(self._obj, CAMERA_Y_OFFSET) or 0.0
         return (x_offset, y_offset, 0.0)
 
 
@@ -176,11 +183,11 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     xoffset = -scaled_blender_width / 2
     yoffset = scaled_blender_height / 2
 
-    dal.set_custom_property(camera_view._obj, "camera_x_scale", xfactor)
-    dal.set_custom_property(camera_view._obj, "camera_y_scale", yfactor)
-    dal.set_custom_property(camera_view._obj, "camera_z_scale", zfactor)
-    dal.set_custom_property(camera_view._obj, "camera_x_offset", xoffset)
-    dal.set_custom_property(camera_view._obj, "camera_y_offset", yoffset)
+    dal.set_custom_property(camera_view._obj, CAMERA_X_SCALE, xfactor)
+    dal.set_custom_property(camera_view._obj, CAMERA_Y_SCALE, yfactor)
+    dal.set_custom_property(camera_view._obj, CAMERA_Z_SCALE, zfactor)
+    dal.set_custom_property(camera_view._obj, CAMERA_X_OFFSET, xoffset)
+    dal.set_custom_property(camera_view._obj, CAMERA_Y_OFFSET, yoffset)
 
     dal.set_camera_background(camera_obj_ref, movie_clip)
     dal.set_camera_ortho(camera_obj_ref, scaled_blender_width)

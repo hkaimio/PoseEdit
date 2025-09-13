@@ -8,10 +8,22 @@ from pathlib import Path
 
 import bpy
 
-from ..core.camera_view import BLENDER_TARGET_WIDTH, create_camera_view
+from ..core.camera_view import (
+    BLENDER_TARGET_WIDTH,
+    BRIGHT_COLORS,
+    CameraView,
+    create_camera_view,
+)
+from ..core.marker_data import MarkerData
+from ..core.person_data_view import PersonDataView
+from ..core.person_facade import (
+    IS_REAL_PERSON_INSTANCE,
+    PERSON_DEFINITION_ID,
+    RealPersonInstanceFacade,
+)
 from ..core.skeleton import COCO133Skeleton
 from ..pose2sim.skeletons import COCO_133
-from . import scene_builder
+from . import dal, scene_builder
 
 
 class PE_OT_CreateProject(bpy.types.Operator):
@@ -118,16 +130,15 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
     )
 
     def execute(self, context):
-        from ..blender import dal
-        from ..core.person_facade import IS_REAL_PERSON_INSTANCE, PERSON_DEFINITION_ID
-
         if not self.person_name:
             self.report({"ERROR"}, "Person name cannot be empty.")
             return {"CANCELLED"}
 
         # Check if a person with this name already exists
         existing_person = dal.get_object_by_name(self.person_name)
-        if existing_person and dal.get_custom_property(existing_person, IS_REAL_PERSON_INSTANCE):
+        if existing_person and dal.get_custom_property(
+            existing_person, IS_REAL_PERSON_INSTANCE
+        ):
             self.report({"ERROR"}, f"A Real Person named '{self.person_name}' already exists.")
             return {"CANCELLED"}
 
@@ -145,26 +156,18 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
         )  # For now, name is also definition ID
 
         # Add this person to the UI state collection
-        stitching_ui_state = context.scene.pose_editor_stitching_ui
-        item = stitching_ui_state.items.add()
-        item.person_name = self.person_name
+        self._update_ui_state(context)
 
         # --- Create MarkerData and PersonDataView for the Real Person in each CameraView ---
-        from ..core.camera_view import BLENDER_TARGET_WIDTH, BRIGHT_COLORS
-        from ..core.marker_data import MarkerData
-        from ..core.person_data_view import PersonDataView
-        from ..core.skeleton import COCO133Skeleton
-        from ..pose2sim.skeletons import COCO_133
-
         # Find all existing CameraView root objects
-        camera_view_refs = dal.find_all_objects_by_property(dal.IS_CAMERA_VIEW, True)
+        camera_views = CameraView.get_all()
 
         # For now, hardcode skeleton. In future, this should be from PersonDefinition.
         skeleton_def = COCO_133
         skeleton = COCO133Skeleton(skeleton_def)
 
-        for i, cam_view_ref in enumerate(camera_view_refs):
-            cam_view_name = dal.get_custom_property(cam_view_ref, dal.SERIES_NAME)
+        for i, cam_view in enumerate(camera_views):
+            cam_view_name = dal.get_custom_property(cam_view._obj, dal.SERIES_NAME)
 
             # Determine color for this Real Person's view
             color = BRIGHT_COLORS[i % len(BRIGHT_COLORS)]
@@ -179,28 +182,29 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
                 view_name=real_person_pv_name,
                 skeleton=skeleton,
                 color=color,
-                camera_view_obj_ref=cam_view_ref,
-                collection=None,  # Assuming default collection for now, or pass a specific one if needed
+                camera_view=cam_view,
+                collection=None,
             )
 
             # Link PersonDataView to MarkerData
             real_person_pv.connect_to_series(real_person_md)
 
-            # Parent Real Person's PersonDataView to the CameraView's root
-            real_person_pv.view_root_object._get_obj().parent = cam_view_ref._get_obj()
-
             # Position the Real Person's PersonDataView relative to the CameraView
             # Offset it to the right of the raw tracks
-            # Assuming raw tracks are at local (0,0,0) within the CameraView
-            # BLENDER_TARGET_WIDTH is the width of the video plane
             offset_x = BLENDER_TARGET_WIDTH + 1.0  # Offset by width + some padding
-            real_person_pv.view_root_object._get_obj().location = (offset_x, 0, 0)
+            real_person_pv.view_root_object._get_obj().location.x += offset_x
 
         self.report({"INFO"}, f"Real Person '{self.person_name}' added.")
         return {"FINISHED"}
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
+
+    def _update_ui_state(self, context):
+        """Adds the new person to the UI state collection."""
+        stitching_ui_state = context.scene.pose_editor_stitching_ui
+        item = stitching_ui_state.items.add()
+        item.person_name = self.person_name
 
 
 class PE_OT_AssignTrack(bpy.types.Operator):
