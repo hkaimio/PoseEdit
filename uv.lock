@@ -284,6 +284,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "bpy" },
+    { name = "coverage" },
     { name = "ruff" },
 ]
 
@@ -301,6 +302,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "bpy", specifier = "==4.5.0" },
+    { name = "coverage", specifier = ">=7.10.6" },
     { name = "ruff", specifier = ">=0.12.12" },
 ]
 

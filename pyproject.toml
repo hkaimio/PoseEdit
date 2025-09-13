@@ -48,5 +48,6 @@ test = "pytest"
 [dependency-groups]
 dev = [
     "bpy==4.5.0",
+    "coverage>=7.10.6",
     "ruff>=0.12.12",
 ]

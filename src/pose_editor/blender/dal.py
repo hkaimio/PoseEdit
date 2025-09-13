@@ -988,6 +988,55 @@ def get_animation_data_as_numpy(
     return data
 
 
+def replace_fcurve_segment_from_numpy(
+    action: bpy.types.Action,
+    columns: list[tuple[str, str, int]],
+    start_frame: int,
+    end_frame: int,
+    data: np.ndarray,
+) -> None:
+    """Replaces a segment of multiple F-Curves in an Action from a NumPy array.
+
+    This function iterates through each F-Curve defined by 'columns', removes
+    existing keyframes within the [start_frame, end_frame] range, and then
+    inserts new keyframes from the provided NumPy array 'data'.
+
+    Args:
+        action: The Action to modify.
+        columns: A list of tuples, where each tuple defines an F-Curve and
+                 corresponds to a column in the data array. The tuple format is
+                 (slot_name, data_path, index).
+        start_frame: The starting frame number for the segment to replace.
+        end_frame: The ending frame number for the segment to replace.
+        data: A 2D NumPy array of shape (frames, columns) containing the
+              animation data for the segment. The frames in this array are
+              relative to 'start_frame'.
+    """
+    if not action or not columns or data.size == 0:
+        return
+
+    num_frames_in_data = data.shape[0]
+
+    for col_idx, (slot_name, data_path, index) in enumerate(columns):
+        fcurve = get_or_create_fcurve(action, slot_name, data_path, index if index is not None else -1)
+
+        new_keyframes_for_fcurve = []
+        for frame_offset in range(num_frames_in_data):
+            current_frame = start_frame + frame_offset
+            # Ensure we don't go beyond the specified end_frame for replacement
+            if current_frame > end_frame:
+                break
+            value = data[frame_offset, col_idx]
+            if not np.isnan(value):
+                new_keyframes_for_fcurve.append((float(current_frame), value))
+
+        replace_fcurve_keyframes_in_range(fcurve, start_frame, end_frame, new_keyframes_for_fcurve)
+
+    # Update all F-Curves.
+    for fcurve in action.fcurves: # Iterate through all fcurves in the action to ensure all are updated
+        fcurve.update()
+
+
 def set_fcurves_from_numpy(
     action: bpy.types.Action, columns: list[tuple[str, str, int]], start_frame: int, data: np.ndarray
 ) -> None:

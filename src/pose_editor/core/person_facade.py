@@ -109,7 +109,7 @@ class RealPersonInstanceFacade:
 
         # 4. Write data to the target action
         print(f"Writing data to {target_md.action.name}...")
-        dal.set_fcurves_from_numpy(target_md.action, columns_to_copy, start_frame, source_data_np)
+        dal.replace_fcurve_segment_from_numpy(target_md.action, columns_to_copy, start_frame, end_frame, source_data_np)
         print("Write complete.")
 
         # 5. Set the keyframe for the active_track_index
