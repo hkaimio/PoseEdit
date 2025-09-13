@@ -2,9 +2,12 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from ..blender import dal
+
+if TYPE_CHECKING:
+    from .camera_view import CameraView
 from .marker_data import MarkerData
 from .skeleton import SkeletonBase
 
@@ -74,7 +77,7 @@ class PersonDataView:
         view_name: str,
         skeleton: SkeletonBase,
         color: tuple[float, float, float, float],
-        camera_view_obj_ref: dal.BlenderObjRef,
+        camera_view: "CameraView",
         collection: "bpy.types.Collection" = None,
     ) -> "PersonDataView":
         """Creates a new PersonDataView, including its Blender objects.
@@ -83,7 +86,7 @@ class PersonDataView:
             view_name: A unique name for this person view (e.g., "PV.Alice.cam1").
             skeleton: The skeleton definition to use for creating marker objects.
             color: The color for the markers (RGBA tuple).
-            camera_view_obj_ref: The BlenderObjRef of the CameraView this PersonDataView belongs to.
+            camera_view: The CameraView this PersonDataView belongs to.
             collection: The collection to link the root Empty to.
 
         Returns:
@@ -91,14 +94,20 @@ class PersonDataView:
         """
         # Create the root Empty for this view
         view_root_object = dal.get_or_create_object(
-            name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=camera_view_obj_ref
+            name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=camera_view._obj
         )
+
+        # Set scale and location from the camera view
+        scale = camera_view.get_transform_scale()
+        location = camera_view.get_transform_location()
+        view_root_object._get_obj().scale = scale
+        view_root_object._get_obj().location = location
 
         # Set custom properties
         dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
         dal.set_custom_property(view_root_object, dal.SKELETON, skeleton._skeleton.name)
         dal.set_custom_property(view_root_object, dal.COLOR, color)
-        dal.set_custom_property(view_root_object, dal.CAMERA_VIEW_ID, camera_view_obj_ref.name)
+        dal.set_custom_property(view_root_object, dal.CAMERA_VIEW_ID, camera_view._obj.name)
 
         # Create a temporary instance to call internal creation methods
         temp_instance = cls.__new__(cls)  # Bypass __init__ for now
@@ -106,7 +115,7 @@ class PersonDataView:
         temp_instance.view_name = view_name
         temp_instance.skeleton = skeleton
         temp_instance.color = color
-        temp_instance.camera_view_id = camera_view_obj_ref.name
+        temp_instance.camera_view_id = camera_view._obj.name
         temp_instance._marker_objects_by_role = {}
 
         # Create marker objects based on the skeleton definition

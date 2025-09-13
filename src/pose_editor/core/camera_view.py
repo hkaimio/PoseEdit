@@ -49,6 +49,40 @@ class CameraView:
 
         self._raw_person_data: list[RawPersonData] = []
 
+    def get_transform_scale(self) -> tuple[float, float, float]:
+        """Returns the scale transformation for this camera view."""
+        if not self._obj:
+            return (1.0, 1.0, 1.0)
+        x_scale = dal.get_custom_property(self._obj, "camera_x_scale", 1.0)
+        y_scale = dal.get_custom_property(self._obj, "camera_y_scale", 1.0)
+        z_scale = dal.get_custom_property(self._obj, "camera_z_scale", 1.0)
+        return (x_scale, y_scale, z_scale)
+
+    def get_transform_location(self) -> tuple[float, float, float]:
+        """Returns the location transformation for this camera view."""
+        if not self._obj:
+            return (0.0, 0.0, 0.0)
+        x_offset = dal.get_custom_property(self._obj, "camera_x_offset", 0.0)
+        y_offset = dal.get_custom_property(self._obj, "camera_y_offset", 0.0)
+        return (x_offset, y_offset, 0.0)
+
+    def get_transform_scale(self) -> tuple[float, float, float]:
+        """Returns the scale transformation for this camera view."""
+        if not self._obj:
+            return (1.0, 1.0, 1.0)
+        x_scale = dal.get_custom_property(self._obj, "camera_x_scale") or 1.0
+        y_scale = dal.get_custom_property(self._obj, "camera_y_scale") or 1.0
+        z_scale = dal.get_custom_property(self._obj, "camera_z_scale") or 1.0
+        return (x_scale, y_scale, z_scale)
+
+    def get_transform_location(self) -> tuple[float, float, float]:
+        """Returns the location transformation for this camera view."""
+        if not self._obj:
+            return (0.0, 0.0, 0.0)
+        x_offset = dal.get_custom_property(self._obj, "camera_x_offset") or 0.0
+        y_offset = dal.get_custom_property(self._obj, "camera_y_offset") or 0.0
+        return (x_offset, y_offset, 0.0)
+
 
 def _extract_frame_number(filename: str) -> int:
     """
@@ -142,6 +176,12 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     xoffset = -scaled_blender_width / 2
     yoffset = scaled_blender_height / 2
 
+    dal.set_custom_property(camera_view._obj, "camera_x_scale", xfactor)
+    dal.set_custom_property(camera_view._obj, "camera_y_scale", yfactor)
+    dal.set_custom_property(camera_view._obj, "camera_z_scale", zfactor)
+    dal.set_custom_property(camera_view._obj, "camera_x_offset", xoffset)
+    dal.set_custom_property(camera_view._obj, "camera_y_offset", yoffset)
+
     dal.set_camera_background(camera_obj_ref, movie_clip)
     dal.set_camera_ortho(camera_obj_ref, scaled_blender_width)
 
@@ -227,19 +267,12 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
             view_name=f"PV.{series_name}",
             skeleton=skeleton_obj,
             color=color,
-            camera_view_obj_ref=camera_view._obj,
+            camera_view=camera_view,
             collection=None,  # Or a specific collection if needed
         )
         print(f"Linking PersonDataView {person_view.view_name} to MarkerData series {series_name}...")
         person_view.connect_to_series(marker_data)
 
-        print(f"Linking PersonDataView {person_view.view_root_object.name} to CameraView {camera_view._obj.name}...")
-        person_view.view_root_object._get_obj().parent = camera_view._obj._get_obj()
-        print(
-            f"Setting scale and location for PersonDataView {person_view.view_root_object.name} sx={xfactor}, sy={yfactor}, ox={xoffset}, oy={yoffset}..."
-        )
-        person_view.view_root_object._get_obj().scale = (xfactor, yfactor, zfactor)
-        person_view.view_root_object._get_obj().location = (xoffset, yoffset, 0)
         print(
             f"PersonDataView {person_view.view_root_object.name} created and linked to CameraView {camera_view._obj.name}."
         )

@@ -74,18 +74,23 @@ class TestPersonDataView:
 
         # Act
         mock_camera_view_obj_ref = MagicMock()
+        mock_camera_view = MagicMock()
+        mock_camera_view._obj = mock_camera_view_obj_ref
+        mock_camera_view.get_transform_scale.return_value = (1.0, 1.0, 1.0)
+        mock_camera_view.get_transform_location.return_value = (0.0, 0.0, 0.0)
+
         view = PersonDataView.create_new(
             view_name=view_name,
             skeleton=mock_skeleton,
             color=marker_color,
-            camera_view_obj_ref=mock_camera_view_obj_ref,
+            camera_view=mock_camera_view,
             collection=None,  # Assuming default collection for now
         )
 
         # Assert
         # Check root object creation
         mock_dal.get_or_create_object.assert_any_call(
-            name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=mock_camera_view_obj_ref
+            name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=mock_camera_view._obj
         )
 
         # Check marker creation
@@ -96,6 +101,46 @@ class TestPersonDataView:
         mock_dal.get_or_create_object.assert_any_call(
             name=armature_name, obj_type="ARMATURE", collection_name="PersonViews", parent=mock_blender_obj_ref
         )
+
+    @patch("pose_editor.core.person_data_view.dal")
+    def test_create_new_applies_transform(self, mock_dal, mock_skeleton):
+        """Test that create_new applies the transform from the CameraView."""
+        from pose_editor.core.person_data_view import PersonDataView
+
+        # Arrange
+        view_name = "PV.Test.cam1"
+        marker_color = (0.1, 0.2, 0.3, 1.0)
+
+        mock_camera_view_obj_ref = MagicMock()
+        mock_camera_view = MagicMock()
+        mock_camera_view._obj = mock_camera_view_obj_ref
+
+        expected_scale = (0.5, -0.5, 0.5)
+        expected_location = (-100, 100, 0)
+        mock_camera_view.get_transform_scale.return_value = expected_scale
+        mock_camera_view.get_transform_location.return_value = expected_location
+
+        mock_view_root_object = MagicMock()
+        mock_dal.get_or_create_object.return_value = mock_view_root_object
+
+        # Act
+        PersonDataView.create_new(
+            view_name=view_name,
+            skeleton=mock_skeleton,
+            color=marker_color,
+            camera_view=mock_camera_view,
+            collection=None,
+        )
+
+        # Assert
+        mock_camera_view.get_transform_scale.assert_called_once()
+        mock_camera_view.get_transform_location.assert_called_once()
+
+        # Check that the scale and location were set on the mock object
+        # that dal.get_or_create_object returns.
+        created_obj_mock = mock_dal.get_or_create_object.return_value
+        assert created_obj_mock._get_obj().scale == expected_scale
+        assert created_obj_mock._get_obj().location == expected_location
 
     @patch("pose_editor.core.person_data_view.dal")
     def test_create_armature_method(self, mock_dal, mock_skeleton, mock_blender_obj_ref):
