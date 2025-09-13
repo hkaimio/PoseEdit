@@ -7,6 +7,7 @@ import re
 import bpy
 
 from ..blender import dal
+from ..core.camera_view import CameraView
 
 
 def get_available_tracks(self, context):
@@ -40,6 +41,35 @@ def get_available_tracks(self, context):
             items.append((track_index, f"Person {track_index}", f"Use raw track from Person {track_index}"))
 
     return items
+
+
+def update_view_start(self, context):
+    """Update callback for the view_start property."""
+    if not context.space_data.camera:
+        return
+
+    active_camera = context.space_data.camera
+    if not active_camera.name.startswith("Cam_"):
+        return
+
+    view_name = active_camera.name.replace("Cam_", "")
+    view_obj_ref = dal.get_object_by_name(f"View_{view_name}")
+    if not view_obj_ref:
+        return
+
+    camera_view = CameraView.from_blender_obj(view_obj_ref)
+    camera_view.set_start_frame(self.view_start)
+
+
+class CameraViewSettings(bpy.types.PropertyGroup):
+    """Properties for managing camera view settings."""
+
+    view_start: bpy.props.IntProperty(
+        name="Start Frame",
+        description="The start frame of the camera view",
+        default=1,
+        update=update_view_start,
+    )
 
 
 class StitchingUIItem(bpy.types.PropertyGroup):

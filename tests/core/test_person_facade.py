@@ -134,7 +134,8 @@ def test_assign_source_track_for_segment_preserves_outside_keyframes(
 
     # Configure MarkerData to return these specific instances
     # The first call to MarkerData will be for the target, the second for the source
-    mock_marker_data.side_effect = [mock_target_md_instance, mock_source_md_instance]
+    mock_marker_data.from_blender_object = MagicMock()
+    mock_marker_data.from_blender_object.side_effect = [mock_target_md_instance, mock_source_md_instance]
 
     # Mock get_animation_data_as_numpy to return some source data
     source_data_np = np.array([[10.0, 11.0], [12.0, 13.0], [14.0, 15.0], [16.0, 17.0], [18.0, 19.0], [20.0, 21.0], [22.0, 23.0], [24.0, 25.0], [26.0, 27.0], [28.0, 29.0], [30.0, 31.0]]) # 11 frames (20 to 30 inclusive)

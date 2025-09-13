@@ -20,6 +20,36 @@ class PE_PT_ProjectPanel(bpy.types.Panel):
         layout.operator("pose_editor.load_camera_views")
 
 
+class PE_PT_ViewPanel(bpy.types.Panel):
+    """Creates a Panel in the 3D Viewport sidebar for View settings."""
+
+    bl_label = "View Settings"
+    bl_idname = "PE_PT_ViewPanel"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Pose Editor"
+    bl_parent_id = "PE_PT_ProjectPanel"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        # Only show the panel if we are in a 3D view with a camera
+        return context.space_data.camera and context.space_data.camera.name.startswith(
+            "Cam_"
+        )
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        view_settings = scene.pose_editor_view_settings
+
+        active_camera = context.space_data.camera
+        view_name = active_camera.name.replace("Cam_", "")
+        layout.label(text=f"Active View: {view_name}")
+
+        layout.prop(view_settings, "view_start")
+
+
 class PE_PT_StitchingPanel(bpy.types.Panel):
     """Creates a Panel in the 3D Viewport sidebar for 2D Stitching."""
 
@@ -56,7 +86,9 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         from ..blender import dal
         from ..core import person_facade
 
-        real_person_refs = dal.find_all_objects_by_property(person_facade.IS_REAL_PERSON_INSTANCE, True)
+        real_person_refs = dal.find_all_objects_by_property(
+            person_facade.IS_REAL_PERSON_INSTANCE, True
+        )
 
         # TODO: Find raw tracks for the current view
         # This is a placeholder

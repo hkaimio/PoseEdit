@@ -94,6 +94,7 @@ IS_CAMERA_VIEW = CustomProperty[bool]("is_camera_view")
 POSE_EDITOR_OBJECT_TYPE = CustomProperty[str]("pose_editor_object_type")
 CAMERA_VIEW_ID = CustomProperty[str]("camera_view_id")
 COLOR = CustomProperty[tuple[float, float, float, float]]("color")
+MARKER_DATA_ID = CustomProperty[str]("marker_data_id")
 
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
@@ -630,11 +631,12 @@ def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, 
     obj.animation_data.action_slot = action.slots[prefixed_name]
 
 
-def get_children_of_object(obj_ref: "BlenderObjRef") -> list["BlenderObjRef"]:
-    """Returns a list of direct children objects of a given object.
+def get_children_of_object(obj_ref: "BlenderObjRef", recursive: bool = False) -> list["BlenderObjRef"]:
+    """Gets all direct or recursive children of a given Blender object.
 
     Args:
         obj_ref: A reference to the parent object.
+        recursive: If True, retrieves all descendants; otherwise, only direct children.
 
     Returns:
         A list of BlenderObjRef wrappers for the children.
@@ -642,7 +644,17 @@ def get_children_of_object(obj_ref: "BlenderObjRef") -> list["BlenderObjRef"]:
     obj = obj_ref._get_obj()
     if not obj:
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
-    return [BlenderObjRef(child.name) for child in obj.children]
+
+    children = []
+    if not recursive:
+        children.extend([BlenderObjRef(child.name) for child in obj.children])
+    else:
+        queue = list(obj.children)
+        while queue:
+            current_obj = queue.pop(0)
+            children.append(BlenderObjRef(current_obj.name))
+            queue.extend(current_obj.children)
+    return children
 
 
 def get_object_by_name(name: str) -> Optional["BlenderObjRef"]:
@@ -1093,3 +1105,19 @@ def set_fcurves_from_numpy(
     # 5. Update all F-Curves.
     for fcurve in fcurves:
         fcurve.update()
+
+def shift_action(action: bpy.types.Action, frame_delta: int) -> None:
+    """Shifts all keyframes in an Action by a given frame delta.
+
+    Args:
+        action: The Action to modify.
+        frame_delta: The amount to shift keyframes by (can be positive or negative).
+    """
+    if not action:
+        return
+
+    for channelbag in action.layers[0].strips[0].channelbags:
+        for fcurve in channelbag.fcurves:
+            for kp in fcurve.keyframe_points:
+                kp.co[0] += frame_delta
+            fcurve.update()

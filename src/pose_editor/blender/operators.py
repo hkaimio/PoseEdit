@@ -174,7 +174,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
 
             # Create MarkerData for the Real Person in this view
             real_person_md_name = f"{person_obj_ref.name}.{cam_view_name}"
-            real_person_md = MarkerData(real_person_md_name, skeleton._skeleton.name)
+            real_person_md = MarkerData.create_new(real_person_md_name, skeleton._skeleton.name)
 
             # Create PersonDataView for the Real Person in this view
             real_person_pv_name = f"PV.{person_obj_ref.name}.{cam_view_name}"

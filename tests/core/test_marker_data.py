@@ -38,7 +38,7 @@ class TestMarkerData:
         mock_dal.get_or_create_action.return_value = mock_action
 
         # Act
-        md = MarkerData(series_name, skeleton_name)
+        md = MarkerData.create_new(series_name, skeleton_name)
 
         # Assert
         assert md.series_name == series_name
@@ -66,7 +66,7 @@ class TestMarkerData:
 
         # Arrange
         mock_dal.get_or_create_action.return_value = mock_action
-        md = MarkerData("set_data_series")
+        md = MarkerData.create_new("set_data_series")
 
         # Mock the return value for get_or_create_fcurve
         mock_fcurve = MagicMock()
@@ -108,7 +108,7 @@ class TestMarkerData:
 
         # Arrange
         mock_dal.get_or_create_action.return_value = mock_action
-        md = MarkerData("apply_view_series")
+        md = MarkerData.create_new("apply_view_series")
 
         # Create a mock PersonDataView object
         mock_person_data_view = MagicMock(spec=PersonDataView)

@@ -5,9 +5,14 @@
 import bpy
 
 from .blender.drivers import get_quality_driven_color_component
-from .blender.operators import PE_OT_AddPersonInstance, PE_OT_AssignTrack, PE_OT_CreateProject, PE_OT_LoadCameraViews
-from .blender.properties import StitchingUIItem, StitchingUIState
-from .ui.panels import PE_PT_ProjectPanel, PE_PT_StitchingPanel
+from .blender.operators import (
+    PE_OT_AddPersonInstance,
+    PE_OT_AssignTrack,
+    PE_OT_CreateProject,
+    PE_OT_LoadCameraViews,
+)
+from .blender.properties import CameraViewSettings, StitchingUIItem, StitchingUIState
+from .ui.panels import PE_PT_ProjectPanel, PE_PT_StitchingPanel, PE_PT_ViewPanel
 
 
 class PE_OT_dummy(bpy.types.Operator):
@@ -28,9 +33,11 @@ _classes = [
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
     PE_PT_ProjectPanel,
+    PE_PT_ViewPanel,
     PE_PT_StitchingPanel,
     StitchingUIItem,
     StitchingUIState,
+    CameraViewSettings,
 ]
 
 
@@ -40,16 +47,24 @@ def register():
         bpy.utils.register_class(cls)
 
     # Register driver functions
-    bpy.app.driver_namespace["get_quality_driven_color_component"] = get_quality_driven_color_component
+    bpy.app.driver_namespace[
+        "get_quality_driven_color_component"
+    ] = get_quality_driven_color_component
 
-    # Add the stitching UI state to the scene type
-    bpy.types.Scene.pose_editor_stitching_ui = bpy.props.PointerProperty(type=StitchingUIState)
+    # Add the property groups to the scene type
+    bpy.types.Scene.pose_editor_stitching_ui = bpy.props.PointerProperty(
+        type=StitchingUIState
+    )
+    bpy.types.Scene.pose_editor_view_settings = bpy.props.PointerProperty(
+        type=CameraViewSettings
+    )
 
 
 def unregister():
     """Unregister the add-on."""
-    # Delete the scene property
+    # Delete the scene properties
     del bpy.types.Scene.pose_editor_stitching_ui
+    del bpy.types.Scene.pose_editor_view_settings
 
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

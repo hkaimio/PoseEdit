@@ -11,9 +11,11 @@ from pose_editor.core.camera_view import (
     CAMERA_Y_OFFSET,
     CAMERA_Y_SCALE,
     CAMERA_Z_SCALE,
+    VIEW_START,
     CameraView,
     _extract_frame_number,
     create_camera_view,
+    update_scene_frame_range,
 )
 from pose_editor.core.skeleton import SkeletonBase
 
@@ -27,7 +29,7 @@ class DummySkeleton(SkeletonBase):
 
 
 class TestCameraView:
-    @patch("pose_editor.core.camera_view.dal", autospec=True)
+    @patch("pose_editor.core.camera_view.dal")
     def test_get_transform(self, mock_dal):
         # Arrange
         cv = CameraView()
@@ -56,8 +58,96 @@ class TestCameraView:
         assert scale == (0.1, -0.2, 0.3)
         assert location == (10.0, -20.0, 0.0)
 
+    @patch("pose_editor.core.camera_view.update_scene_frame_range")
+    @patch("pose_editor.core.camera_view.dal")
+    def test_set_start_frame(self, mock_dal, mock_update_scene_range):
+        # Arrange
+        cv = CameraView()
+        cv._obj = MagicMock()
 
-@patch("pose_editor.core.camera_view.dal", autospec=True)
+        # Mock the current start frame
+        mock_dal.get_custom_property.return_value = 1
+
+        # Mock the objects to be shifted
+        mock_child1 = MagicMock()
+        mock_child2 = MagicMock()
+        def get_children_side_effect(obj, recursive=False):
+            if obj == cv._obj:
+                return [mock_child1, mock_child2]
+            else:
+                return []
+
+        mock_dal.get_children_of_object.side_effect = get_children_side_effect
+        mock_action1 = MagicMock()
+        mock_fcurve1 = MagicMock()
+        mock_dal.get_animation_action.return_value = mock_action1
+        mock_dal.get_fcurves_from_action.return_value = [mock_fcurve1]
+
+        # Mock the camera and movie clip
+        mock_camera = MagicMock()
+        mock_movie_clip = MagicMock()
+        mock_movie_clip.frame_offset = 10
+        mock_dal.get_camera_for_view.return_value = mock_camera
+        mock_dal.get_movie_clip_for_camera.return_value = mock_movie_clip
+
+        # Act
+        cv.set_start_frame(10)
+
+        # Assert
+        delta = 9
+        assert mock_dal.shift_fcurve_keyframes.call_count == 3
+        mock_dal.shift_fcurve_keyframes.assert_any_call(mock_fcurve1, delta)
+        assert mock_movie_clip.frame_offset == 10 + delta
+        mock_dal.set_custom_property.assert_called_with(cv._obj, VIEW_START, 10)
+        mock_update_scene_range.assert_called_once()
+
+
+@patch("pose_editor.core.camera_view.dal")
+@patch("pose_editor.core.camera_view.CameraView.get_all")
+def test_update_scene_frame_range(mock_get_all, mock_dal):
+    # Arrange
+    mock_view1 = MagicMock()
+    mock_view1.get_start_frame.return_value = 10
+    mock_view1._obj = MagicMock()
+
+    mock_view2 = MagicMock()
+    mock_view2.get_start_frame.return_value = -20
+    mock_view2._obj = MagicMock()
+
+    mock_get_all.return_value = [mock_view1, mock_view2]
+
+    mock_child1 = MagicMock()
+    mock_child2 = MagicMock()
+
+    def get_children_side_effect(obj, recursive=False):
+        if obj == mock_view1._obj:
+            return [mock_child1]
+        if obj == mock_view2._obj:
+            return [mock_child2]
+        return []
+
+    mock_dal.get_children_of_object.side_effect = get_children_side_effect
+
+    def get_duration_side_effect(obj):
+        if obj == mock_child1:
+            return 100
+        if obj == mock_child2:
+            return 50
+        return 0
+
+    mock_dal.get_animation_duration.side_effect = get_duration_side_effect
+
+    # Act
+    update_scene_frame_range()
+
+    # Assert
+    # view1: 10 to 110
+    # view2: -20 to 30
+    # Expected range: -20 to 110
+    mock_dal.set_scene_frame_range.assert_called_once_with(-20, 110)
+
+
+@patch("pose_editor.core.camera_view.dal")
 @patch("pose_editor.core.camera_view.PersonDataView", autospec=True)
 @patch("pose_editor.core.camera_view.os.listdir", autospec=True)
 @patch(
@@ -117,7 +207,7 @@ def test_create_camera_view_scaling_landscape(
     )
 
 
-@patch("pose_editor.core.camera_view.dal", autospec=True)
+@patch("pose_editor.core.camera_view.dal")
 @patch("pose_editor.core.camera_view.PersonDataView", autospec=True)
 @patch("pose_editor.core.camera_view.os.listdir", autospec=True)
 @patch(
@@ -195,7 +285,7 @@ def test_extract_frame_number_empty_string():
         _extract_frame_number("")
 
 
-@patch("pose_editor.core.camera_view.dal", autospec=True)
+@patch("pose_editor.core.camera_view.dal")
 @patch("pose_editor.core.camera_view.MarkerData", autospec=True)
 @patch("pose_editor.core.camera_view.PersonDataView", autospec=True)
 @patch("pose_editor.core.camera_view.os.listdir", autospec=True)
@@ -230,6 +320,10 @@ def test_create_camera_view_missing_person_data(
     mock_person_view_instance.view_root_object = mock_root_obj
     mock_person_data_view.return_value = mock_person_view_instance
 
+    marker_data_instance = MagicMock()
+    mock_marker_data.create_new.return_value = marker_data_instance
+
+
     # Mock skeleton
     skeleton = DummySkeleton()
     # Add one joint to the dummy skeleton
@@ -252,9 +346,7 @@ def test_create_camera_view_missing_person_data(
 
     # Assert
     # Check the data passed to set_animation_data_from_numpy
-    marker_data_instance = mock_marker_data.return_value
     call_args = marker_data_instance.set_animation_data_from_numpy.call_args
-
     data = call_args.kwargs["data"]
 
     # data should have 3 rows (frames)

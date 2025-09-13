@@ -21,6 +21,15 @@ from .skeleton import SkeletonBase
 
 BLENDER_TARGET_WIDTH = 10.0  # Blender units
 
+# Custom Properties
+VIEW_START = CustomProperty[int]("view_start")
+CAMERA_X_SCALE = CustomProperty[float]("camera_x_scale")
+CAMERA_Y_SCALE = CustomProperty[float]("camera_y_scale")
+CAMERA_Z_SCALE = CustomProperty[float]("camera_z_scale")
+CAMERA_X_OFFSET = CustomProperty[float]("camera_x_offset")
+CAMERA_Y_OFFSET = CustomProperty[float]("camera_y_offset")
+
+
 PASTEL_COLORS = [
     (0.68, 0.78, 0.81, 1.0),  # Light Blue
     (0.47, 0.87, 0.47, 1.0),  # Light Green
@@ -43,18 +52,42 @@ BRIGHT_COLORS = [
     (0.5, 0.0, 1.0, 1.0),  # Purple
 ]
 
-CAMERA_X_SCALE = CustomProperty[float]("camera_x_scale")
-CAMERA_Y_SCALE = CustomProperty[float]("camera_y_scale")
-CAMERA_Z_SCALE = CustomProperty[float]("camera_z_scale")
-CAMERA_X_OFFSET = CustomProperty[float]("camera_x_offset")
-CAMERA_Y_OFFSET = CustomProperty[float]("camera_y_offset")
+
+def _get_all_children_recursive(obj_ref: BlenderObjRef) -> list[BlenderObjRef]:
+    """Recursively gets all children of a Blender object."""
+    all_children = []
+    direct_children = dal.get_children_of_object(obj_ref)
+    for child in direct_children:
+        all_children.append(child)
+        all_children.extend(_get_all_children_recursive(child))
+    return all_children
+
+
+def update_scene_frame_range():
+    """Adjusts the scene start and end frames to encompass all camera views."""
+    min_start = 1
+    max_end = 1
+
+    for view in CameraView.get_all():
+        start_frame = view.get_start_frame()
+        duration = 0
+        # Find the duration of the animation data in the view
+        # This includes raw tracks and stitched tracks
+        for obj_ref in _get_all_children_recursive(view._obj):
+            obj_duration = dal.get_animation_duration(obj_ref)
+            if obj_duration > duration:
+                duration = obj_duration
+
+        min_start = min(min_start, start_frame)
+        max_end = max(max_end, start_frame + duration)
+
+    dal.set_scene_frame_range(min_start, int(max_end))
 
 
 class CameraView:
     def __init__(self):
         self._obj: BlenderObjRef | None = None
         self._video_surf: BlenderObjRef | None = None
-
         self._raw_person_data: list[RawPersonData] = []
 
     @classmethod
@@ -89,6 +122,35 @@ class CameraView:
         x_offset = dal.get_custom_property(self._obj, CAMERA_X_OFFSET) or 0.0
         y_offset = dal.get_custom_property(self._obj, CAMERA_Y_OFFSET) or 0.0
         return (x_offset, y_offset, 0.0)
+
+    def get_start_frame(self) -> int:
+        """Returns the start frame of the camera view."""
+        if not self._obj:
+            return 1
+        return dal.get_custom_property(self._obj, VIEW_START) or 1
+
+    def set_start_frame(self, new_start: int):
+        """Sets the start frame of the camera view, shifting all related data."""
+        if not self._obj:
+            return
+
+        old_start = self.get_start_frame()
+        delta = new_start - old_start
+
+        if delta == 0:
+            return
+
+        # Shift all animation data (f-curves) for all objects in this view
+        views = PersonDataView.get_all_for_camera_view(self)
+
+        for person_view in views:
+            person_view.shift(delta)
+
+        # Update the property
+        dal.set_custom_property(self._obj, VIEW_START, new_start)
+
+        # Update the scene frame range
+        # update_scene_frame_range()
 
 
 def _extract_frame_number(filename: str) -> int:
@@ -155,6 +217,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     camera_view._obj = dal.create_empty(camera_view_empty_name)
     dal.set_custom_property(camera_view._obj, SERIES_NAME, name)
     dal.set_custom_property(camera_view._obj, dal.IS_CAMERA_VIEW, True)
+    dal.set_custom_property(camera_view._obj, VIEW_START, 1)
 
     # Create camera and set background video
     camera_name = f"Cam_{name}"
@@ -224,7 +287,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
     for person_idx, frames_data in pose_data_by_person.items():
         series_name = f"{name}_person{person_idx}"
-        marker_data = MarkerData(series_name, "COCO_133")
+        marker_data = MarkerData.create_new(series_name, "COCO_133")
 
         columns_to_extract = []
         for joint_node in PreOrderIter(skeleton_obj._skeleton):

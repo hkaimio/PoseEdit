@@ -82,13 +82,25 @@ class RealPersonInstanceFacade:
 
         # 1. Get Target and Source MarkerData objects
         target_ds_name = f"{self.person_id}.{view_name}"
-        target_md = MarkerData(target_ds_name, skeleton._skeleton.name)
+        marker_ref = dal.get_object_by_name(target_ds_name)
+        if not marker_ref:
+            print(f"Error: Target MarkerData object {target_ds_name} not found.")
+            return
+        
+        target_md = MarkerData.from_blender_object(marker_ref)
+        if not target_md:
+            print(f"Error: Target MarkerData {target_ds_name} could not be initialized.")
+            return
 
         source_ds_name = f"{view_name}_person{source_track_index}"
-        source_md = MarkerData(source_ds_name, skeleton._skeleton.name)
+        source_ds_obj = dal.get_object_by_name(source_ds_name)
+        if not source_ds_obj:
+            print(f"Error: Source MarkerData object {source_ds_name} not found.")
+            return
+        source_md = MarkerData.from_blender_object(source_ds_obj)
 
         # 2. Define the columns of data to be copied
-        columns_to_copy: List[Tuple[str, str, int]] = []
+        columns_to_copy: list[tuple[str, str, int]] = []
         for joint_node in skeleton._skeleton.descendants:
             if not hasattr(joint_node, "id") or joint_node.id is None:
                 continue

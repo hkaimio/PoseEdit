@@ -25,33 +25,69 @@ class MarkerData:
         action, such as its `series_name` and the `skeleton` type it uses.
     """
 
-    def __init__(self, series_name: str, skeleton_name: str | None = None):
-        """Initializes the MarkerData object.
-
-        This finds or creates the necessary Blender data-blocks (a DataSeries
-        Empty and an Action) via the Data Access Layer.
+    def __init__(self, series_name: str, skeleton_name: str | None = None, action=None, data_series_object=None):
+        """
+        Initializes the MarkerData object as a runtime instance.
 
         Args:
-            series_name: A unique name for this data series (e.g., "cam1_person0_raw").
-            skeleton_name: The name of the skeleton definition used for this data
-                           series (e.g., "HALPE_26").
+            series_name: Unique name for this data series (e.g., "cam1_person0_raw").
+            skeleton_name: Name of the skeleton definition used for this data series.
+            action: Blender Action object associated with this data series.
+            data_series_object: Blender Empty object holding metadata for this data series.
         """
         self.series_name = series_name
         self.action_name = f"AC.{series_name}"
         self.data_series_object_name = f"DS.{series_name}"
         self.skeleton_name = skeleton_name
+        self.data_series_object = data_series_object
+        self.action = action
 
-        # Find or create the DataSeries Empty that holds metadata
-        self.data_series_object = dal.get_or_create_object(
-            name=self.data_series_object_name, obj_type="EMPTY", collection_name="DataSeries"
+    @classmethod
+    def create_new(cls, series_name: str, skeleton_name: str | None = None) -> "MarkerData":
+        """
+        Creates a new persistent MarkerData object in Blender.
+
+        Args:
+            series_name: Unique name for this data series.
+            skeleton_name: Name of the skeleton definition used.
+
+        Returns:
+            MarkerData: The newly created MarkerData instance.
+        """
+        data_series_object = dal.get_or_create_object(
+            name=f"DS.{series_name}", obj_type="EMPTY", collection_name="DataSeries"
         )
-        # Set metadata on the Empty
-        dal.set_custom_property(self.data_series_object, dal.SERIES_NAME, series_name)
-        dal.set_custom_property(self.data_series_object, dal.SKELETON, skeleton_name)
-        dal.set_custom_property(self.data_series_object, dal.ACTION_NAME, self.action_name)
+        dal.set_custom_property(data_series_object, dal.SERIES_NAME, series_name)
+        dal.set_custom_property(data_series_object, dal.SKELETON, skeleton_name if skeleton_name else "")
+        dal.set_custom_property(data_series_object, dal.ACTION_NAME, f"AC.{series_name}")
+        dal.set_custom_property(data_series_object, dal.POSE_EDITOR_OBJECT_TYPE, "MarkerData")
 
-        # Find or create the Action that holds the animation data
-        self.action = dal.get_or_create_action(self.action_name)
+        action = dal.get_or_create_action(f"AC.{series_name}")
+
+        return cls(series_name, skeleton_name, action=action, data_series_object=data_series_object)
+
+    @classmethod
+    def from_blender_object(cls, data_series_obj_ref: dal.BlenderObjRef) -> "MarkerData | None":
+        """
+        Initializes MarkerData from an existing Blender DataSeries object.
+
+        Args:
+            data_series_obj_ref: BlenderObjRef pointing to the DataSeries Empty.
+
+        Returns:
+            MarkerData | None: The initialized MarkerData instance, or None if not found.
+        """
+        if not data_series_obj_ref or not data_series_obj_ref._get_obj():
+            return None
+
+        series_name = dal.get_custom_property(data_series_obj_ref, dal.SERIES_NAME)
+        if not series_name:
+            return None
+        skeleton_name = dal.get_custom_property(data_series_obj_ref, dal.SKELETON)
+        action_name = dal.get_custom_property(data_series_obj_ref, dal.ACTION_NAME)
+        action = dal.get_or_create_action(action_name) if action_name else None
+
+        return cls(series_name, skeleton_name, action=action, data_series_object=data_series_obj_ref)
 
     def set_animation_data(
         self,
@@ -124,3 +160,13 @@ class MarkerData:
         for marker_role, marker_obj_ref in person_data_view.get_marker_objects().items():
             if dal.action_has_slot(self.action, marker_role):
                 dal.assign_action_to_object(marker_obj_ref, self.action, marker_role)
+
+    def shift(self, frame_delta: int):
+        """Shifts the MarkerData timeline data in its action by frame_delta frames.
+        
+        Args:
+            frame_delta: The number of frames to shift the animation data. Positive values
+                         shift forward in time, negative values shift backward.
+        """
+        if self.action is not None:
+            dal.shift_action(self.action, frame_delta)

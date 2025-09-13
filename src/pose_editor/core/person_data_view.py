@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 from .marker_data import MarkerData
 from .skeleton import SkeletonBase
 
-
 class PersonDataView:
     """A facade for a person's 2D data view (View layer).
 
@@ -95,6 +94,9 @@ class PersonDataView:
         if collection is None:
             collection = dal.get_or_create_collection("PersonViews")
 
+        if camera_view._obj is None:
+            raise ValueError("CameraView object is None")
+        
         # Create the root Empty for this view
         view_root_object = dal.get_or_create_object(
             name=view_name,
@@ -113,7 +115,8 @@ class PersonDataView:
         dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
         dal.set_custom_property(view_root_object, dal.SKELETON, skeleton._skeleton.name)
         dal.set_custom_property(view_root_object, dal.COLOR, color)
-        dal.set_custom_property(view_root_object, dal.CAMERA_VIEW_ID, camera_view._obj.name)
+        dal.set_custom_property(view_root_object, dal.CAMERA_VIEW_ID, camera_view._obj._id)
+        dal.set_custom_property(view_root_object, dal.MARKER_DATA_ID, "") 
 
         # Create a temporary instance to call internal creation methods
         temp_instance = cls.__new__(cls)  # Bypass __init__ for now
@@ -121,7 +124,7 @@ class PersonDataView:
         temp_instance.view_name = view_name
         temp_instance.skeleton = skeleton
         temp_instance.color = color
-        temp_instance.camera_view_id = camera_view._obj.name
+        temp_instance.camera_view_id = camera_view._obj._id
         temp_instance._marker_objects_by_role = {}
 
         # Create marker objects based on the skeleton definition
@@ -201,6 +204,35 @@ class PersonDataView:
         # The __init__ with create_blender_objects=False already handles
         # populating _marker_objects_by_role and finding the armature.
         return instance
+
+    @classmethod
+    def get_all(cls) -> list["PersonDataView"]:
+        """Returns all PersonDataView objects in the Blender file."""
+        objs = dal.find_all_objects_by_property(dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
+        ret = []
+        for o in objs:
+            if o is None:
+                continue
+            pdv = cls.from_blender_object(o)
+            if pdv is not None:
+                ret.append(pdv)
+        return ret
+
+    @classmethod
+    def get_all_for_camera_view(cls, camera_view: "CameraView") -> list["PersonDataView"]:
+        """Returns all PersonDataViews that belong to the given camera view."""
+        if camera_view._obj is None:
+            return []
+        camera_view_id = camera_view._obj._id
+        objs = cls.get_all()
+        ret = []
+        for o in objs:
+            if o is None:
+                continue
+            pdv = cls.from_blender_object(dal.BlenderObjRef(o.view_name))
+            if pdv is not None and pdv.camera_view_id == camera_view_id:
+                ret.append(pdv)
+        return ret
 
     def _create_marker_objects(self, collection: "bpy.types.Collection"):
         """Creates a marker object for each joint in the skeleton."""
@@ -297,7 +329,33 @@ class PersonDataView:
             marker_data: The MarkerData series to connect to.
         """
         marker_data.apply_to_view(self)
+        # Store the marker_data_id in the root object's custom property
+        dal.set_custom_property(
+            self.view_root_object,
+            dal.MARKER_DATA_ID,
+            marker_data.data_series_object_name
+        )
 
     def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
         """Returns a dictionary of marker objects in this view, keyed by their role."""
         return self._marker_objects_by_role
+
+    def shift(self, delta_frames: int):
+        """Shifts all marker data by the given number of frames.
+
+        Args:
+            delta_frames: The number of frames to shift. Positive values shift
+                          forward in time, negative values shift backward.
+        """
+        if delta_frames == 0:
+            return
+
+        marker_data_if = dal.get_custom_property(self.view_root_object, dal.MARKER_DATA_ID)
+        if not marker_data_if:
+            print(f"PersonDataView {self.view_name} is not connected to any MarkerData series.")
+            return
+        marker_data = MarkerData.from_blender_object(dal.BlenderObjRef(marker_data_if))
+        if not marker_data:
+            print(f"MarkerData series {marker_data_if} not found for PersonDataView {self.view_name}.")
+            return 
+        marker_data.shift(delta_frames)
