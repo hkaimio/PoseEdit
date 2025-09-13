@@ -87,14 +87,20 @@ class PersonDataView:
             skeleton: The skeleton definition to use for creating marker objects.
             color: The color for the markers (RGBA tuple).
             camera_view: The CameraView this PersonDataView belongs to.
-            collection: The collection to link the root Empty to.
+            collection: The collection to link the root Empty to. If None, defaults to "PersonViews".
 
         Returns:
             A new PersonDataView instance.
         """
+        if collection is None:
+            collection = dal.get_or_create_collection("PersonViews")
+
         # Create the root Empty for this view
         view_root_object = dal.get_or_create_object(
-            name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=camera_view._obj
+            name=view_name,
+            obj_type="EMPTY",
+            collection_name=collection.name,
+            parent=camera_view._obj,
         )
 
         # Set scale and location from the camera view

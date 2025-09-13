@@ -49,6 +49,11 @@ class TestPersonDataView:
         # Arrange
         view_name = "PV.Test.cam1"
         marker_color = (0.1, 0.2, 0.3, 1.0)
+
+        mock_collection = MagicMock()
+        mock_collection.name = "PersonViews"
+        mock_dal.get_or_create_collection.return_value = mock_collection
+
         mock_dal.get_or_create_object.return_value = mock_blender_obj_ref
 
         mock_root_marker_ref = MagicMock()
@@ -84,22 +89,35 @@ class TestPersonDataView:
             skeleton=mock_skeleton,
             color=marker_color,
             camera_view=mock_camera_view,
-            collection=None,  # Assuming default collection for now
+            collection=None,  # Test the default collection logic
         )
 
         # Assert
+        # Check that the collection was retrieved
+        mock_dal.get_or_create_collection.assert_called_once_with("PersonViews")
+
         # Check root object creation
         mock_dal.get_or_create_object.assert_any_call(
-            name=view_name, obj_type="EMPTY", collection_name="PersonViews", parent=mock_camera_view._obj
+            name=view_name,
+            obj_type="EMPTY",
+            collection_name=mock_collection.name,
+            parent=mock_camera_view._obj,
         )
 
         # Check marker creation
         assert mock_dal.create_marker.call_count == 3
+        # Check that markers are created in the correct collection
+        mock_dal.create_marker.assert_any_call(
+            parent=mock_blender_obj_ref, name="Nose", color=marker_color, collection=mock_collection
+        )
 
         # Check armature creation
         armature_name = f"{view_name}_Armature"
         mock_dal.get_or_create_object.assert_any_call(
-            name=armature_name, obj_type="ARMATURE", collection_name="PersonViews", parent=mock_blender_obj_ref
+            name=armature_name,
+            obj_type="ARMATURE",
+            collection_name="PersonViews",
+            parent=mock_blender_obj_ref,
         )
 
     @patch("pose_editor.core.person_data_view.dal")
