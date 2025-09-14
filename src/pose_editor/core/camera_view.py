@@ -277,7 +277,10 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
             for person_idx, person_data in enumerate(data["people"]):
                 if person_idx not in pose_data_by_person:
                     pose_data_by_person[person_idx] = {}
-                pose_data_by_person[person_idx][frame_num] = person_data["pose_keypoints_2d"]
+                if person_data and "pose_keypoints_2d" in person_data:
+                    pose_data_by_person[person_idx][frame_num] = person_data["pose_keypoints_2d"]
+                else:
+                    pose_data_by_person[person_idx][frame_num] = []
 
     if not pose_data_by_person:
         return camera_view
@@ -314,7 +317,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                         np_data[frame_idx, col_idx] = x
                         np_data[frame_idx, col_idx + 1] = y
                         np_data[frame_idx, col_idx + 2] = (
-                            likelihood if (x is not None and y is not None and likelihood > 0) else -1.0
+                            likelihood if (x is not np.nan and y is not np.nan and likelihood > 0) else -1.0
                         )
                     col_idx += 3
             else:
