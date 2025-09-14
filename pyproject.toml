@@ -9,6 +9,7 @@ description = "A Blender add-on for editing motion capture pose data."
 requires-python = ">=3.11, <3.12"
 dependencies = [
     "anytree>=2.13.0",
+    "opencv-python>=4.9.0",
 ]
 
 [project.optional-dependencies]
