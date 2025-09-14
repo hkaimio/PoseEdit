@@ -202,3 +202,45 @@ def triangulate_point(
         3. For each selected object, creates a `RealPersonInstanceFacade`.
         4. Calls `facade.triangulate(frame_start=start_frame, frame_end=end_frame)`.
         5. Reports success to the user.
+
+## 7. Phased Implementation Plan
+
+This feature will be implemented in verifiable phases to ensure stability and correctness at each step.
+
+### Phase 1: Calibration Data Handling
+- **Goal**: Implement the loading, storage, and access of camera calibration data.
+- **Tasks**:
+    1. Implement the `PE_OT_LoadCalibration` operator and its corresponding UI button.
+    2. Create the `core.calibration` module with the `Calibration` facade.
+    3. Implement the logic to parse the TOML file, convert it to a JSON string, and store it in a custom property on the `_CalibrationData` empty via the DAL.
+- **Verification**: Can be tested independently. An integration test will run the operator and then verify that the `Calibration` facade can be instantiated and correctly retrieve data (e.g., `get_matrix("int_cam1_img")`).
+- **Dependencies**: None.
+- **Inputs**: Requires the `calib_example.toml` file for testing.
+
+### Phase 2: 3D Data Structure Creation
+- **Goal**: Create the visible Blender objects that represent the 3D pose (the `Person3DView`).
+- **Tasks**:
+    1. Create the `core.person_3d_view` module and the `Person3DView` class.
+    2. Implement the creation of the object hierarchy: a root empty, marker spheres (for real joints), marker empties (for virtual joints), and the connecting armature with constraints.
+    3. Implement the creation of drivers for the virtual markers (e.g., "Hip").
+- **Verification**: Can be tested by creating a `RealPersonInstance` and instantiating a `Person3DView` for it. The test will assert that the correct objects, hierarchy, and drivers are created in the Blender scene.
+- **Dependencies**: A `RealPersonInstance` must exist in the scene.
+
+### Phase 3: 3D Animation Data Management
+- **Goal**: Implement the `MarkerData3D` class to manage the `Action` for the 3D animation.
+- **Tasks**:
+    1. Create the `core.marker_data_3d` module and the `MarkerData3D` class.
+    2. Implement the creation of the `Action` and its associated `DS` empty.
+    3. Implement the method to link the `MarkerData3D` to a `Person3DView`.
+- **Verification**: Can be tested by creating a `Person3DView` and a `MarkerData3D`, linking them, and then programmatically inserting keyframes into the action. The test will verify that the marker objects in the view move accordingly.
+- **Dependencies**: Phase 2.
+
+### Phase 4: Triangulation Core and Operator
+- **Goal**: Implement the main triangulation logic and the user-facing operator.
+- **Tasks**:
+    1. Implement the pure Python `triangulate_point` function, integrating the user-provided draft logic.
+    2. Implement the orchestrator method `triangulate(start, end)` on the `RealPersonInstanceFacade`.
+    3. Implement the `PE_OT_TriangulatePerson` operator and its UI.
+- **Verification**: This is the final end-to-end test. It will involve a full scene setup with 2D data, running the operator, and asserting that the `MarkerData3D` action is populated with correctly triangulated 3D coordinates and metadata.
+- **Dependencies**: Phases 1, 2, and 3.
+- **Inputs**: Requires the draft triangulation function and a complete test dataset (2D poses from multiple cameras + calibration file).
