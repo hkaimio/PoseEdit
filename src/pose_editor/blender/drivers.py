@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import bpy
 
 
 def get_quality_driven_color_component(
@@ -40,7 +41,11 @@ def get_quality_driven_color_component(
         return interpolated_value
 
 
-# Register the function in Blender's driver namespace
-# This part would typically be handled in the add-on's register function
-# For testing purposes, we'll assume it's registered.
-# bpy.app.driver_namespace['get_quality_driven_color_component'] = get_quality_driven_color_component
+def register_drivers() -> None:
+    """Register all driver functions."""
+    bpy.app.driver_namespace["get_quality_driven_color_component"] = get_quality_driven_color_component
+
+
+def unregister_drivers() -> None:
+    """Unregister all driver functions."""
+    del bpy.app.driver_namespace["get_quality_driven_color_component"]

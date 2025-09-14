@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import bpy
-
-from .blender.drivers import get_quality_driven_color_component
+from bpy.app.handlers import persistent
+from .blender.drivers import register_drivers, unregister_drivers
 from .blender.operators import (
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
@@ -41,15 +41,22 @@ _classes = [
 ]
 
 
+@persistent
+def on_load_post(dummy):
+    """Handler for file load."""
+    register_drivers()
+
+
 def register():
     """Register the add-on."""
     for cls in _classes:
         bpy.utils.register_class(cls)
 
     # Register driver functions
-    bpy.app.driver_namespace[
-        "get_quality_driven_color_component"
-    ] = get_quality_driven_color_component
+    register_drivers()
+
+    # Add handler for loading new files
+    bpy.app.handlers.load_post.append(on_load_post)
 
     # Add the property groups to the scene type
     bpy.types.Scene.pose_editor_stitching_ui = bpy.props.PointerProperty(
@@ -70,8 +77,10 @@ def unregister():
         bpy.utils.unregister_class(cls)
 
     # Unregister driver functions
-    if "get_quality_driven_color_component" in bpy.app.driver_namespace:
-        del bpy.app.driver_namespace["get_quality_driven_color_component"]
+    unregister_drivers()
+
+    # Remove the handler
+    bpy.app.handlers.load_post.remove(on_load_post)
 
 
 if __name__ == "__main__":
