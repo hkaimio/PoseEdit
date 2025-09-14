@@ -3,13 +3,14 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import bpy
-from bpy.app.handlers import persistent
+
 from .blender.drivers import register_drivers, unregister_drivers
 from .blender.operators import (
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
     PE_OT_CreateProject,
     PE_OT_LoadCameraViews,
+    PE_OT_LoadCalibration,
 )
 from .blender.properties import CameraViewSettings, StitchingUIItem, StitchingUIState
 from .ui.panels import PE_PT_ProjectPanel, PE_PT_StitchingPanel, PE_PT_ViewPanel
@@ -30,6 +31,7 @@ _classes = [
     PE_OT_dummy,
     PE_OT_CreateProject,
     PE_OT_LoadCameraViews,
+    PE_OT_LoadCalibration,
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
     PE_PT_ProjectPanel,
@@ -41,7 +43,6 @@ _classes = [
 ]
 
 
-@persistent
 def on_load_post(dummy):
     """Handler for file load."""
     register_drivers()
@@ -56,7 +57,8 @@ def register():
     register_drivers()
 
     # Add handler for loading new files
-    bpy.app.handlers.load_post.append(on_load_post)
+    if on_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(on_load_post)
 
     # Add the property groups to the scene type
     bpy.types.Scene.pose_editor_stitching_ui = bpy.props.PointerProperty(
@@ -80,7 +82,8 @@ def unregister():
     unregister_drivers()
 
     # Remove the handler
-    bpy.app.handlers.load_post.remove(on_load_post)
+    if on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(on_load_post)
 
 
 if __name__ == "__main__":

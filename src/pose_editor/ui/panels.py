@@ -18,6 +18,7 @@ class PE_PT_ProjectPanel(bpy.types.Panel):
         layout = self.layout
         layout.operator("pose_editor.create_project")
         layout.operator("pose_editor.load_camera_views")
+        layout.operator("pose_editor.load_calibration")
 
 
 class PE_PT_ViewPanel(bpy.types.Panel):
@@ -106,7 +107,7 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
         for item in stitching_ui_state.items:
             row = box.row()
             row.label(text=item.person_name)
-            # This is where the dynamic EnumProperty would be updated and drawn
+            # This is where the dynamic EnumProperty would be drawn and drawn
             # For now, we just show a placeholder
             row.prop(item, "selected_track", text="")
 

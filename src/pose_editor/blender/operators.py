@@ -14,6 +14,7 @@ from ..core.camera_view import (
     CameraView,
     create_camera_view,
 )
+from ..core.calibration import load_calibration_from_file
 from ..core.marker_data import MarkerData
 from ..core.person_data_view import PersonDataView
 from ..core.person_facade import (
@@ -35,6 +36,29 @@ class PE_OT_CreateProject(bpy.types.Operator):
     def execute(self, context):
         scene_builder.create_project_structure()
         return {"FINISHED"}
+
+
+class PE_OT_LoadCalibration(bpy.types.Operator):
+    """Loads camera calibration data from a TOML file."""
+
+    bl_idname = "pose_editor.load_calibration"
+    bl_label = "Load Calibration File"
+    bl_description = "Select the camera calibration TOML file"
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+
+    def execute(self, context):
+        try:
+            load_calibration_from_file(self.filepath)
+            self.report({"INFO"}, f"Loaded calibration from {self.filepath}")
+        except Exception as e:
+            self.report({"ERROR"}, f"Failed to load calibration: {e}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
 
 
 class PE_OT_LoadCameraViews(bpy.types.Operator):
