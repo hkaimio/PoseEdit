@@ -189,11 +189,6 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
             # Link PersonDataView to MarkerData
             real_person_pv.connect_to_series(real_person_md)
 
-            # Position the Real Person's PersonDataView relative to the CameraView
-            # Offset it to the right of the raw tracks
-            offset_x = BLENDER_TARGET_WIDTH + 1.0  # Offset by width + some padding
-            real_person_pv.view_root_object._get_obj().location.x += offset_x
-
         self.report({"INFO"}, f"Real Person '{self.person_name}' added.")
         return {"FINISHED"}
 
