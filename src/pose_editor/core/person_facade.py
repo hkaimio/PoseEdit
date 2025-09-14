@@ -81,7 +81,7 @@ class RealPersonInstanceFacade:
         print(f"Source track index: {source_track_index}")
 
         # 1. Get Target and Source MarkerData objects
-        target_ds_name = f"{self.person_id}.{view_name}"
+        target_ds_name = f"DS.{self.person_id}.{view_name}"
         marker_ref = dal.get_object_by_name(target_ds_name)
         if not marker_ref:
             print(f"Error: Target MarkerData object {target_ds_name} not found.")
@@ -92,7 +92,7 @@ class RealPersonInstanceFacade:
             print(f"Error: Target MarkerData {target_ds_name} could not be initialized.")
             return
 
-        source_ds_name = f"{view_name}_person{source_track_index}"
+        source_ds_name = f"DS.{view_name}_person{source_track_index}"
         source_ds_obj = dal.get_object_by_name(source_ds_name)
         if not source_ds_obj:
             print(f"Error: Source MarkerData object {source_ds_name} not found.")

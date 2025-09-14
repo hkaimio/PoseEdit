@@ -112,6 +112,7 @@ class PersonDataView:
         view_root_object._get_obj().location = location
 
         # Set custom properties
+        dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_ID, view_root_object._id)
         dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
         dal.set_custom_property(view_root_object, dal.SKELETON, skeleton._skeleton.name)
         dal.set_custom_property(view_root_object, dal.COLOR, color)
@@ -141,6 +142,21 @@ class PersonDataView:
         # Now, call the actual __init__ to properly initialize the instance
         instance = cls(view_root_object)
         return instance
+
+    @classmethod
+    def get_by_id(cls, object_id: str) -> Optional["PersonDataView"]:
+        """Finds a PersonDataView by its unique object ID.
+
+        Args:
+            object_id: The unique ID of the PersonDataView root object.
+
+        Returns:
+            A PersonDataView instance if found, otherwise None.
+        """
+        obj_ref = dal.find_object_by_property(dal.POSE_EDITOR_OBJECT_ID, object_id)
+        if not obj_ref:
+            return None
+        return cls.from_blender_object(obj_ref)
 
     @classmethod
     def from_blender_object(cls, view_root_obj_ref: dal.BlenderObjRef) -> Optional["PersonDataView"]:

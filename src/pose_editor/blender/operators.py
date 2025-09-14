@@ -227,6 +227,8 @@ class PE_OT_AssignTrack(bpy.types.Operator):
             self.report({"ERROR"}, "No active camera view found.")
             return {"CANCELLED"}
         view_name = active_camera.name.replace("Cam_", "")
+        pvd_name = f"DS.{view_name}"
+
 
         # TODO: This is a temporary way to get a skeleton. This should
         # be retrieved from the RealPersonInstance in the future.
