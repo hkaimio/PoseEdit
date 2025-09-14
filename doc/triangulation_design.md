@@ -22,8 +22,8 @@ graph TD
     end
 
     subgraph "Output Data"
-        E["MarkerSet3D (Blender Empties/Spheres)"]
-        F["3D Animation (Action)"]
+        E["Person3DView (Blender Empties/Spheres)"]
+        F["MarkerData (Action)"]
         G["Reprojection Error (Custom Property F-Curves)"]
     end
 
@@ -98,20 +98,17 @@ To make the `.blend` file self-contained, the calibration data will be read from
 
 ## 4. 3D Data Representation
 
-Analogous to the 2D `PersonDataView` and `MarkerData` classes, we will introduce new entities to represent the 3D pose.
+Analogous to the 2D `PersonDataView`, we will introduce a new `Person3DView` class to represent the 3D pose. The animation data itself will be managed by the existing `core.marker_data.MarkerData` class.
 
-### 4.1. `core.marker_data_3d.MarkerData3D`
-- **Purpose**: The "Model" layer for a `RealPersonInstance`'s 3D animated markers. It manages the `Action` containing all 3D animation data.
-- **Blender Representation**:
-    - An `Action` data-block (e.g., `AC.Alice_3D`).
-    - A corresponding Empty object (e.g., `DS.Alice_3D`) in the `DataSeries` collection to hold metadata.
-- **Animation Data**:
-    - The action will use the Slotted Actions API.
-    - For each marker, it will store F-Curves for its 3D `location`.
-    - It will also store F-Curves for custom properties on each marker object, such as `reprojection_error` and `contributing_views`. The `contributing_views` property will be a string containing a comma-separated list of camera names.
+### 4.1. `core.marker_data.MarkerData` (Reused for 3D)
+- **Purpose**: The generic "Model" layer for a set of animated markers. It manages a single `Action` and is capable of storing any F-Curve data.
+- **3D Usage**:
+    - A new `MarkerData` instance will be created for each `RealPersonInstance`'s 3D data (e.g., with series name `Alice_3D`).
+    - The triangulation process will call `marker_data.set_animation_data_from_numpy()`.
+    - The `columns` parameter will be configured to write to the 3D `location` (index 0, 1, 2) and to custom properties like `['reprojection_error']` and `['contributing_views']` on the marker objects.
 
 ### 4.2. `core.person_3d_view.Person3DView`
-- **Purpose**: The "View" layer. It creates and manages the visible Blender objects for the 3D pose.
+- **Purpose**: The "View" layer for 3D. It creates and manages the visible Blender objects for the 3D pose.
 - **Blender Representation**:
     - **Root Object**: A main Empty (e.g., `PV.Alice_3D`) parented to the `RealPersonInstance`'s master Empty.
     - **Marker Objects**:
@@ -127,12 +124,12 @@ Analogous to the 2D `PersonDataView` and `MarkerData` classes, we will introduce
 - **Logic**:
     1. Get the `Calibration` object.
     2. Get all `StitchedPose2D` data associated with the person instance.
-    3. Create the `Person3DView` and `MarkerData3D` objects if they don't exist.
+    3. Create the `Person3DView` and a new `MarkerData` instance for the 3D data if they don't exist.
     4. Loop from `frame_start` to `frame_end`.
     5. In each frame, gather the 2D data (x, y, quality) for every marker from every camera view.
     6. Pass the frame's data to the core `triangulate_point` function.
     7. Collect the results (3D point, error, etc.) for all markers and frames into NumPy arrays.
-    8. After the loop, use a high-performance DAL function (`dal.set_fcurves_from_numpy`) to write all the collected animation data to the `MarkerData3D` action in one bulk operation.
+    8. After the loop, call `marker_data.set_animation_data_from_numpy()` to write all collected animation data to the `Action` in one bulk operation.
 
 ### 5.2. Core Triangulation Function Interface
 A pure, testable Python function will perform the core calculation for a single point in a single frame.
@@ -227,12 +224,12 @@ This feature will be implemented in verifiable phases to ensure stability and co
 - **Dependencies**: A `RealPersonInstance` must exist in the scene.
 
 ### Phase 3: 3D Animation Data Management
-- **Goal**: Implement the `MarkerData3D` class to manage the `Action` for the 3D animation.
+- **Goal**: Create and populate the `MarkerData` action for the 3D animation.
 - **Tasks**:
-    1. Create the `core.marker_data_3d` module and the `MarkerData3D` class.
-    2. Implement the creation of the `Action` and its associated `DS` empty.
-    3. Implement the method to link the `MarkerData3D` to a `Person3DView`.
-- **Verification**: Can be tested by creating a `Person3DView` and a `MarkerData3D`, linking them, and then programmatically inserting keyframes into the action. The test will verify that the marker objects in the view move accordingly.
+    1. In the triangulation logic (Phase 4), call `MarkerData.create_new()` to create a new data series for the 3D data (e.g., "Alice_3D").
+    2. Connect the new `MarkerData` instance to the `Person3DView` instance created in Phase 2.
+    3. The triangulation orchestrator will be responsible for formatting the NumPy array of 3D points and metadata into the `columns` structure expected by `set_animation_data_from_numpy`.
+- **Verification**: This will be verified as part of the end-to-end test in Phase 4. The test will check that the correct `Action` is created and populated with F-Curves for the 3D location and metadata.
 - **Dependencies**: Phase 2.
 
 ### Phase 4: Triangulation Core and Operator
@@ -241,6 +238,6 @@ This feature will be implemented in verifiable phases to ensure stability and co
     1. Implement the pure Python `triangulate_point` function, integrating the user-provided draft logic.
     2. Implement the orchestrator method `triangulate(start, end)` on the `RealPersonInstanceFacade`.
     3. Implement the `PE_OT_TriangulatePerson` operator and its UI.
-- **Verification**: This is the final end-to-end test. It will involve a full scene setup with 2D data, running the operator, and asserting that the `MarkerData3D` action is populated with correctly triangulated 3D coordinates and metadata.
+- **Verification**: This is the final end-to-end test. It will involve a full scene setup with 2D data, running the operator, and asserting that the `MarkerData` action is populated with correctly triangulated 3D coordinates and metadata.
 - **Dependencies**: Phases 1, 2, and 3.
 - **Inputs**: Requires the draft triangulation function and a complete test dataset (2D poses from multiple cameras + calibration file).
