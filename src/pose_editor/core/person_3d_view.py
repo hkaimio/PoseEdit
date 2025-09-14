@@ -49,17 +49,21 @@ class Person3DView:
         dal.set_custom_property(view_root_object, dal.SKELETON, skeleton._skeleton.name)
         dal.set_custom_property(view_root_object, dal.COLOR, color)
 
-        temp_instance = cls.__new__(cls)
-        temp_instance.view_root_object = view_root_object
-        temp_instance.skeleton = skeleton
-        temp_instance.color = color
-        temp_instance._marker_objects_by_role = {}
+        instance = cls(view_root_object)
+        instance.skeleton = skeleton
+        instance.color = color
+        instance._marker_objects_by_role = {}
 
-        temp_instance._create_marker_objects()
-        temp_instance._create_armature()
-        temp_instance._create_drivers()
+        instance._create_marker_objects()
+        instance._create_armature()
+        instance._create_drivers()
 
-        return cls(view_root_object)
+        return instance
+
+    def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
+        """Returns a dictionary of marker objects in this view, keyed by their role."""
+        # In a full implementation, this might need to populate the dictionary if not already done.
+        return self._marker_objects_by_role
 
     def _create_marker_objects(self):
         """Creates a marker object for each joint in the skeleton."""
