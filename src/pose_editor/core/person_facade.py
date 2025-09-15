@@ -11,10 +11,7 @@ from anytree import PreOrderIter
 from ..blender import dal
 from ..blender.dal import CAMERA_VIEW_ID, BlenderObjRef
 from .calibration import Calibration
-from .camera_view import CameraView
 from .marker_data import MarkerData
-from .person_3d_view import Person3DView
-from .person_data_view import PersonDataView
 from .skeleton import get_skeleton
 from .triangulation import TriangulationOutput, triangulate_point
 
@@ -244,8 +241,11 @@ class RealPersonInstanceFacade:
 
     def triangulate(self, frame_start: int, frame_end: int):
         """Performs 3D triangulation for this person over a frame range."""
+
+        from .person_data_view import PersonDataView
+
         # 1. Get calibration data
-        calibration = Calibration.from_scene()
+        calibration = Calibration()
         if not calibration:
             print("Error: Calibration data not found in scene.")
             return
@@ -268,19 +268,37 @@ class RealPersonInstanceFacade:
             print("Error: Skeleton not found for person data views.")
             return
 
-        # 3. Create 3D View and MarkerData if they don't exist
-        person_3d_view_name = f"P3D.{self.name}"
-        person_3d_view = Person3DView.create_new(
-            view_name=person_3d_view_name,
-            skeleton=skeleton,
-            color=(0.8, 0.8, 0.8, 1.0),  # Default color for 3D view
-            parent_ref=self.obj,
-        )
+        # 3. Find or create the 3D View and its MarkerData
+        person_3d_view = Person3DView.get_for_person(self)
+        if not person_3d_view:
+            person_3d_view = Person3DView.create_new(
+                view_name=f"P3D.{self.name}",
+                skeleton=skeleton,
+                color=(0.8, 0.8, 0.8, 1.0),
+                parent_ref=self.obj,
+                person=self,
+            )
 
         marker_data_3d_name = f"{self.name}_3D"
-        marker_data_3d = MarkerData.create_new(
-            series_name=marker_data_3d_name, skeleton_name=skeleton.name, person=self
-        )
+        all_mds = dal.find_all_objects_by_property(dal.POSE_EDITOR_OBJECT_TYPE, "MarkerData")
+        marker_data_3d_ref = None
+        for md_ref in all_mds:
+            md_person_id = dal.get_custom_property(md_ref, PERSON_DEFINITION_REF)
+            md_view_id = dal.get_custom_property(md_ref, CAMERA_VIEW_ID)
+            if md_person_id == self.obj._id and not md_view_id:
+                marker_data_3d_ref = md_ref
+                break
+
+        if marker_data_3d_ref:
+            marker_data_3d = MarkerData.from_blender_object(marker_data_3d_ref)
+        else:
+            marker_data_3d = MarkerData.create_new(
+                series_name=marker_data_3d_name, skeleton_name=skeleton.name, person=self
+            )
+
+        if not marker_data_3d:
+            print(f"Error: Could not find or create MarkerData for {marker_data_3d_name}")
+            return
 
         # 4. Loop through frames and markers, collecting triangulation results
         num_frames = frame_end - frame_start + 1

@@ -4,12 +4,15 @@
 
 """Module for creating and managing the 3D visual representation of a person."""
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from anytree import PreOrderIter
 
 from ..blender import dal, dal3d
-from .skeleton import SkeletonBase
+from .skeleton import SkeletonBase, get_skeleton
+
+if TYPE_CHECKING:
+    from .person_facade import RealPersonInstanceFacade
 
 
 class Person3DView:
@@ -21,13 +24,63 @@ class Person3DView:
 
     def __init__(self, view_root_obj_ref: dal.BlenderObjRef):
         """Initializes the Person3DView as a wrapper around an existing Blender object."""
+        self._init_from_blender_ref(view_root_obj_ref)
+
+    def _init_from_blender_ref(self, view_root_obj_ref: dal.BlenderObjRef):
+        """Initializes the instance from an existing Blender object reference."""
         self.view_root_object = view_root_obj_ref
         self.skeleton: Optional[SkeletonBase] = None
         self.color: Optional[tuple[float, float, float, float]] = None
         self._marker_objects_by_role: dict[str, dal.BlenderObjRef] = {}
 
-        # In a full implementation, this would read all properties from the object
-        # and populate the marker dictionary.
+        skeleton_name = dal.get_custom_property(view_root_obj_ref, dal.SKELETON)
+        if skeleton_name:
+            self.skeleton = get_skeleton(skeleton_name)
+        self.color = dal.get_custom_property(view_root_obj_ref, dal.COLOR)
+        self._populate_marker_objects_by_role()
+
+    def _populate_marker_objects_by_role(self):
+        """Populates the marker dictionary by finding child objects with a MARKER_ROLE."""
+        self._marker_objects_by_role = {}
+        children = dal.get_children_of_object(self.view_root_object, recursive=False)
+        for child_ref in children:
+            role = dal.get_custom_property(child_ref, dal.MARKER_ROLE)
+            if role:
+                self._marker_objects_by_role[role] = child_ref
+
+    @classmethod
+    def from_blender_object(cls, view_root_obj_ref: dal.BlenderObjRef) -> Optional["Person3DView"]:
+        """Builds a Person3DView from an existing Blender object."""
+        if not view_root_obj_ref or not view_root_obj_ref._get_obj():
+            return None
+        obj_type = dal.get_custom_property(view_root_obj_ref, dal.POSE_EDITOR_OBJECT_TYPE)
+        if obj_type != "Person3DView":
+            return None
+        return cls(view_root_obj_ref)
+
+    @classmethod
+    def get_for_person(cls, person: "RealPersonInstanceFacade") -> Optional["Person3DView"]:
+        """Finds the Person3DView for a given RealPersonInstanceFacade."""
+        from .person_facade import PERSON_DEFINITION_REF
+
+        all_3d_views = dal.find_all_objects_by_property(dal.POSE_EDITOR_OBJECT_TYPE, "Person3DView")
+        for view_ref in all_3d_views:
+            person_id = dal.get_custom_property(view_ref, PERSON_DEFINITION_REF)
+            if person_id == person.obj._id:
+                return cls.from_blender_object(view_ref)
+        return None
+
+    def get_person(self) -> Optional["RealPersonInstanceFacade"]:
+        """Returns the RealPersonInstanceFacade associated with this view."""
+        from .person_facade import PERSON_DEFINITION_REF, RealPersonInstanceFacade
+
+        person_id = dal.get_custom_property(self.view_root_object, PERSON_DEFINITION_REF)
+        if not person_id:
+            return None
+        person_obj_ref = dal.get_object_by_name(person_id)
+        if not person_obj_ref:
+            return None
+        return RealPersonInstanceFacade.from_blender_obj(person_obj_ref)
 
     @classmethod
     def create_new(
@@ -36,8 +89,11 @@ class Person3DView:
         skeleton: SkeletonBase,
         color: tuple[float, float, float, float],
         parent_ref: dal.BlenderObjRef,
+        person: Optional["RealPersonInstanceFacade"] = None,
     ) -> "Person3DView":
         """Creates a new Person3DView, including its Blender objects."""
+        from .person_facade import PERSON_DEFINITION_REF
+
         view_root_object = dal.get_or_create_object(
             name=view_name,
             obj_type="EMPTY",
@@ -48,6 +104,7 @@ class Person3DView:
         dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_TYPE, "Person3DView")
         dal.set_custom_property(view_root_object, dal.SKELETON, skeleton.name)
         dal.set_custom_property(view_root_object, dal.COLOR, color)
+        dal.set_custom_property(view_root_object, PERSON_DEFINITION_REF, person.obj._id if person and person.obj else "")
 
         instance = cls(view_root_object)
         instance.skeleton = skeleton
@@ -62,7 +119,6 @@ class Person3DView:
 
     def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
         """Returns a dictionary of marker objects in this view, keyed by their role."""
-        # In a full implementation, this might need to populate the dictionary if not already done.
         return self._marker_objects_by_role
 
     def _create_marker_objects(self):
@@ -73,18 +129,22 @@ class Person3DView:
             marker_name = node.name
             marker_ref = None
             if hasattr(node, "id") and node.id is not None:
+                # For 3D, we also need to set the marker role
                 marker_ref = dal3d.create_sphere_marker(
                     parent=self.view_root_object,
                     name=marker_name,
                     color=self.color,
                     collection=collection,
                 )
+                dal.set_custom_property(marker_ref, dal.MARKER_ROLE, marker_name)
             else:
                 marker_ref = dal.create_empty(
                     name=f"{self.view_root_object.name}_{marker_name}",
                     collection=collection,
                     parent_obj=self.view_root_object,
                 )
+                dal.set_custom_property(marker_ref, dal.MARKER_ROLE, marker_name)
+
             self._marker_objects_by_role[marker_name] = marker_ref
 
     def _create_armature(self):

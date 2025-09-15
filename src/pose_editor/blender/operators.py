@@ -262,3 +262,83 @@ class PE_OT_AssignTrack(bpy.types.Operator):
 
         self.report({"INFO"}, f"Stitching applied at frame {start_frame}.")
         return {"FINISHED"}
+
+
+class PE_OT_TriangulatePerson(bpy.types.Operator):
+    """Triangulates 2D poses into a 3D animation for the selected persons."""
+
+    bl_idname = "pose_editor.triangulate_person"
+    bl_label = "Triangulate Person(s)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    frame_range_options = [
+        ("CURRENT_FRAME", "Current Frame", "Only triangulate the current frame"),
+        ("SCENE_RANGE", "Scene Frame Range", "Triangulate the entire scene frame range"),
+        ("CUSTOM_RANGE", "Custom Range", "Specify a custom frame range"),
+    ]
+
+    frame_range: bpy.props.EnumProperty(
+        name="Frame Range",
+        items=frame_range_options,
+        default="SCENE_RANGE",
+        description="Define which frames to triangulate",
+    )
+
+    start_frame: bpy.props.IntProperty(
+        name="Start Frame",
+        description="The first frame of the custom range to triangulate",
+        default=1,
+    )
+
+    end_frame: bpy.props.IntProperty(
+        name="End Frame",
+        description="The last frame of the custom range to triangulate",
+        default=250,
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "frame_range")
+        if self.frame_range == "CUSTOM_RANGE":
+            row = layout.row()
+            row.prop(self, "start_frame")
+            row.prop(self, "end_frame")
+
+    def execute(self, context):
+        start_frame, end_frame = self._get_frame_range(context)
+
+        selected_person_facades = []
+        for obj in context.selected_objects:
+            facade = RealPersonInstanceFacade.from_blender_obj(dal.BlenderObjRef(obj.name))
+            if facade:
+                selected_person_facades.append(facade)
+
+        if not selected_person_facades:
+            self.report({"WARNING"}, "No Real Person Instances selected.")
+            return {"CANCELLED"}
+
+        for facade in selected_person_facades:
+            try:
+                self.report({"INFO"}, f"Triangulating {facade.name}...")
+                facade.triangulate(start_frame, end_frame)
+            except Exception as e:
+                self.report({"ERROR"}, f"Triangulation failed for {facade.name}: {e}")
+                # Optionally, re-raise if debugging is needed
+                # raise e
+
+        self.report({"INFO"}, f"Triangulation finished for {len(selected_person_facades)} person(s).")
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def _get_frame_range(self, context) -> tuple[int, int]:
+        """Determines the start and end frame based on the operator's properties."""
+        if self.frame_range == "CURRENT_FRAME":
+            current = context.scene.frame_current
+            return current, current
+        elif self.frame_range == "SCENE_RANGE":
+            return context.scene.frame_start, context.scene.frame_end
+        elif self.frame_range == "CUSTOM_RANGE":
+            return self.start_frame, self.end_frame
+        return context.scene.frame_start, context.scene.frame_end
