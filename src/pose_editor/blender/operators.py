@@ -14,7 +14,7 @@ from ..core.camera_view import (
     CameraView,
     create_camera_view,
 )
-from ..core.calibration import load_calibration_from_file
+from ..core.calibration import Calibration, load_calibration_from_file
 from ..core.marker_data import MarkerData
 from ..core.person_data_view import PersonDataView
 from ..core.person_facade import (
@@ -86,10 +86,26 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
 
         video_files = [f for f in os.listdir(videos_dir) if f.endswith((".mp4", ".avi", ".mov"))]
 
+        # Get calibration data to find matching names
+        calibration = Calibration()
+        calib_cam_names = calibration.get_camera_names()
+
         camera_views = []
         for video_file in video_files:
-            camera_name = Path(video_file).stem
-            json_dir = pose_dir / f"{camera_name}_json"
+            camera_name_short = Path(video_file).stem
+            json_dir = pose_dir / f"{camera_name_short}_json"
+
+            # Find the corresponding full name in calibration data
+            calib_cam_name_full = None
+            for name in calib_cam_names:
+                # A bit fuzzy matching, but should work for "int_cam1_img" vs "cam1"
+                if f"_{camera_name_short}_" in name or name == f"int_{camera_name_short}_img":
+                    calib_cam_name_full = name
+                    break
+
+            if not calib_cam_name_full:
+                self.report({"WARNING"}, f"No matching calibration data found for camera '{camera_name_short}'")
+                continue
 
             if json_dir.is_dir():
                 # For now, we'll hardcode the COCO-133 skeleton.
@@ -97,8 +113,13 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
                 skeleton = COCO133Skeleton()
 
                 view = create_camera_view(
-                    name=camera_name, video_file=videos_dir / video_file, pose_data_dir=json_dir, skeleton_obj=skeleton
+                    name=camera_name_short,
+                    video_file=videos_dir / video_file,
+                    pose_data_dir=json_dir,
+                    skeleton_obj=skeleton,
                 )
+                # Store the full calibration name on the view object
+                dal.set_custom_property(view._obj, dal.CALIBRATION_CAMERA_NAME, calib_cam_name_full)
                 camera_views.append(view)
             else:
                 print(f"Warning: No matching JSON folder found for video {video_file}")
@@ -116,7 +137,6 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
         """Arranges the camera view root objects in a grid."""
         if not views:
             return
-
 
         count = len(views)
         if count == 0:
@@ -195,7 +215,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
                 color=color,
                 camera_view=cam_view,
                 collection=None,
-                person=person_facade
+                person=person_facade,
             )
 
             # Link PersonDataView to MarkerData
@@ -235,7 +255,6 @@ class PE_OT_AssignTrack(bpy.types.Operator):
             return {"CANCELLED"}
         view_name = "View_" + active_camera.name.replace("Cam_", "")
         pvd_name = f"DS.{view_name}"
-
 
         # TODO: This is a temporary way to get a skeleton. This should
         # be retrieved from the RealPersonInstance in the future.
@@ -322,11 +341,15 @@ class PE_OT_TriangulatePerson(bpy.types.Operator):
                 self.report({"INFO"}, f"Triangulating {facade.name}...")
                 facade.triangulate(start_frame, end_frame)
             except Exception as e:
+                import traceback
                 self.report({"ERROR"}, f"Triangulation failed for {facade.name}: {e}")
+                print(f"Error during triangulation for {facade.name}: {e}")
+                print(traceback.format_exc())
                 # Optionally, re-raise if debugging is needed
                 # raise e
 
         self.report({"INFO"}, f"Triangulation finished for {len(selected_person_facades)} person(s).")
+
         return {"FINISHED"}
 
     def invoke(self, context, event):

@@ -7,10 +7,6 @@
 import itertools as it
 from typing import Dict, List, NamedTuple, Optional
 
-# try:
-#     import cv2
-# except ImportError:
-#     print("Warning: OpenCV (cv2) is not installed. Triangulation functions will not work.")
 import numpy as np
 
 
@@ -24,67 +20,41 @@ class TriangulationOutput(NamedTuple):
 def rodrigues(rotation_vector) -> np.ndarray:
     """
     Converts a rotation vector to a rotation matrix using Rodrigues' formula.
-    Equivalent to cv2.Rodrigues in OpenCV.
     """
     theta = np.linalg.norm(rotation_vector)
-    if theta < 1e-6:
+    if theta < 1e-9:
         return np.eye(3)
 
     r = rotation_vector / theta
     rx, ry, rz = r
-    K = np.array([
+    K_mat = np.array([
         [0, -rz, ry],
         [rz, 0, -rx],
         [-ry, rx, 0]
     ])
-    R = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+    R = np.eye(3) + np.sin(theta) * K_mat + (1 - np.cos(theta)) * (K_mat @ K_mat)
     return R
 
 
-def svd_numpy(A):
-    # Step 1: Compute AᵀA
-    ATA = A.T @ A
-
-    # Step 2: Eigen-decomposition of AᵀA
-    eigvals, V = np.linalg.eigh(ATA)
-
-    # Step 3: Sort eigenvalues and eigenvectors in descending order
-    sorted_indices = np.argsort(eigvals)[::-1]
-    eigvals = eigvals[sorted_indices]
-    V = V[:, sorted_indices]
-
-    # Step 4: Compute singular values (√eigenvalues)
-    singular_values = np.sqrt(np.maximum(eigvals, 0))  # Ensure non-negative
-
-    # Step 5: Compute U = A V Σ⁻¹
-    nonzero_mask = singular_values > 1e-10
-    Sigma_inv = np.zeros_like(singular_values)
-    Sigma_inv[nonzero_mask] = 1.0 / singular_values[nonzero_mask]
-    U = A @ V
-    U = U * Sigma_inv[np.newaxis, :]
-
-    # Step 6: Orthonormalize U
-    U = np.linalg.qr(U)[0]
-
-    # Step 7: Construct Σ matrix
-    S = np.zeros_like(A, dtype=float)
-    np.fill_diagonal(S, singular_values)
-
-    return U, singular_values, V
-
-
-# Helper functions from the prototype
 def weighted_triangulation(P_all, x_all, y_all, likelihood_all):
-    A = np.empty((0, 4))
+    """
+    Triangulation with direct linear transform, weighted by likelihood.
+    """
+    A_list = []
     for c in range(len(x_all)):
         P_cam = P_all[c]
-        A = np.vstack((A, (P_cam[0] - x_all[c] * P_cam[2]) * likelihood_all[c]))
-        A = np.vstack((A, (P_cam[1] - y_all[c] * P_cam[2]) * likelihood_all[c]))
+        A_list.append((P_cam[0] - x_all[c] * P_cam[2]) * likelihood_all[c])
+        A_list.append((P_cam[1] - y_all[c] * P_cam[2]) * likelihood_all[c])
+    A = np.array(A_list)
 
     if np.shape(A)[0] >= 4:
-        S, U, Vt = svd_numpy(A)
-        V = Vt.T
-        Q = np.array([V[0][3] / V[3][3], V[1][3] / V[3][3], V[2][3] / V[3][3], 1])
+        # Use numpy's SVD
+        U, s, Vt = np.linalg.svd(A)
+        # The solution is the null space of A, corresponding to the singular vector
+        # associated with the smallest singular value. Vt is V transpose, and s is
+        # sorted high-to-low, so the last row of Vt is the vector we want.
+        Q = Vt[-1]
+        Q = Q / Q[3]  # Normalize homogeneous coordinate
     else:
         Q = np.array([np.nan, np.nan, np.nan, 1])
     return Q
@@ -98,18 +68,8 @@ def reprojection(P_all, Q):
     return x_calc, y_calc
 
 def euclidean_distance(q1, q2):
-    q1 = np.array(q1)
-    q2 = np.array(q2)
-    dist = q2 - q1
-    if np.isnan(dist).all():
-        dist = np.empty_like(dist)
-        dist[...] = np.inf
-
-    if len(dist.shape) == 1:
-        euc_dist = np.sqrt(np.nansum([d**2 for d in dist]))
-    else:
-        euc_dist = np.sqrt(np.nansum([d**2 for d in dist], axis=1))
-    return euc_dist
+    dist = np.array(q1) - np.array(q2)
+    return np.sqrt(np.nansum(dist**2))
 
 
 def triangulate_point(
@@ -121,34 +81,30 @@ def triangulate_point(
 ) -> Optional[TriangulationOutput]:
     """Triangulates a single 3D point from multiple 2D observations."""
     
-    # 1. Unpack the input dictionaries into lists, filtering by quality
-    camera_names = list(points_2d_by_camera.keys())
+    camera_names = list(calibration_by_camera.keys())
     x_all, y_all, likelihood_all, projection_matrices = [], [], [], []
     
     for name in camera_names:
-        point_2d = points_2d_by_camera[name]
+        point_2d = points_2d_by_camera.get(name)
         calib = calibration_by_camera.get(name)
         
-        if calib and point_2d[2] >= min_quality:
+        if calib and point_2d is not None and point_2d[2] >= min_quality:
             x_all.append(point_2d[0])
             y_all.append(point_2d[1])
             likelihood_all.append(point_2d[2])
             
-            # Construct projection matrix P = K * [R|t]
             K = np.array(calib["matrix"])
-            R = rodrigues(np.array(calib["rotation"]))[0]
+            R = rodrigues(np.array(calib["rotation"]))
             t = np.array(calib["translation"]).reshape(3, 1)
             Rt = np.hstack((R, t))
             P = K @ Rt
             projection_matrices.append(P)
         else:
-            # Append NaN for cameras that don't meet quality or have no calib
             x_all.append(np.nan)
             y_all.append(np.nan)
             likelihood_all.append(0)
-            projection_matrices.append(None) # Placeholder
+            projection_matrices.append(None)
 
-    # Filter out None projection matrices before processing
     valid_indices = [i for i, p in enumerate(projection_matrices) if p is not None]
     if len(valid_indices) < min_cameras:
         return None
@@ -160,7 +116,6 @@ def triangulate_point(
     valid_camera_names = [camera_names[i] for i in valid_indices]
     n_cams = len(valid_camera_names)
 
-    # 2. Iteratively remove cameras to find the best triangulation
     error_min = np.inf
     Q_best = None
     best_cam_indices = None
@@ -201,7 +156,7 @@ def triangulate_point(
             nb_cams_off += 1
             continue
 
-        min_err_for_this_iter = min(error_configs)
+        min_err_for_this_iter = min(error_configs) if error_configs else np.inf
         if min_err_for_this_iter < error_min:
             error_min = min_err_for_this_iter
             best_config_idx = np.argmin(error_configs)
@@ -213,7 +168,6 @@ def triangulate_point(
 
         nb_cams_off += 1
 
-    # 3. Format the output
     if Q_best is None or error_min > reproj_error_threshold:
         return None
 

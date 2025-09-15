@@ -96,6 +96,7 @@ POSE_EDITOR_OBJECT_ID = CustomProperty[str]("pose_editor_object_id")
 CAMERA_VIEW_ID = CustomProperty[str]("camera_view_id")
 COLOR = CustomProperty[tuple[float, float, float, float]]("color")
 MARKER_DATA_ID = CustomProperty[str]("marker_data_id")
+CALIBRATION_CAMERA_NAME = CustomProperty[str]("calibration_camera_name")
 
 
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:

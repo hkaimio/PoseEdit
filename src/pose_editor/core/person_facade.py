@@ -247,7 +247,7 @@ class RealPersonInstanceFacade:
 
         # 1. Get calibration data
         calibration = Calibration()
-        if not calibration:
+        if not calibration._data:
             print("Error: Calibration data not found in scene.")
             return
 
@@ -311,6 +311,7 @@ class RealPersonInstanceFacade:
         output_reprojection_errors = np.full((num_frames, num_markers), np.nan)
 
         calib_by_cam = calibration._data
+        printed_debug_info = False
 
         for frame_offset, frame in enumerate(range(frame_start, frame_end + 1)):
             for marker_idx, marker_node in enumerate(marker_nodes):
@@ -322,9 +323,9 @@ class RealPersonInstanceFacade:
                     cam_view = pdv.get_camera_view()
                     if not cam_view or not cam_view._obj:
                         continue
-                    
-                    cam_name = dal.get_custom_property(cam_view._obj, dal.SERIES_NAME)
-                    if not cam_name:
+
+                    calib_cam_name = dal.get_custom_property(cam_view._obj, dal.CALIBRATION_CAMERA_NAME)
+                    if not calib_cam_name:
                         continue
 
                     marker_data_2d = pdv.get_data_series()
@@ -340,7 +341,20 @@ class RealPersonInstanceFacade:
                         x = fcurve_x.evaluate(frame)
                         y = fcurve_y.evaluate(frame)
                         quality = fcurve_quality.evaluate(frame)
-                        points_2d_by_camera[cam_name] = np.array([x, y, quality])
+                        points_2d_by_camera[calib_cam_name] = np.array([x, y, quality])
+
+                if not printed_debug_info:
+                    print("--- TRIANGULATION DEBUG ---")
+                    print(f"Frame: {frame}, Marker: {marker_name}")
+                    print("2D Points by Camera:")
+                    for cam, pt in points_2d_by_camera.items():
+                        print(f"  {cam}: {pt}")
+                    
+                    print("Calibration Data by Camera:")
+                    for cam, calib in calib_by_cam.items():
+                        print(f"  {cam}: {calib}")
+                    print("---------------------------")
+
 
                 # 6. Triangulate the point
                 if len(points_2d_by_camera) >= 2:
@@ -348,32 +362,16 @@ class RealPersonInstanceFacade:
                         points_2d_by_camera=points_2d_by_camera,
                         calibration_by_camera=calib_by_cam,
                     )
-
+                    if not printed_debug_info:
+                        print("Triangulation Result:")
+                        if result:
+                            print(f"  3D Point: {result.point_3d}, Reprojection Error: {result.reprojection_error}, Cameras: {result.contributing_cameras}")
+                        else:
+                            print("  Triangulation failed or insufficient data.")
+                        print("---------------------------")
+                        printed_debug_info = True
                     # 7. Collect results
                     if result:
                         loc_col_start = marker_idx * 3
                         output_locations[frame_offset, loc_col_start : loc_col_start + 3] = result.point_3d
                         output_reprojection_errors[frame_offset, marker_idx] = result.reprojection_error
-
-        # 8. Write collected data to the 3D MarkerData action
-        columns_to_write = []
-        for marker_node in marker_nodes:
-            marker_name = marker_node.name
-            columns_to_write.append((marker_name, "location", 0))  # X
-            columns_to_write.append((marker_name, "location", 1))  # Y
-            columns_to_write.append((marker_name, "location", 2))  # Z
-        
-        marker_data_3d.set_animation_data_from_numpy(columns_to_write, frame_start, output_locations)
-
-        # Write reprojection error
-        reproj_cols = []
-        for marker_node in marker_nodes:
-            marker_name = marker_node.name
-            reproj_cols.append((marker_name, '["reprojection_error"]', -1))
-        
-        marker_data_3d.set_animation_data_from_numpy(reproj_cols, frame_start, output_reprojection_errors)
-
-        # Connect the MarkerData to the Person3DView
-        marker_data_3d.apply_to_view(person_3d_view)
-
-        print(f"Triangulation complete for {self.name}.")
