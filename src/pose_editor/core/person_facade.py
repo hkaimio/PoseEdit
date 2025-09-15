@@ -5,7 +5,7 @@
 
 from typing import Optional
 from ..blender import dal
-from .marker_data import MarkerData
+from .marker_data import MarkerData, CAMERA_VIEW_ID
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
 PERSON_DEFINITION_REF = dal.CustomProperty[str]("person_definition_ref")
@@ -140,7 +140,7 @@ class RealPersonInstanceFacade:
         """Assigns a new source track for a segment of the timeline."""
 
         from .person_data_view import PersonDataView
-        
+
         end_frame = self.find_next_stitch_frame(view_name, start_frame)
         if end_frame < start_frame:
             print(f"End frame {end_frame} is before start frame {start_frame}, aborting stitch.")
@@ -150,6 +150,14 @@ class RealPersonInstanceFacade:
         print(f"Source track index: {source_track_index}")
 
         # 1. Get Target and Source MarkerData objects
+
+        marker_refs = dal.find_all_objects_by_property(PERSON_DEFINITION_REF, self.person_id)
+        for mr in marker_refs:
+            view_id = dal.get_custom_property(mr, MarkerData.CAMERA_VIEW_ID)
+            if view_id == view_name:
+                marker_ref = mr
+                break
+
         target_ds_name = f"DS.{self.person_id}.{view_name}"
         marker_ref = dal.get_object_by_name(target_ds_name)
         if not marker_ref:

@@ -8,6 +8,13 @@ import numpy as np
 # No direct 'import bpy' here! All Blender interactions go through the DAL.
 from ..blender import dal
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .camera_view import CameraView
+    from .person_data_view import PersonDataView
+    from .person_facade import RealPersonInstanceFacade
+
+CAMERA_VIEW_ID = dal.CustomProperty[str]("camera_view_id")
 
 class MarkerData:
     """A facade for a marker data series (model layer).
@@ -43,7 +50,7 @@ class MarkerData:
         self.action = action
 
     @classmethod
-    def create_new(cls, series_name: str, skeleton_name: str | None = None) -> "MarkerData":
+    def create_new(cls, series_name: str, skeleton_name: str | None = None, camera_view: "CameraView" = None, person: "RealPersonInstanceFacade" = None) -> "MarkerData":
         """
         Creates a new persistent MarkerData object in Blender.
 
@@ -54,6 +61,9 @@ class MarkerData:
         Returns:
             MarkerData: The newly created MarkerData instance.
         """
+
+        from .person_facade import PERSON_DEFINITION_REF
+
         data_series_object = dal.get_or_create_object(
             name=f"DS.{series_name}", obj_type="EMPTY", collection_name="DataSeries"
         )
@@ -61,6 +71,10 @@ class MarkerData:
         dal.set_custom_property(data_series_object, dal.SKELETON, skeleton_name if skeleton_name else "")
         dal.set_custom_property(data_series_object, dal.ACTION_NAME, f"AC.{series_name}")
         dal.set_custom_property(data_series_object, dal.POSE_EDITOR_OBJECT_TYPE, "MarkerData")
+        camera_view_id = camera_view._obj.name if camera_view and camera_view._obj else ""
+        dal.set_custom_property(data_series_object, CAMERA_VIEW_ID, camera_view_id)
+        person_id = person.person_id if person is not None else ""
+        dal.set_custom_property(data_series_object, PERSON_DEFINITION_REF, person_id)
 
         action = dal.get_or_create_action(f"AC.{series_name}")
 

@@ -99,6 +99,14 @@ class CameraView:
         view = cls()
         view._obj = obj_ref
         return view
+    
+    @classmethod
+    def get_by_id(cls, view_id: str) -> CameraView | None:
+        """Finds a CameraView by its unique ID."""
+        camera_view_ref = dal.find_object_by_property(dal.SERIES_NAME, view_id)
+        if camera_view_ref:
+            return cls.from_blender_obj(camera_view_ref)
+        return None
 
     @classmethod
     def get_all(cls) -> list[CameraView]:
@@ -151,6 +159,25 @@ class CameraView:
 
         # Update the scene frame range
         # update_scene_frame_range()
+
+    @property
+    def translation(self) -> tuple[float, float, float]:
+        """Returns the translation (offset) for this camera view."""
+        if not self._obj:
+            return (0.0, 0.0, 0.0)
+        x_offset = dal.get_custom_property(self._obj, CAMERA_X_OFFSET) or 0.0
+        y_offset = dal.get_custom_property(self._obj, CAMERA_Y_OFFSET) or 0.0
+        return (x_offset, y_offset, 0.0)
+    
+    @property
+    def scale(self) -> tuple[float, float, float]:
+        """Returns the scale for this camera view."""
+        if not self._obj:
+            return (1.0, 1.0, 1.0)
+        x_scale = dal.get_custom_property(self._obj, CAMERA_X_SCALE) or 1.0
+        y_scale = dal.get_custom_property(self._obj, CAMERA_Y_SCALE) or 1.0
+        z_scale = dal.get_custom_property(self._obj, CAMERA_Z_SCALE) or 1.0
+        return (x_scale, y_scale, z_scale)
 
 
 def _extract_frame_number(filename: str) -> int:
@@ -350,3 +377,4 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
             f"PersonDataView {person_view.view_root_object.name} created and linked to CameraView {camera_view._obj.name}."
         )
     return camera_view
+

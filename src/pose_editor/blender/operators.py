@@ -243,10 +243,6 @@ class PE_OT_AssignTrack(bpy.types.Operator):
         persons = {person.name: person for person in RealPersonInstanceFacade.get_all()}
 
         for item in stitching_ui_state.items:
-            person_ref = dal.get_object_by_name(item.person_name)
-            if not person_ref:
-                continue
-
             facade = persons.get(item.person_name)
             if not facade:
                 continue

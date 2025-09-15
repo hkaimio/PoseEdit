@@ -9,7 +9,12 @@ from ..blender import dal
 if TYPE_CHECKING:
     from .camera_view import CameraView
 from .marker_data import MarkerData
-from .skeleton import SkeletonBase
+from .skeleton import SkeletonBase, get_skeleton
+from .person_facade import RealPersonInstanceFacade, PERSON_DEFINITION_REF
+
+
+SKELETON_NAME = dal.CustomProperty[str]("skeleton_name")
+CAMERA_VIEW_ID = dal.CustomProperty[str]("camera_view")
 
 class PersonDataView:
     """A facade for a person's 2D data view (View layer).
@@ -34,6 +39,19 @@ class PersonDataView:
     -   `camera_view_id` (str): The name of the CameraView this PersonDataView belongs to.
     """
 
+    def __init__(self, view_root_obj_ref: dal.BlenderObjRef):
+        """Initializes the PersonDataView as a wrapper around an existing Blender object.
+
+        Do not call this constructor directly; use the factory methods create_new() 
+        or from_blender_object() instead.
+
+        Args:
+            view_root_obj_ref: A BlenderObjRef pointing to the root Empty of the
+                               existing PersonDataView (e.g., PV.Alice.cam1).
+        """
+        self._obj = view_root_obj_ref
+        self.skeleton: Optional[SkeletonBase] = None
+
     def _init_from_blender_ref(self, view_root_obj_ref: dal.BlenderObjRef):
         """Initializes the PersonDataView from an existing Blender object.
 
@@ -46,12 +64,7 @@ class PersonDataView:
                                existing PersonDataView (e.g., PV.Alice.cam1).
         """
         self.view_root_object = view_root_obj_ref
-        self.view_name = view_root_obj_ref.name
 
-        # Read properties from the Blender object
-        self.skeleton = dal.get_custom_property(self.view_root_object, dal.SKELETON)
-        self.color = dal.get_custom_property(self.view_root_object, dal.COLOR)
-        self.camera_view_id = dal.get_custom_property(self.view_root_object, dal.CAMERA_VIEW_ID)
 
         # Populate marker objects and find armature from existing Blender objects
         self._marker_objects_by_role = {}
@@ -61,87 +74,100 @@ class PersonDataView:
         if not self._armature_object:
             print(f"Warning: Armature {armature_name} not found for existing PersonDataView {self.view_name}")
 
-    def __init__(self, view_root_obj_ref: dal.BlenderObjRef):
-        """Initializes the PersonDataView as a wrapper around an existing Blender object.
-
-        Args:
-            view_root_obj_ref: A BlenderObjRef pointing to the root Empty of the
-                               existing PersonDataView (e.g., PV.Alice.cam1).
-        """
-        self._init_from_blender_ref(view_root_obj_ref)
+        skeleton_name = dal.get_custom_property(view_root_obj_ref, SKELETON_NAME)
+        if skeleton_name:
+            self.skeleton = get_skeleton(skeleton_name)
 
     @classmethod
     def create_new(
         cls,
         view_name: str,
-        skeleton: SkeletonBase,
-        color: tuple[float, float, float, float],
-        camera_view: "CameraView",
-        collection: "bpy.types.Collection" = None,
+        skeleton,
+        color,
+        camera_view,
+        collection=None,
+        person: Optional[RealPersonInstanceFacade] = None,
     ) -> "PersonDataView":
-        """Creates a new PersonDataView, including its Blender objects.
+        """
+        Creates a new PersonDataView object in Blender.
 
         Args:
-            view_name: A unique name for this person view (e.g., "PV.Alice.cam1").
-            skeleton: The skeleton definition to use for creating marker objects.
-            color: The color for the markers (RGBA tuple).
-            camera_view: The CameraView this PersonDataView belongs to.
-            collection: The collection to link the root Empty to. If None, defaults to "PersonViews".
+            view_name: Name for the view.
+            skeleton: Skeleton object.
+            color: Color tuple.
+            camera_view: CameraView object.
+            collection: Blender collection to add to.
+            person: Optional RealPersonInstanceFacade to associate.
 
         Returns:
-            A new PersonDataView instance.
+            PersonDataView: The newly created instance.
         """
+        from .camera_view import CameraView
         if collection is None:
-            collection = dal.get_or_create_collection("PersonViews")
+            collection = dal.get_or_create_collection("PersonViews")    
 
-        if camera_view._obj is None:
-            raise ValueError("CameraView object is None")
-        
-        # Create the root Empty for this view
-        view_root_object = dal.get_or_create_object(
-            name=view_name,
-            obj_type="EMPTY",
-            collection_name=collection.name,
-            parent=camera_view._obj,
+        obj = dal.get_or_create_object(
+            name=view_name, obj_type="EMPTY", collection_name=collection.name if collection else None, parent=camera_view._obj
         )
-
-        # Set scale and location from the camera view
-        scale = camera_view.get_transform_scale()
-        location = camera_view.get_transform_location()
-        view_root_object._get_obj().scale = scale
-        view_root_object._get_obj().location = location
-
         # Set custom properties
-        dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_ID, view_root_object._id)
-        dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
-        dal.set_custom_property(view_root_object, dal.SKELETON, skeleton._skeleton.name)
-        dal.set_custom_property(view_root_object, dal.COLOR, color)
-        dal.set_custom_property(view_root_object, dal.CAMERA_VIEW_ID, camera_view._obj._id)
-        dal.set_custom_property(view_root_object, dal.MARKER_DATA_ID, "") 
+        dal.set_custom_property(obj, dal.SERIES_NAME, view_name)
+        dal.set_custom_property(obj, SKELETON_NAME, skeleton.name)
+        dal.set_custom_property(obj, dal.COLOR, color)
+        dal.set_custom_property(obj, CAMERA_VIEW_ID, getattr(camera_view, "view_id", getattr(camera_view, "name", "")))
+        dal.set_custom_property(obj, PERSON_DEFINITION_REF, person.person_id if person is not None else "")
+        instance = cls(obj)
+        instance._init_from_blender_ref(obj)
+        instance._create_marker_objects(collection)
+        instance._create_armature()
+        instance._init_from_blender_ref(obj)
 
-        # Create a temporary instance to call internal creation methods
-        temp_instance = cls.__new__(cls)  # Bypass __init__ for now
-        temp_instance.view_root_object = view_root_object
-        temp_instance.view_name = view_name
-        temp_instance.skeleton = skeleton
-        temp_instance.color = color
-        temp_instance.camera_view_id = camera_view._obj._id
-        temp_instance._marker_objects_by_role = {}
+        obj._get_obj().location = camera_view.translation
+        obj._get_obj().scale = camera_view.scale
 
-        # Create marker objects based on the skeleton definition
-        print("Creating marker objects...")
-        temp_instance._create_marker_objects(collection)
-        # Populate the dictionary after creating markers
-        print("Populating marker objects by role...")
-        temp_instance._populate_marker_objects_by_role()
-
-        # Create armature and bones
-        print("Creating armature...")
-        temp_instance._create_armature()
-
-        # Now, call the actual __init__ to properly initialize the instance
-        instance = cls(view_root_object)
         return instance
+
+    def get_camera_view(self) -> Optional["CameraView"]:
+        """
+        Returns the CameraView object associated with this PersonDataView, or None if not assigned.
+        """
+        camera_view_id = dal.get_custom_property(self._obj, CAMERA_VIEW_ID)
+        if not camera_view_id:
+            return None
+        # Import here to avoid circular import
+        from .camera_view import CameraView
+        return CameraView.get_by_id(camera_view_id)
+
+
+    def get_person(self) -> RealPersonInstanceFacade | None:
+        """
+        Returns the RealPersonInstanceFacade associated with this view, or None if not assigned.
+        """
+
+        from .person_facade import RealPersonInstanceFacade, PERSON_DEFINITION_REF
+
+        person_id = dal.get_custom_property(self._obj, PERSON_DEFINITION_REF)
+        if not person_id:
+            return None
+        return RealPersonInstanceFacade.get_by_id(person_id)
+
+    @property
+    def view_name(self) -> str:
+        """Returns the name of this PersonDataView."""
+        return dal.get_custom_property(self._obj, dal.SERIES_NAME) or ""
+
+    @property
+    def color(self) -> tuple[float, float, float, float]:
+        """Returns the RGBA color of this PersonDataView."""
+        return dal.get_custom_property(self._obj, dal.COLOR) or (1.0, 1.0, 1.0, 1.0)
+    
+    
+    def camera_view(self) -> Optional["CameraView"]:
+        """Returns the CameraView this PersonDataView belongs to, or None if not set."""
+        camera_view_id = dal.get_custom_property(self._obj, CAMERA_VIEW_ID)
+        if not camera_view_id:
+            return None
+        from .camera_view import CameraView
+        return CameraView.get_by_id(camera_view_id)
 
     @classmethod
     def get_by_id(cls, object_id: str) -> Optional["PersonDataView"]:
@@ -185,41 +211,9 @@ class PersonDataView:
 
         # Instantiate PersonDataView by calling its __init__ with the existing ref
         instance = cls(view_root_obj_ref)
+        instance._init_from_blender_ref(view_root_obj_ref)
         return instance
 
-    @classmethod
-    def from_existing_blender_object(
-        cls, view_root_obj_ref: dal.BlenderObjRef, skeleton: SkeletonBase
-    ) -> "PersonDataView":
-        """Builds a PersonDataView instance from existing Blender objects.
-
-        This factory method assumes the Blender objects (root Empty, markers, armature)
-        already exist in the scene and initializes the Python wrapper around them.
-        It does NOT create any new Blender objects.
-
-        Args:
-            view_root_obj_ref: A BlenderObjRef pointing to the root Empty of the
-                               existing PersonDataView (e.g., PV.Alice.cam1).
-            skeleton: The skeleton definition associated with this view.
-
-        Returns:
-            A PersonDataView instance initialized from the existing Blender data.
-        """
-        view_name = view_root_obj_ref.name
-        # We need to retrieve the color from the existing objects if possible,
-        # but for now, we'll use a default or assume it's set elsewhere.
-        # For simplicity, let's assume the color is not critical for reconstruction
-        # or can be derived from the first marker's original color properties.
-        # For now, we'll use a default color.
-        # A more robust solution would store the color on the view_root_object.
-        color = (1.0, 1.0, 1.0, 1.0)  # Default color for reconstruction
-
-        # Instantiate PersonDataView, telling it NOT to create Blender objects
-        instance = cls(view_name, skeleton, color, create_blender_objects=False)
-
-        # The __init__ with create_blender_objects=False already handles
-        # populating _marker_objects_by_role and finding the armature.
-        return instance
 
     @classmethod
     def get_all(cls) -> list["PersonDataView"]:
@@ -352,6 +346,13 @@ class PersonDataView:
             marker_data.data_series_object_name
         )
 
+    def get_data_series(self) -> Optional[MarkerData]:
+        """Returns the MarkerData series connected to this view, or None if not connected."""
+        marker_data_if = dal.get_custom_property(self.view_root_object, dal.MARKER_DATA_ID)
+        if not marker_data_if:
+            return None
+        return MarkerData.from_blender_object(dal.BlenderObjRef(marker_data_if))
+    
     def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
         """Returns a dictionary of marker objects in this view, keyed by their role."""
         return self._marker_objects_by_role
