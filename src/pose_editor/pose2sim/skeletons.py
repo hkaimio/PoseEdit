@@ -41,6 +41,27 @@ from anytree import Node
 # __email__ = "contact@david-pagnon.com"
 # __status__ = "Development"
 
+def get_skeleton_definition(name: str):
+    """
+    Returns the skeleton definition (anytree.Node) for the given name.
+
+    Args:
+        name (str): The name of the skeleton (e.g. "COCO_133", "HALPE_26").
+
+    Returns:
+        Node: The root node of the skeleton definition.
+
+    Raises:
+        ValueError: If no skeleton definition with the given name exists.
+    """
+    # Only expose known skeletons
+    if name in globals():
+        definition = globals()[name]
+        from anytree import Node
+        if isinstance(definition, Node):
+            return definition
+    raise ValueError(f"No skeleton definition found for '{name}'")
+
 
 """HALPE_26 (full-body without hands, from AlphaPose, MMPose, etc.)
 https://github.com/MVIG-SJTU/AlphaPose/blob/master/docs/MODEL_ZOO.md

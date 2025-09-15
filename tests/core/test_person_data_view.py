@@ -243,7 +243,7 @@ class TestPersonDataView:
             lambda obj, prop: {
                 mock_view_root_obj_ref: {
                     mock_dal.POSE_EDITOR_OBJECT_TYPE: "PersonDataView",
-                    mock_dal.SKELETON: mock_skeleton._skeleton.name,
+                    mock_dal.SKELETON: mockname,
                     mock_dal.COLOR: marker_color,
                     mock_dal.CAMERA_VIEW_ID: "cam1",  # Example camera view ID
                 }
@@ -282,7 +282,7 @@ class TestPersonDataView:
                 # Logic for PersonDataView root properties
                 return {
                     mock_dal.POSE_EDITOR_OBJECT_TYPE: "PersonDataView",
-                    mock_dal.SKELETON: mock_skeleton._skeleton.name,
+                    mock_dal.SKELETON: mock_skeleton.name,
                     mock_dal.COLOR: marker_color,
                     mock_dal.CAMERA_VIEW_ID: "cam1",
                 }.get(prop)

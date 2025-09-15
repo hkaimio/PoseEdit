@@ -1,6 +1,6 @@
 
 from anytree import Node, findall
-
+from ..pose2sim.skeletons import COCO_133, get_skeleton_definition
 
 class SkeletonBase:
     """
@@ -10,7 +10,7 @@ class SkeletonBase:
     structure of a skeleton with joints identified by names and IDs.
     """
 
-    def __init__(self, skeleton_def: Node):
+    def __init__(self, skeleton_def: Node, name: str = "UnnamedSkeleton"):
         """
         Initializes the Skeleton with the root node of an anytree skeleton definition.
 
@@ -18,6 +18,12 @@ class SkeletonBase:
             skeleton_def: The root `anytree.Node` of the skeleton definition.
         """
         self._skeleton = skeleton_def
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        """Returns the name of the skeleton."""
+        return self._name
 
     def get_joint_name(self, joint_id: int) -> str | None:
         """
@@ -74,8 +80,8 @@ class COCO133Skeleton(SkeletonBase):
     A specialized skeleton class for COCO_133 that calculates fake markers for Hip and Neck.
     """
 
-    def __init__(self, skeleton_def: Node):
-        super().__init__(skeleton_def)
+    def __init__(self):
+        super().__init__(COCO_133, "COCO_133")
 
     def calculate_fake_marker_pos(self, name: str, marker_data: dict[str, list[float]]) -> list[float] | None:
         """
@@ -105,3 +111,24 @@ class COCO133Skeleton(SkeletonBase):
                 return midpoint
 
         return super().calculate_fake_marker_pos(name, marker_data)
+
+def get_skeleton(skeleton_name: str) -> SkeletonBase:
+    """
+    Factory function to return a SkeletonBase (or subclass) for the given skeleton name.
+
+    Args:
+        skeleton_name (str): The name of the skeleton definition (e.g. "COCO_133", "HALPE_26").
+
+    Returns:
+        SkeletonBase: An instance of SkeletonBase or a subclass (e.g. COCO133Skeleton).
+
+    Raises:
+        ValueError: If no skeleton definition with the given name exists.
+    """
+    if skeleton_name == "COCO_133":
+        return COCO133Skeleton()
+    try:
+        skeleton_def = get_skeleton_definition(skeleton_name)
+        return SkeletonBase(skeleton_def, skeleton_name)
+    except ValueError:
+        raise ValueError(f"No skeleton definition found for '{skeleton_name}'")

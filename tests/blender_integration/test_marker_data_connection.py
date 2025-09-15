@@ -35,7 +35,7 @@ def test_connect_marker_data_to_3d_view():
     )
 
     # 2. Create a MarkerData instance
-    marker_data = MarkerData.create_new("Test3DData", skeleton._skeleton.name)
+    marker_data = MarkerData.create_new("Test3DData", skeleton.name)
 
     # 3. Manually add a keyframe to the MarkerData action
     fcurve = dal.get_or_create_fcurve(marker_data.action, "LHip", "location", index=0) # X-axis
