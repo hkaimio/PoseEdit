@@ -116,8 +116,10 @@ class PersonDataView:
         dal.set_custom_property(obj, PERSON_DEFINITION_REF, person.obj._id if person and person.obj else "")
         dal.set_custom_property(obj, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
         instance = cls(obj)
+        
         instance._init_from_blender_ref(obj)
         instance._create_marker_objects(collection)
+        instance._populate_marker_objects_by_role()
         instance._create_armature()
         instance._init_from_blender_ref(obj)
 
