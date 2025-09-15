@@ -23,7 +23,6 @@ from ..core.person_facade import (
     RealPersonInstanceFacade,
 )
 from ..core.skeleton import COCO133Skeleton
-from ..pose2sim.skeletons import COCO_133
 from . import dal, scene_builder
 
 
@@ -95,8 +94,7 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
             if json_dir.is_dir():
                 # For now, we'll hardcode the COCO-133 skeleton.
                 # This should be a user choice later.
-                skeleton_def = COCO_133
-                skeleton = COCO133Skeleton(skeleton_def)
+                skeleton = COCO133Skeleton()
 
                 view = create_camera_view(
                     name=camera_name, video_file=videos_dir / video_file, pose_data_dir=json_dir, skeleton_obj=skeleton
@@ -177,8 +175,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
         camera_views = CameraView.get_all()
 
         # For now, hardcode skeleton. In future, this should be from PersonDefinition.
-        skeleton_def = COCO_133
-        skeleton = COCO133Skeleton(skeleton_def)
+        skeleton = COCO133Skeleton()
 
         for i, cam_view in enumerate(camera_views):
             cam_view_name = dal.get_custom_property(cam_view._obj, dal.SERIES_NAME)
@@ -188,7 +185,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
 
             # Create MarkerData for the Real Person in this view
             real_person_md_name = f"{person_obj_ref.name}.{cam_view_name}"
-            real_person_md = MarkerData.create_new(real_person_md_name, skeleton._skeleton.name)
+            real_person_md = MarkerData.create_new(real_person_md_name, skeleton.name)
 
             # Create PersonDataView for the Real Person in this view
             real_person_pv_name = f"PV.{person_obj_ref.name}.{cam_view_name}"
@@ -241,8 +238,7 @@ class PE_OT_AssignTrack(bpy.types.Operator):
 
         # TODO: This is a temporary way to get a skeleton. This should
         # be retrieved from the RealPersonInstance in the future.
-        skeleton_def = COCO_133
-        skeleton = COCO133Skeleton(skeleton_def)
+        skeleton = COCO133Skeleton()
 
         persons = {person.name: person for person in RealPersonInstanceFacade.get_all()}
 

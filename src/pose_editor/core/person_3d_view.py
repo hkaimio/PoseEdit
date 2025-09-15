@@ -46,7 +46,7 @@ class Person3DView:
         )
 
         dal.set_custom_property(view_root_object, dal.POSE_EDITOR_OBJECT_TYPE, "Person3DView")
-        dal.set_custom_property(view_root_object, dal.SKELETON, skeleton._skeleton.name)
+        dal.set_custom_property(view_root_object, dal.SKELETON, skeleton.name)
         dal.set_custom_property(view_root_object, dal.COLOR, color)
 
         instance = cls(view_root_object)

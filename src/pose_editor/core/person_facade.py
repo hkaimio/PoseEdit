@@ -3,11 +3,12 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 
+from typing import Optional
 from ..blender import dal
 from .marker_data import MarkerData
-from .person_data_view import PersonDataView
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
+PERSON_DEFINITION_REF = dal.CustomProperty[str]("person_definition_ref")
 IS_REAL_PERSON_INSTANCE = dal.CustomProperty[bool]("is_real_person_instance")
 ACTIVE_TRACK_INDEX = dal.CustomProperty[int]("active_track_index")
 PERSON_NAME = dal.CustomProperty[str]("person_name")
@@ -63,6 +64,21 @@ class RealPersonInstanceFacade:
         if obj_type != "Person":
             return None
         return cls(obj_ref)
+    
+    @classmethod
+    def get_by_id(cls, object_id: str) -> Optional["RealPersonInstanceFacade"]:
+        """Finds a RealPersonInstanceFacade by its unique object ID.
+
+        Args:
+            object_id: The unique ID of the RealPersonInstanceFacade object.
+
+        Returns:
+            A RealPersonInstanceFacade instance if found, otherwise None.
+        """
+        obj_ref = dal.find_object_by_property(PERSON_DEFINITION_ID, object_id)
+        if not obj_ref:
+            return None
+        return cls.from_blender_obj(obj_ref)
 
     @classmethod
     def get_all(cls) -> list["RealPersonInstanceFacade"]:
@@ -123,6 +139,8 @@ class RealPersonInstanceFacade:
     ):
         """Assigns a new source track for a segment of the timeline."""
 
+        from .person_data_view import PersonDataView
+        
         end_frame = self.find_next_stitch_frame(view_name, start_frame)
         if end_frame < start_frame:
             print(f"End frame {end_frame} is before start frame {start_frame}, aborting stitch.")

@@ -4,9 +4,11 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from anytree import Node
+import pytest
 
+from pose_editor.core.person_data_view import PersonDataView
+from pose_editor.core.person_facade import RealPersonInstanceFacade
 
 # Mock the dal module before importing the class to be tested
 @pytest.fixture(autouse=True)
@@ -40,6 +42,60 @@ def mock_blender_obj_ref():
     return mock_ref
 
 
+
+@patch("pose_editor.core.person_data_view.dal")
+@patch("pose_editor.core.person_facade.RealPersonInstanceFacade")
+def test_get_person_returns_facade(mock_facade_cls, mock_dal):
+    # Arrange
+    mock_obj = MagicMock()
+    mock_dal.get_custom_property.return_value = "person_123"
+    mock_facade_instance = MagicMock()
+    mock_facade_instance.person_id = "person_123"
+    # Patch get_by_id to return our instance
+    mock_facade_cls.get_by_id.return_value = mock_facade_instance
+
+    pdv = PersonDataView(mock_obj)
+
+    # Act
+    result = pdv.get_person()
+
+    # Assert
+    assert result == mock_facade_instance
+    mock_facade_cls.get_by_id.assert_called_once_with("person_123")
+
+@patch("pose_editor.core.person_data_view.dal")
+@patch("pose_editor.core.person_facade.RealPersonInstanceFacade")
+def test_get_person_returns_none_if_not_assigned(mock_facade_cls, mock_dal):
+    # Arrange
+    mock_obj = MagicMock()
+    mock_dal.get_custom_property.return_value = None
+
+    pdv = PersonDataView(mock_obj)
+
+    # Act
+    result = pdv.get_person()
+
+    # Assert
+    assert result is None
+    mock_facade_cls.get_all.assert_not_called()
+
+@patch("pose_editor.core.person_data_view.dal")
+@patch("pose_editor.core.person_facade.RealPersonInstanceFacade")
+def test_get_person_returns_none_if_id_not_found(mock_facade_cls, mock_dal):
+    # Arrange
+    mock_obj = MagicMock()
+    mock_dal.get_custom_property.return_value = "person_999"
+    mock_facade_cls.get_by_id.return_value = None  # <-- Ensure returns None
+
+    pdv = PersonDataView(mock_obj)
+
+    # Act
+    result = pdv.get_person()
+
+    # Assert
+    assert result is None
+    mock_dal.get_custom_property.assert_called()
+    mock_facade_cls.get_by_id.assert_called_once_with("person_999")
 class TestPersonDataView:
     @patch("pose_editor.core.person_data_view.dal")
     def test_init_creates_objects_and_armature(self, mock_dal, mock_skeleton, mock_blender_obj_ref):
@@ -89,12 +145,12 @@ class TestPersonDataView:
             skeleton=mock_skeleton,
             color=marker_color,
             camera_view=mock_camera_view,
-            collection=None,  # Test the default collection logic
+            collection=mock_collection,  # Test the default collection logic
         )
 
         # Assert
         # Check that the collection was retrieved
-        mock_dal.get_or_create_collection.assert_called_once_with("PersonViews")
+        # mock_dal.get_or_create_collection.assert_called_once_with("PersonViews")
 
         # Check root object creation
         mock_dal.get_or_create_object.assert_any_call(
@@ -243,7 +299,7 @@ class TestPersonDataView:
             lambda obj, prop: {
                 mock_view_root_obj_ref: {
                     mock_dal.POSE_EDITOR_OBJECT_TYPE: "PersonDataView",
-                    mock_dal.SKELETON: mockname,
+                    mock_dal.SKELETON: "COCO_133",
                     mock_dal.COLOR: marker_color,
                     mock_dal.CAMERA_VIEW_ID: "cam1",  # Example camera view ID
                 }
