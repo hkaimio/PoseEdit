@@ -7,10 +7,10 @@
 import itertools as it
 from typing import Dict, List, NamedTuple, Optional
 
-try:
-    import cv2
-except ImportError:
-    print("Warning: OpenCV (cv2) is not installed. Triangulation functions will not work.")
+# try:
+#     import cv2
+# except ImportError:
+#     print("Warning: OpenCV (cv2) is not installed. Triangulation functions will not work.")
 import numpy as np
 
 
@@ -19,6 +19,58 @@ class TriangulationOutput(NamedTuple):
     point_3d: np.ndarray  # Shape (3,) for (x, y, z)
     contributing_cameras: List[str]  # Names of cameras used
     reprojection_error: float
+
+
+def rodrigues(rotation_vector) -> np.ndarray:
+    """
+    Converts a rotation vector to a rotation matrix using Rodrigues' formula.
+    Equivalent to cv2.Rodrigues in OpenCV.
+    """
+    theta = np.linalg.norm(rotation_vector)
+    if theta < 1e-6:
+        return np.eye(3)
+
+    r = rotation_vector / theta
+    rx, ry, rz = r
+    K = np.array([
+        [0, -rz, ry],
+        [rz, 0, -rx],
+        [-ry, rx, 0]
+    ])
+    R = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+    return R
+
+
+def svd_numpy(A):
+    # Step 1: Compute AᵀA
+    ATA = A.T @ A
+
+    # Step 2: Eigen-decomposition of AᵀA
+    eigvals, V = np.linalg.eigh(ATA)
+
+    # Step 3: Sort eigenvalues and eigenvectors in descending order
+    sorted_indices = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[sorted_indices]
+    V = V[:, sorted_indices]
+
+    # Step 4: Compute singular values (√eigenvalues)
+    singular_values = np.sqrt(np.maximum(eigvals, 0))  # Ensure non-negative
+
+    # Step 5: Compute U = A V Σ⁻¹
+    nonzero_mask = singular_values > 1e-10
+    Sigma_inv = np.zeros_like(singular_values)
+    Sigma_inv[nonzero_mask] = 1.0 / singular_values[nonzero_mask]
+    U = A @ V
+    U = U * Sigma_inv[np.newaxis, :]
+
+    # Step 6: Orthonormalize U
+    U = np.linalg.qr(U)[0]
+
+    # Step 7: Construct Σ matrix
+    S = np.zeros_like(A, dtype=float)
+    np.fill_diagonal(S, singular_values)
+
+    return U, singular_values, V
 
 
 # Helper functions from the prototype
@@ -30,7 +82,7 @@ def weighted_triangulation(P_all, x_all, y_all, likelihood_all):
         A = np.vstack((A, (P_cam[1] - y_all[c] * P_cam[2]) * likelihood_all[c]))
 
     if np.shape(A)[0] >= 4:
-        S, U, Vt = cv2.SVDecomp(A)
+        S, U, Vt = svd_numpy(A)
         V = Vt.T
         Q = np.array([V[0][3] / V[3][3], V[1][3] / V[3][3], V[2][3] / V[3][3], 1])
     else:
@@ -84,7 +136,7 @@ def triangulate_point(
             
             # Construct projection matrix P = K * [R|t]
             K = np.array(calib["matrix"])
-            R = cv2.Rodrigues(np.array(calib["rotation"]))[0]
+            R = rodrigues(np.array(calib["rotation"]))[0]
             t = np.array(calib["translation"]).reshape(3, 1)
             Rt = np.hstack((R, t))
             P = K @ Rt

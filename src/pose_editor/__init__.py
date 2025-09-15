@@ -11,9 +11,15 @@ from .blender.operators import (
     PE_OT_CreateProject,
     PE_OT_LoadCameraViews,
     PE_OT_LoadCalibration,
+    PE_OT_TriangulatePerson,
 )
 from .blender.properties import CameraViewSettings, StitchingUIItem, StitchingUIState
-from .ui.panels import PE_PT_ProjectPanel, PE_PT_StitchingPanel, PE_PT_ViewPanel
+from .ui.panels import (
+    PE_PT_3DPipelinePanel,
+    PE_PT_ProjectPanel,
+    PE_PT_StitchingPanel,
+    PE_PT_ViewPanel,
+)
 
 
 class PE_OT_dummy(bpy.types.Operator):
@@ -34,9 +40,11 @@ _classes = [
     PE_OT_LoadCalibration,
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
+    PE_OT_TriangulatePerson,
     PE_PT_ProjectPanel,
     PE_PT_ViewPanel,
     PE_PT_StitchingPanel,
+    PE_PT_3DPipelinePanel,
     StitchingUIItem,
     StitchingUIState,
     CameraViewSettings,

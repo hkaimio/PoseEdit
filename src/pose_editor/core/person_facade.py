@@ -243,6 +243,7 @@ class RealPersonInstanceFacade:
         """Performs 3D triangulation for this person over a frame range."""
 
         from .person_data_view import PersonDataView
+        from .person_3d_view import Person3DView
 
         # 1. Get calibration data
         calibration = Calibration()
@@ -309,7 +310,7 @@ class RealPersonInstanceFacade:
         output_locations = np.full((num_frames, num_markers * 3), np.nan)
         output_reprojection_errors = np.full((num_frames, num_markers), np.nan)
 
-        calib_by_cam = calibration.get_all_camera_calibrations()
+        calib_by_cam = calibration._data
 
         for frame_offset, frame in enumerate(range(frame_start, frame_end + 1)):
             for marker_idx, marker_node in enumerate(marker_nodes):

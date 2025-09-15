@@ -113,3 +113,21 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
 
         layout.operator("pose_editor.assign_track", text="Assign Source at Current Frame")
         layout.operator("pose_editor.load_camera_views")
+
+
+class PE_PT_3DPipelinePanel(bpy.types.Panel):
+    """Creates a Panel in the 3D Viewport sidebar for the 3D Pipeline."""
+
+    bl_label = "3D Pipeline"
+    bl_idname = "PE_PT_3DPipelinePanel"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Pose Editor"
+    bl_parent_id = "PE_PT_ProjectPanel"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+
+        # Operator to triangulate selected persons
+        layout.operator("pose_editor.triangulate_person", text="Triangulate Selected Persons")
