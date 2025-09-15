@@ -4,9 +4,20 @@
 
 
 from typing import Optional
+
+import numpy as np
+from anytree import PreOrderIter
+
 from ..blender import dal
-from .marker_data import MarkerData
 from ..blender.dal import CAMERA_VIEW_ID, BlenderObjRef
+from .calibration import Calibration
+from .camera_view import CameraView
+from .marker_data import MarkerData
+from .person_3d_view import Person3DView
+from .person_data_view import PersonDataView
+from .skeleton import get_skeleton
+from .triangulation import TriangulationOutput, triangulate_point
+
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
 PERSON_DEFINITION_REF = dal.CustomProperty[str]("person_definition_ref")
@@ -230,3 +241,120 @@ class RealPersonInstanceFacade:
 
         target_md.apply_to_view(pv)
         print(f"Re-connected PersonDataView {pv} to action.")
+
+    def triangulate(self, frame_start: int, frame_end: int):
+        """Performs 3D triangulation for this person over a frame range."""
+        # 1. Get calibration data
+        calibration = Calibration.from_scene()
+        if not calibration:
+            print("Error: Calibration data not found in scene.")
+            return
+
+        # 2. Get all 2D data views for this person
+        all_pdvs = PersonDataView.get_all()
+        person_pdvs = [
+            pdv
+            for pdv in all_pdvs
+            if pdv.get_person() and pdv.get_person().person_id == self.person_id
+        ]
+
+        if not person_pdvs:
+            print(f"Error: No 2D data views found for person {self.name}")
+            return
+
+        # Assume all views share the same skeleton
+        skeleton = person_pdvs[0].skeleton
+        if not skeleton:
+            print("Error: Skeleton not found for person data views.")
+            return
+
+        # 3. Create 3D View and MarkerData if they don't exist
+        person_3d_view_name = f"P3D.{self.name}"
+        person_3d_view = Person3DView.create_new(
+            view_name=person_3d_view_name,
+            skeleton=skeleton,
+            color=(0.8, 0.8, 0.8, 1.0),  # Default color for 3D view
+            parent_ref=self.obj,
+        )
+
+        marker_data_3d_name = f"{self.name}_3D"
+        marker_data_3d = MarkerData.create_new(
+            series_name=marker_data_3d_name, skeleton_name=skeleton.name, person=self
+        )
+
+        # 4. Loop through frames and markers, collecting triangulation results
+        num_frames = frame_end - frame_start + 1
+        marker_nodes = [node for node in PreOrderIter(skeleton._skeleton) if hasattr(node, "id") and node.id is not None]
+        num_markers = len(marker_nodes)
+
+        # Prepare NumPy arrays to hold the final 3D data
+        output_locations = np.full((num_frames, num_markers * 3), np.nan)
+        output_reprojection_errors = np.full((num_frames, num_markers), np.nan)
+
+        calib_by_cam = calibration.get_all_camera_calibrations()
+
+        for frame_offset, frame in enumerate(range(frame_start, frame_end + 1)):
+            for marker_idx, marker_node in enumerate(marker_nodes):
+                marker_name = marker_node.name
+
+                # 5. Gather 2D data for this marker at this frame from all views
+                points_2d_by_camera = {}
+                for pdv in person_pdvs:
+                    cam_view = pdv.get_camera_view()
+                    if not cam_view or not cam_view._obj:
+                        continue
+                    
+                    cam_name = dal.get_custom_property(cam_view._obj, dal.SERIES_NAME)
+                    if not cam_name:
+                        continue
+
+                    marker_data_2d = pdv.get_data_series()
+                    if not marker_data_2d or not marker_data_2d.action:
+                        continue
+
+                    # Get F-Curves for x, y, quality
+                    fcurve_x = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0)
+                    fcurve_y = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 1)
+                    fcurve_quality = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, '["quality"]', -1)
+
+                    if fcurve_x and fcurve_y and fcurve_quality:
+                        x = fcurve_x.evaluate(frame)
+                        y = fcurve_y.evaluate(frame)
+                        quality = fcurve_quality.evaluate(frame)
+                        points_2d_by_camera[cam_name] = np.array([x, y, quality])
+
+                # 6. Triangulate the point
+                if len(points_2d_by_camera) >= 2:
+                    result: TriangulationOutput | None = triangulate_point(
+                        points_2d_by_camera=points_2d_by_camera,
+                        calibration_by_camera=calib_by_cam,
+                    )
+
+                    # 7. Collect results
+                    if result:
+                        loc_col_start = marker_idx * 3
+                        output_locations[frame_offset, loc_col_start : loc_col_start + 3] = result.point_3d
+                        output_reprojection_errors[frame_offset, marker_idx] = result.reprojection_error
+
+        # 8. Write collected data to the 3D MarkerData action
+        columns_to_write = []
+        for marker_node in marker_nodes:
+            marker_name = marker_node.name
+            columns_to_write.append((marker_name, "location", 0))  # X
+            columns_to_write.append((marker_name, "location", 1))  # Y
+            columns_to_write.append((marker_name, "location", 2))  # Z
+        
+        marker_data_3d.set_animation_data_from_numpy(columns_to_write, frame_start, output_locations)
+
+        # Write reprojection error
+        reproj_cols = []
+        for marker_node in marker_nodes:
+            marker_name = marker_node.name
+            reproj_cols.append((marker_name, '["reprojection_error"]', -1))
+        
+        marker_data_3d.set_animation_data_from_numpy(reproj_cols, frame_start, output_reprojection_errors)
+
+        # Connect the MarkerData to the Person3DView
+        marker_data_3d.apply_to_view(person_3d_view)
+
+        print(f"Triangulation complete for {self.name}.")

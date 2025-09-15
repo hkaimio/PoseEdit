@@ -7,7 +7,10 @@
 import itertools as it
 from typing import Dict, List, NamedTuple, Optional
 
-import cv2
+try:
+    import cv2
+except ImportError:
+    print("Warning: OpenCV (cv2) is not installed. Triangulation functions will not work.")
 import numpy as np
 
 
