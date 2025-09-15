@@ -159,25 +159,15 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
             return {"CANCELLED"}
 
         # Check if a person with this name already exists
-        existing_person = dal.get_object_by_name(self.person_name)
-        if existing_person and dal.get_custom_property(
-            existing_person, IS_REAL_PERSON_INSTANCE
-        ):
-            self.report({"ERROR"}, f"A Real Person named '{self.person_name}' already exists.")
-            return {"CANCELLED"}
+        existing_persons = RealPersonInstanceFacade.get_all()
+        for person in existing_persons:
+            if person.name == self.person_name:
+                self.report({"ERROR"}, f"A Real Person named '{self.person_name}' already exists.")
+                return {"CANCELLED"}
 
-        # Create the master Empty object for the RealPersonInstance
-        person_obj_ref = dal.get_or_create_object(
-            name=self.person_name,
-            obj_type="EMPTY",
-            collection_name="RealPersons",  # Assuming a collection for RealPersons
-        )
-
-        # Set custom properties to identify it as a RealPersonInstance
-        dal.set_custom_property(person_obj_ref, IS_REAL_PERSON_INSTANCE, True)
-        dal.set_custom_property(
-            person_obj_ref, PERSON_DEFINITION_ID, self.person_name
-        )  # For now, name is also definition ID
+        # Create the master Empty object for the RealPersonInstance using the facade
+        person_facade = RealPersonInstanceFacade.create_new(self.person_name)
+        person_obj_ref = person_facade.obj
 
         # Add this person to the UI state collection
         self._update_ui_state(context)
@@ -254,12 +244,16 @@ class PE_OT_AssignTrack(bpy.types.Operator):
         skeleton_def = COCO_133
         skeleton = COCO133Skeleton(skeleton_def)
 
+        persons = {person.name: person for person in RealPersonInstanceFacade.get_all()}
+
         for item in stitching_ui_state.items:
             person_ref = dal.get_object_by_name(item.person_name)
             if not person_ref:
                 continue
 
-            facade = RealPersonInstanceFacade(person_ref)
+            facade = persons.get(item.person_name)
+            if not facade:
+                continue
 
             current_track_index = facade.get_active_track_index_at_frame(view_name, start_frame)
             selected_track_index = int(item.selected_track)

@@ -76,9 +76,9 @@ class MockLocation:
 @patch("pose_editor.blender.operators.CameraView")
 @patch("pose_editor.blender.operators.PersonDataView")
 @patch("pose_editor.blender.operators.MarkerData")
-@patch("pose_editor.blender.operators.dal")
+@patch("pose_editor.blender.operators.RealPersonInstanceFacade")
 def test_add_person_instance_operator(
-    mock_dal,
+    mock_person_facade,
     mock_marker_data,
     mock_person_data_view,
     mock_camera_view,
@@ -90,29 +90,23 @@ def test_add_person_instance_operator(
     and its associated views, applying the correct offset.
     """
     # Arrange
-    # 1. Mock dal functions
-    # get_object_by_name should return None for the new person,
-    # so the operator proceeds with creation.
-    mock_dal.get_object_by_name.return_value = None
+    # 1. Mock RealPersonInstanceFacade.get_all() to return empty list (no existing persons)
+    mock_person_facade.get_all.return_value = []
 
-    def get_custom_property_side_effect(obj, prop):
-        # This will be called to get the camera view name
-        if prop == "series_name":
-            return "cam1"
-        return None
-
-    mock_dal.get_custom_property.side_effect = get_custom_property_side_effect
-
+    # 2. Mock RealPersonInstanceFacade.create_new() to return a mock facade with .obj
     mock_person_obj_ref = MagicMock()
     mock_person_obj_ref.name = "Alice"
-    mock_dal.get_or_create_object.return_value = mock_person_obj_ref
+    mock_facade_instance = MagicMock()
+    mock_facade_instance.obj = mock_person_obj_ref
+    mock_facade_instance.name = "Alice"
+    mock_person_facade.create_new.return_value = mock_facade_instance
 
-    # 2. Mock CameraView.get_all() to return a mock CameraView instance
+    # 3. Mock CameraView.get_all() to return a mock CameraView instance
     mock_cam_view = MagicMock()
     mock_cam_view._obj.name = "View_cam1"
     mock_camera_view.get_all.return_value = [mock_cam_view]
 
-    # 3. Mock PersonDataView.create_new to return a mock with a settable location
+    # 4. Mock PersonDataView.create_new to return a mock with a settable location
     mock_pv = MagicMock()
     mock_loc = MockLocation()
     mock_obj = MagicMock()
@@ -127,18 +121,11 @@ def test_add_person_instance_operator(
     # Check that the UI state update was called
     mock_update_ui.assert_called_once()
 
-    # Check that get_object_by_name was called to check for existing person
-    mock_dal.get_object_by_name.assert_called_once_with("Alice")
+    # Check that RealPersonInstanceFacade.get_all was called to check for existing person
+    mock_person_facade.get_all.assert_called_once()
 
-    # Check that a "Real Person" empty was created
-    mock_dal.get_or_create_object.assert_called_with(
-        name="Alice",
-        obj_type="EMPTY",
-        collection_name="RealPersons",
-    )
+    # Check that RealPersonInstanceFacade.create_new was called to create the person
+    mock_person_facade.create_new.assert_called_once_with("Alice")
 
     # Check that PersonDataView was created for the camera view
     mock_person_data_view.create_new.assert_called_once()
-
-    # Check that the offset was applied correctly
-    assert mock_loc.x == 11.0

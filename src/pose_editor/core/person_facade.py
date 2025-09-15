@@ -10,7 +10,8 @@ from .person_data_view import PersonDataView
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
 IS_REAL_PERSON_INSTANCE = dal.CustomProperty[bool]("is_real_person_instance")
 ACTIVE_TRACK_INDEX = dal.CustomProperty[int]("active_track_index")
-
+PERSON_NAME = dal.CustomProperty[str]("person_name")
+POSE_EDITOR_OBJECT_TYPE = dal.CustomProperty[str]("pose_editor_object_type")
 
 class RealPersonInstanceFacade:
     """A facade for a Real Person Instance.
@@ -20,9 +21,59 @@ class RealPersonInstanceFacade:
     """
 
     def __init__(self, person_instance_obj: dal.BlenderObjRef):
+        """Do not instantiate directly; use create_new or from_blender_obj.
+        """        
         self.obj = person_instance_obj
-        # A more robust implementation would not rely on name parsing
-        self.person_id = person_instance_obj.name
+        self.person_id = dal.get_custom_property(person_instance_obj, PERSON_NAME) or person_instance_obj.name
+        self.name = dal.get_custom_property(person_instance_obj, PERSON_NAME) 
+
+    @classmethod
+    def create_new(cls, person_name: str) -> "RealPersonInstanceFacade":
+        """
+        Creates a new persistent RealPersonInstance object in Blender.
+
+        Args:
+            person_name: Unique name for this person.
+
+        Returns:
+            RealPersonInstanceFacade: The newly created instance.
+        """
+        obj_name = f"PI.{person_name}"
+        person_obj = dal.get_or_create_object(
+            name=obj_name, obj_type="EMPTY", collection_name="Persons"
+        )
+        dal.set_custom_property(person_obj, PERSON_NAME, person_name)
+        dal.set_custom_property(person_obj, POSE_EDITOR_OBJECT_TYPE, "Person")
+        return cls(person_obj)
+
+    @classmethod
+    def from_blender_obj(cls, obj_ref: dal.BlenderObjRef) -> "RealPersonInstanceFacade | None":
+        """
+        Initializes RealPersonInstanceFacade from an existing Blender object.
+
+        Args:
+            obj_ref: BlenderObjRef pointing to the person Empty.
+
+        Returns:
+            RealPersonInstanceFacade | None: The initialized instance, or None if not valid.
+        """
+        if not obj_ref or not obj_ref._get_obj():
+            return None
+        obj_type = dal.get_custom_property(obj_ref, POSE_EDITOR_OBJECT_TYPE)
+        if obj_type != "Person":
+            return None
+        return cls(obj_ref)
+
+    @classmethod
+    def get_all(cls) -> list["RealPersonInstanceFacade"]:
+        """
+        Returns all RealPersonInstanceFacade objects found in the Blender file.
+
+        Returns:
+            List of RealPersonInstanceFacade instances.
+        """
+        all_objs = dal.find_all_objects_by_property(POSE_EDITOR_OBJECT_TYPE, "Person")
+        return [cls(obj) for obj in all_objs]
 
     def _get_dataseries_for_view(self, view_name: str) -> dal.BlenderObjRef | None:
         """Finds the data series object for this person in a specific view."""
