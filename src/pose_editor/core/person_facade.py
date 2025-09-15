@@ -375,3 +375,39 @@ class RealPersonInstanceFacade:
                         loc_col_start = marker_idx * 3
                         output_locations[frame_offset, loc_col_start : loc_col_start + 3] = result.point_3d
                         output_reprojection_errors[frame_offset, marker_idx] = result.reprojection_error
+
+        # 8. Define the columns for the NumPy array and write to F-Curves
+        columns_3d = []
+        for marker_idx, marker_node in enumerate(marker_nodes):
+            marker_name = marker_node.name
+            # Location (X, Y, Z)
+            columns_3d.append((marker_name, "location", 0))
+            columns_3d.append((marker_name, "location", 1))
+            columns_3d.append((marker_name, "location", 2))
+
+        # For metadata, we need a separate array and column definition
+        columns_meta = []
+        for marker_idx, marker_node in enumerate(marker_nodes):
+            marker_name = marker_node.name
+            columns_meta.append((marker_name, '["reprojection_error"]', -1))
+
+        # Combine location and reprojection error data into one array for writing
+        # The final array needs to match the combined column definitions
+        final_data_array = np.hstack((output_locations, output_reprojection_errors))
+        final_columns = columns_3d + columns_meta
+
+        print(f"Writing {final_data_array.shape} data array to action {marker_data_3d.action.name}...")
+
+        # Use the DAL to write the numpy data to the action's f-curves
+        dal.replace_fcurve_segment_from_numpy(
+            action=marker_data_3d.action,
+            columns=final_columns,
+            start_frame=frame_start,
+            end_frame=frame_end,
+            data=final_data_array,
+        )
+
+        # 9. Connect the 3D view to the newly populated MarkerData
+        person_3d_view.connect_to_series(marker_data_3d)
+
+        print("Triangulation data successfully written to f-curves.")

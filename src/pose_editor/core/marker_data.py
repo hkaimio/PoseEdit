@@ -32,7 +32,7 @@ class MarkerData:
         action, such as its `series_name` and the `skeleton` type it uses.
     """
 
-    def __init__(self, series_name: str, skeleton_name: str | None = None, action=None, data_series_object=None):
+    def __init__(self, obj: dal.BlenderObjRef, series_name: str, skeleton_name: str | None = None, action=None, data_series_object=None):
         """
         Initializes the MarkerData object as a runtime instance.
 
@@ -42,6 +42,7 @@ class MarkerData:
             action: Blender Action object associated with this data series.
             data_series_object: Blender Empty object holding metadata for this data series.
         """
+        self._obj = obj
         self.series_name = series_name
         self.action_name = f"AC.{series_name}"
         self.data_series_object_name = f"DS.{series_name}"
@@ -78,7 +79,7 @@ class MarkerData:
 
         action = dal.get_or_create_action(f"AC.{series_name}")
 
-        return cls(series_name, skeleton_name, action=action, data_series_object=data_series_object)
+        return cls(data_series_object, series_name, skeleton_name, action=action, data_series_object=data_series_object)
 
     @classmethod
     def from_blender_object(cls, data_series_obj_ref: dal.BlenderObjRef) -> "MarkerData | None":
@@ -101,7 +102,7 @@ class MarkerData:
         action_name = dal.get_custom_property(data_series_obj_ref, dal.ACTION_NAME)
         action = dal.get_or_create_action(action_name) if action_name else None
 
-        return cls(series_name, skeleton_name, action=action, data_series_object=data_series_obj_ref)
+        return cls(data_series_obj_ref, series_name, skeleton_name, action=action, data_series_object=data_series_obj_ref)
 
     def set_animation_data(
         self,

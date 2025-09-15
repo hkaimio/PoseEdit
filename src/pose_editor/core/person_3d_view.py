@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 from anytree import PreOrderIter
 
 from ..blender import dal, dal3d
+from .marker_data import MarkerData
 from .skeleton import SkeletonBase, get_skeleton
 
 if TYPE_CHECKING:
@@ -121,6 +122,25 @@ class Person3DView:
         """Returns a dictionary of marker objects in this view, keyed by their role."""
         return self._marker_objects_by_role
 
+    def connect_to_series(self, marker_data: MarkerData):
+        """Connects the marker objects in this view to a MarkerData action.
+
+        Args:
+            marker_data: The MarkerData instance containing the animation action.
+        """
+        if not marker_data or not marker_data.action:
+            print(f"Warning: Cannot connect Person3DView to an invalid MarkerData series.")
+            return
+
+        # Store the ID of the MarkerData this view is connected to
+        dal.set_custom_property(self.view_root_object, dal.MARKER_DATA_ID, marker_data._obj._id)
+
+        # Assign the action to each marker object, targeting the correct slot
+        for role, marker_obj_ref in self._marker_objects_by_role.items():
+            dal.assign_action_to_object(marker_obj_ref, marker_data.action, slot_name=role)
+
+        print(f"Connected 3D view '{self.view_root_object.name}' to action '{marker_data.action.name}'.")
+
     def _create_marker_objects(self):
         """Creates a marker object for each joint in the skeleton."""
         collection = self.view_root_object._get_obj().users_collection[0]
@@ -184,9 +204,6 @@ class Person3DView:
 
     def _create_drivers(self):
         """Creates drivers for the virtual markers based on hardcoded rules."""
-        # This implementation is based on the design for COCO133 skeleton.
-        # A more generic solution would require a data-driven way to define these relationships.
-
         virtual_definitions = {
             "Hip": ("LHip", "RHip"),
             "Neck": ("LShoulder", "RShoulder"),
@@ -200,10 +217,26 @@ class Person3DView:
             if not (virtual_marker and source1 and source2):
                 continue
 
-            for i, axis in enumerate(["x", "y", "z"]):
-                expression = f"(var1 + var2) / 2"
-                variables = [
-                    ("var1", "TRANSFORMS", source1.name, f'location.{axis}'),
-                    ("var2", "TRANSFORMS", source2.name, f'location.{axis}'),
-                ]
-                dal3d.add_object_driver(virtual_marker, "location", expression, variables, index=i)
+            # Driver for X-axis
+            expression_x = "(var1 + var2) / 2"
+            variables_x = [
+                ("var1", "TRANSFORMS", source1.name, 'location.x'),
+                ("var2", "TRANSFORMS", source2.name, 'location.x'),
+            ]
+            dal3d.add_object_driver(virtual_marker, "location", expression_x, variables_x, index=0)
+
+            # Driver for Y-axis
+            expression_y = "(var1 + var2) / 2"
+            variables_y = [
+                ("var1", "TRANSFORMS", source1.name, 'location.y'),
+                ("var2", "TRANSFORMS", source2.name, 'location.y'),
+            ]
+            dal3d.add_object_driver(virtual_marker, "location", expression_y, variables_y, index=1)
+
+            # Driver for Z-axis
+            expression_z = "(var1 + var2) / 2"
+            variables_z = [
+                ("var1", "TRANSFORMS", source1.name, 'location.z'),
+                ("var2", "TRANSFORMS", source2.name, 'location.z'),
+            ]
+            dal3d.add_object_driver(virtual_marker, "location", expression_z, variables_z, index=2)
