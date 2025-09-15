@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from .person_data_view import PersonDataView
     from .person_facade import RealPersonInstanceFacade
 
-CAMERA_VIEW_ID = dal.CustomProperty[str]("camera_view_id")
+from ..blender.dal import CAMERA_VIEW_ID
 
 class MarkerData:
     """A facade for a marker data series (model layer).
@@ -73,7 +73,7 @@ class MarkerData:
         dal.set_custom_property(data_series_object, dal.POSE_EDITOR_OBJECT_TYPE, "MarkerData")
         camera_view_id = camera_view._obj.name if camera_view and camera_view._obj else ""
         dal.set_custom_property(data_series_object, CAMERA_VIEW_ID, camera_view_id)
-        person_id = person.person_id if person is not None else ""
+        person_id = person.obj._id if person and person.obj else ""
         dal.set_custom_property(data_series_object, PERSON_DEFINITION_REF, person_id)
 
         action = dal.get_or_create_action(f"AC.{series_name}")

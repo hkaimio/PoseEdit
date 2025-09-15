@@ -185,7 +185,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
 
             # Create MarkerData for the Real Person in this view
             real_person_md_name = f"{person_obj_ref.name}.{cam_view_name}"
-            real_person_md = MarkerData.create_new(real_person_md_name, skeleton.name)
+            real_person_md = MarkerData.create_new(real_person_md_name, skeleton.name, cam_view, person_facade)
 
             # Create PersonDataView for the Real Person in this view
             real_person_pv_name = f"PV.{person_obj_ref.name}.{cam_view_name}"
@@ -195,6 +195,7 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
                 color=color,
                 camera_view=cam_view,
                 collection=None,
+                person=person_facade
             )
 
             # Link PersonDataView to MarkerData
@@ -232,7 +233,7 @@ class PE_OT_AssignTrack(bpy.types.Operator):
         if not active_camera or not active_camera.name.startswith("Cam_"):
             self.report({"ERROR"}, "No active camera view found.")
             return {"CANCELLED"}
-        view_name = active_camera.name.replace("Cam_", "")
+        view_name = "View_" + active_camera.name.replace("Cam_", "")
         pvd_name = f"DS.{view_name}"
 
 

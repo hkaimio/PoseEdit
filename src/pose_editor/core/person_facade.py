@@ -5,7 +5,8 @@
 
 from typing import Optional
 from ..blender import dal
-from .marker_data import MarkerData, CAMERA_VIEW_ID
+from .marker_data import MarkerData
+from ..blender.dal import CAMERA_VIEW_ID, BlenderObjRef
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
 PERSON_DEFINITION_REF = dal.CustomProperty[str]("person_definition_ref")
@@ -44,6 +45,7 @@ class RealPersonInstanceFacade:
             name=obj_name, obj_type="EMPTY", collection_name="Persons"
         )
         dal.set_custom_property(person_obj, PERSON_NAME, person_name)
+        dal.set_custom_property(person_obj, PERSON_DEFINITION_ID, person_obj._id)
         dal.set_custom_property(person_obj, POSE_EDITOR_OBJECT_TYPE, "Person")
         return cls(person_obj)
 
@@ -90,12 +92,17 @@ class RealPersonInstanceFacade:
         """
         all_objs = dal.find_all_objects_by_property(POSE_EDITOR_OBJECT_TYPE, "Person")
         return [cls(obj) for obj in all_objs]
-
+    
     def _get_dataseries_for_view(self, view_name: str) -> dal.BlenderObjRef | None:
         """Finds the data series object for this person in a specific view."""
         # This facade assumes a specific naming convention established by the UI/operators
-        ds_name = f"DS.{self.person_id}.{view_name}"
-        return dal.get_object_by_name(ds_name)
+        all_ds = dal.find_all_objects_by_property(POSE_EDITOR_OBJECT_TYPE, "MarkerData")
+        for ds in all_ds:
+            ds_person_id = dal.get_custom_property(ds, PERSON_DEFINITION_REF)
+            ds_view_id = dal.get_custom_property(ds, CAMERA_VIEW_ID)
+            if ds_person_id == self.person_id and ds_view_id == view_name:
+                return ds
+        return None
 
     def get_active_track_index_at_frame(self, view_name: str, frame: int) -> int:
         """Gets the value of the active_track_index at a specific frame."""
@@ -149,33 +156,46 @@ class RealPersonInstanceFacade:
         print(f"Stitching segment for {self.person_id} in view {view_name} from frame {start_frame} to {end_frame}.")
         print(f"Source track index: {source_track_index}")
 
-        # 1. Get Target and Source MarkerData objects
 
-        marker_refs = dal.find_all_objects_by_property(PERSON_DEFINITION_REF, self.person_id)
-        for mr in marker_refs:
-            view_id = dal.get_custom_property(mr, MarkerData.CAMERA_VIEW_ID)
-            if view_id == view_name:
-                marker_ref = mr
-                break
+        source_md_ref: BlenderObjRef | None = None
+        target_md_ref: BlenderObjRef | None = None
+        all_md = dal.find_all_objects_by_property(POSE_EDITOR_OBJECT_TYPE, "MarkerData")
+        for ds in all_md:
+            if dal.get_custom_property(ds, CAMERA_VIEW_ID) == view_name:
+                if dal.get_custom_property(ds, PERSON_DEFINITION_REF) == self.obj._id:
+                    target_md_ref = ds
+                else:
+                    series_name = dal.get_custom_property(ds, dal.SERIES_NAME) or ""
+                    if series_name.find(f"_person{source_track_index}")>=0:
+                        source_md_ref = ds
 
-        target_ds_name = f"DS.{self.person_id}.{view_name}"
-        marker_ref = dal.get_object_by_name(target_ds_name)
-        if not marker_ref:
-            print(f"Error: Target MarkerData object {target_ds_name} not found.")
+        if not source_md_ref:
+            print(f"Error: Source MarkerData for track index {source_track_index} in view {view_name} not found.")
+            return
+        if not target_md_ref:
+            print(f"Error: Target MarkerData for person {self.person_id} in view {view_name} not found.")
+            return
+        source_md = MarkerData.from_blender_object(source_md_ref)
+        target_md = MarkerData.from_blender_object(target_md_ref)
+
+        if not source_md or not target_md:
+            print("Error: Failed to initialize MarkerData from Blender objects.")
             return
         
-        target_md = MarkerData.from_blender_object(marker_ref)
-        if not target_md:
-            print(f"Error: Target MarkerData {target_ds_name} could not be initialized.")
-            return
+        # Find the PersonDataView for this person and view
+        all_pvs = PersonDataView.get_all()
+        pv = None
+        for person_view in all_pvs:
+            pvp = person_view.get_person()
+            pvcam = person_view.camera_view()
+            if pvp and pvcam and pvcam._obj and pvp.person_id == self.person_id and pvcam._obj.name == view_name:
+                pv = person_view
+                break
 
-        source_ds_name = f"DS.{view_name}_person{source_track_index}"
-        source_ds_obj = dal.get_object_by_name(source_ds_name)
-        if not source_ds_obj:
-            print(f"Error: Source MarkerData object {source_ds_name} not found.")
-            return
-        source_md = MarkerData.from_blender_object(source_ds_obj)
-
+        if not pv:
+            print(f"Error: PersonDataView for person {self.person_id} in view {view_name} not found.")
+            raise ValueError(f"PersonDataView for person {self.person_id} in view {view_name} not found.")
+        
         # 2. Define the columns of data to be copied
         columns_to_copy: list[tuple[str, str, int]] = []
         for joint_node in skeleton._skeleton.descendants:
@@ -187,7 +207,7 @@ class RealPersonInstanceFacade:
             columns_to_copy.append((joint_name, '["quality"]', -1))  # Quality
 
         # 3. Read data from the source action
-        print(f"Reading data from {source_md.action.name}...")
+        print(f"Reading data from {source_md.action.name if source_md.action else 'Unknown'}...")
         source_data_np = dal.get_animation_data_as_numpy(
             source_md.action,
             columns_to_copy,
@@ -197,54 +217,16 @@ class RealPersonInstanceFacade:
         print(f"Read {source_data_np.shape} data array from source.")
 
         # 4. Write data to the target action
-        print(f"Writing data to {target_md.action.name}...")
+        print(f"Writing data to {target_md.action.name if target_md.action else 'Unknown'}...")
         dal.replace_fcurve_segment_from_numpy(target_md.action, columns_to_copy, start_frame, end_frame, source_data_np)
         print("Write complete.")
 
         # 5. Set the keyframe for the active_track_index
-        target_ds_obj = self._get_dataseries_for_view(view_name)
-        if target_ds_obj:
-            print(
-                f"Setting active_track_index keyframe on {target_ds_obj.name} at frame {start_frame} to {source_track_index}"
-            )
-            dal.set_custom_property(target_ds_obj, ACTIVE_TRACK_INDEX, source_track_index)
-            dal.add_keyframe(target_ds_obj, start_frame, {'["active_track_index"]': [source_track_index]})
+        print(
+            f"Setting active_track_index keyframe on {target_md_ref.name} at frame {start_frame} to {source_track_index}"
+        )
+        dal.set_custom_property(target_md_ref, ACTIVE_TRACK_INDEX, source_track_index)
+        dal.add_keyframe(target_md_ref, start_frame, {'["active_track_index"]': [source_track_index]})
 
-        # 6. Re-connect the PersonDataView to the now-populated MarkerData
-        # This ensures the markers animate with the new data
-        real_person_pv_name = f"PV.{self.person_id}.{view_name}"
-        real_person_pv_obj_ref = dal.get_object_by_name(real_person_pv_name)
-
-        # 6. Re-connect the PersonDataView to the now-populated MarkerData
-        # This ensures the markers animate with the new data
-        real_person_pv_name = f"PV.{self.person_id}.{view_name}"
-        real_person_pv_obj_ref = dal.get_object_by_name(real_person_pv_name)
-
-        real_person_pv = PersonDataView.from_blender_object(real_person_pv_obj_ref) if real_person_pv_obj_ref else None
-        if real_person_pv is None:
-            # Fallback: If for some reason the root object doesn't exist or is not valid, create a new one.
-            # This case should ideally not happen if PE_OT_AddPersonInstance worked correctly.
-            print(
-                f"Warning: PersonDataView root object {real_person_pv_name} not found or invalid. Creating a new one."
-            )
-            # We need to get the collection for the PersonDataView constructor
-            person_views_collection = dal.get_or_create_collection("PersonViews")
-            # We need the camera_view_obj_ref to create a new PersonDataView
-            camera_view_obj_ref = dal.get_object_by_name(f"View_{view_name}")
-            if camera_view_obj_ref is None:
-                print(f"Error: CameraView {view_name} not found. Cannot create new PersonDataView.")
-                return  # Or raise an error
-
-            real_person_pv = PersonDataView.create_new(
-                view_name=real_person_pv_name,
-                skeleton=skeleton,  # Skeleton is still needed for new creation
-                color=(1.0, 1.0, 1.0, 1.0),  # Default color for new creation
-                camera_view_obj_ref=camera_view_obj_ref,
-                collection=person_views_collection,
-            )
-            if real_person_pv is None:  # Should not happen if create_new works
-                print(f"Error: Failed to create new PersonDataView {real_person_pv_name}.")
-                return  # Or raise an error
-
-        target_md.apply_to_view(real_person_pv)
-        print(f"Re-connected PersonDataView {real_person_pv_name} to action.")
+        target_md.apply_to_view(pv)
+        print(f"Re-connected PersonDataView {pv} to action.")

@@ -103,7 +103,7 @@ class CameraView:
     @classmethod
     def get_by_id(cls, view_id: str) -> CameraView | None:
         """Finds a CameraView by its unique ID."""
-        camera_view_ref = dal.find_object_by_property(dal.SERIES_NAME, view_id)
+        camera_view_ref = dal.find_object_by_property(dal.CAMERA_VIEW_ID, view_id)
         if camera_view_ref:
             return cls.from_blender_obj(camera_view_ref)
         return None
@@ -243,6 +243,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     camera_view_empty_name = f"View_{name}"
     camera_view._obj = dal.create_empty(camera_view_empty_name)
     dal.set_custom_property(camera_view._obj, SERIES_NAME, name)
+    dal.set_custom_property(camera_view._obj, dal.CAMERA_VIEW_ID, camera_view._obj._id)
     dal.set_custom_property(camera_view._obj, dal.IS_CAMERA_VIEW, True)
     dal.set_custom_property(camera_view._obj, VIEW_START, 1)
 
@@ -317,7 +318,7 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
 
     for person_idx, frames_data in pose_data_by_person.items():
         series_name = f"{name}_person{person_idx}"
-        marker_data = MarkerData.create_new(series_name, "COCO_133")
+        marker_data = MarkerData.create_new(series_name, "COCO_133", camera_view=camera_view)
 
         columns_to_extract = []
         for joint_node in PreOrderIter(skeleton_obj._skeleton):

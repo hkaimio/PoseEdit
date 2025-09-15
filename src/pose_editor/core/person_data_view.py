@@ -11,10 +11,9 @@ if TYPE_CHECKING:
 from .marker_data import MarkerData
 from .skeleton import SkeletonBase, get_skeleton
 from .person_facade import RealPersonInstanceFacade, PERSON_DEFINITION_REF
-
+from ..blender.dal import CAMERA_VIEW_ID
 
 SKELETON_NAME = dal.CustomProperty[str]("skeleton_name")
-CAMERA_VIEW_ID = dal.CustomProperty[str]("camera_view")
 
 class PersonDataView:
     """A facade for a person's 2D data view (View layer).
@@ -113,8 +112,9 @@ class PersonDataView:
         dal.set_custom_property(obj, dal.SERIES_NAME, view_name)
         dal.set_custom_property(obj, SKELETON_NAME, skeleton.name)
         dal.set_custom_property(obj, dal.COLOR, color)
-        dal.set_custom_property(obj, CAMERA_VIEW_ID, getattr(camera_view, "view_id", getattr(camera_view, "name", "")))
-        dal.set_custom_property(obj, PERSON_DEFINITION_REF, person.person_id if person is not None else "")
+        dal.set_custom_property(obj, CAMERA_VIEW_ID, camera_view._obj.name if camera_view and camera_view._obj else "")
+        dal.set_custom_property(obj, PERSON_DEFINITION_REF, person.obj._id if person and person.obj else "")
+        dal.set_custom_property(obj, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
         instance = cls(obj)
         instance._init_from_blender_ref(obj)
         instance._create_marker_objects(collection)
