@@ -50,5 +50,7 @@ test = "pytest"
 dev = [
     "bpy==4.5.0",
     "coverage>=7.10.6",
+    "mypy>=1.18.1",
+    "pytest>=8.4.2",
     "ruff>=0.12.12",
 ]
