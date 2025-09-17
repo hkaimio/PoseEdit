@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 from anytree import PreOrderIter
 
 from ..blender import dal, dal3d
+from .calibration import Calibration
 from .marker_data import MarkerData
 from .skeleton import SkeletonBase, get_skeleton
 
@@ -144,26 +145,33 @@ class Person3DView:
     def _create_marker_objects(self):
         """Creates a marker object for each joint in the skeleton."""
         collection = self.view_root_object._get_obj().users_collection[0]
+        calibration = Calibration()
+        all_camera_names = calibration.get_camera_names() if calibration._data else []
 
         for node in PreOrderIter(self.skeleton._skeleton):
             marker_name = node.name
             marker_ref = None
             if hasattr(node, "id") and node.id is not None:
-                # For 3D, we also need to set the marker role
                 marker_ref = dal3d.create_sphere_marker(
                     parent=self.view_root_object,
                     name=marker_name,
                     color=self.color,
                     collection=collection,
                 )
-                dal.set_custom_property(marker_ref, dal.MARKER_ROLE, marker_name)
             else:
                 marker_ref = dal.create_empty(
                     name=f"{self.view_root_object.name}_{marker_name}",
                     collection=collection,
                     parent_obj=self.view_root_object,
                 )
-                dal.set_custom_property(marker_ref, dal.MARKER_ROLE, marker_name)
+
+            # Initialize all custom properties that will be driven by F-Curves
+            dal.set_custom_property(marker_ref, dal.MARKER_ROLE, marker_name)
+            marker_obj = marker_ref._get_obj()
+            marker_obj["reprojection_error"] = 0.0
+            marker_obj["contributing_cam_count"] = 0
+            for cam_name in all_camera_names:
+                marker_obj[f"contrib_{cam_name}"] = False
 
             self._marker_objects_by_role[marker_name] = marker_ref
 
@@ -217,26 +225,6 @@ class Person3DView:
             if not (virtual_marker and source1 and source2):
                 continue
 
-            # Driver for X-axis
-            expression_x = "(var1 + var2) / 2"
-            variables_x = [
-                ("var1", "TRANSFORMS", source1.name, 'location.x'),
-                ("var2", "TRANSFORMS", source2.name, 'location.x'),
-            ]
-            dal3d.add_object_driver(virtual_marker, "location", expression_x, variables_x, index=0)
-
-            # Driver for Y-axis
-            expression_y = "(var1 + var2) / 2"
-            variables_y = [
-                ("var1", "TRANSFORMS", source1.name, 'location.y'),
-                ("var2", "TRANSFORMS", source2.name, 'location.y'),
-            ]
-            dal3d.add_object_driver(virtual_marker, "location", expression_y, variables_y, index=1)
-
-            # Driver for Z-axis
-            expression_z = "(var1 + var2) / 2"
-            variables_z = [
-                ("var1", "TRANSFORMS", source1.name, 'location.z'),
-                ("var2", "TRANSFORMS", source2.name, 'location.z'),
-            ]
-            dal3d.add_object_driver(virtual_marker, "location", expression_z, variables_z, index=2)
+            dal3d.add_midpoint_driver(
+                target_obj_ref=virtual_marker, source_a_ref=source1, source_b_ref=source2
+            )

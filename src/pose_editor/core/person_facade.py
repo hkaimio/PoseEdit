@@ -251,6 +251,8 @@ class RealPersonInstanceFacade:
             print("Error: Calibration data not found in scene.")
             return
 
+        all_camera_names = calibration.get_camera_names()
+
         # 2. Get all 2D data views for this person
         all_pdvs = PersonDataView.get_all()
         person_pdvs = [
@@ -306,12 +308,13 @@ class RealPersonInstanceFacade:
         marker_nodes = [node for node in PreOrderIter(skeleton._skeleton) if hasattr(node, "id") and node.id is not None]
         num_markers = len(marker_nodes)
 
-        # Prepare NumPy arrays to hold the final 3D data
+        # Prepare NumPy arrays to hold the final 3D data and metadata
         output_locations = np.full((num_frames, num_markers * 3), np.nan)
         output_reprojection_errors = np.full((num_frames, num_markers), np.nan)
+        output_cam_counts = np.zeros((num_frames, num_markers), dtype=int)
+        output_cam_bools = np.zeros((num_frames, num_markers * len(all_camera_names)), dtype=bool)
 
         calib_by_cam = calibration._data
-        printed_debug_info = False
 
         for frame_offset, frame in enumerate(range(frame_start, frame_end + 1)):
             for marker_idx, marker_node in enumerate(marker_nodes):
@@ -332,7 +335,6 @@ class RealPersonInstanceFacade:
                     if not marker_data_2d or not marker_data_2d.action:
                         continue
 
-                    # Get F-Curves for x, y, quality
                     fcurve_x = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0)
                     fcurve_y = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 1)
                     fcurve_quality = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, '["quality"]', -1)
@@ -343,62 +345,60 @@ class RealPersonInstanceFacade:
                         quality = fcurve_quality.evaluate(frame)
                         points_2d_by_camera[calib_cam_name] = np.array([x, y, quality])
 
-                if not printed_debug_info:
-                    print("--- TRIANGULATION DEBUG ---")
-                    print(f"Frame: {frame}, Marker: {marker_name}")
-                    print("2D Points by Camera:")
-                    for cam, pt in points_2d_by_camera.items():
-                        print(f"  {cam}: {pt}")
-                    
-                    print("Calibration Data by Camera:")
-                    for cam, calib in calib_by_cam.items():
-                        print(f"  {cam}: {calib}")
-                    print("---------------------------")
-
-
                 # 6. Triangulate the point
                 if len(points_2d_by_camera) >= 2:
                     result: TriangulationOutput | None = triangulate_point(
                         points_2d_by_camera=points_2d_by_camera,
                         calibration_by_camera=calib_by_cam,
                     )
-                    if not printed_debug_info:
-                        print("Triangulation Result:")
-                        if result:
-                            print(f"  3D Point: {result.point_3d}, Reprojection Error: {result.reprojection_error}, Cameras: {result.contributing_cameras}")
-                        else:
-                            print("  Triangulation failed or insufficient data.")
-                        print("---------------------------")
-                        printed_debug_info = True
                     # 7. Collect results
                     if result:
                         loc_col_start = marker_idx * 3
                         output_locations[frame_offset, loc_col_start : loc_col_start + 3] = result.point_3d
                         output_reprojection_errors[frame_offset, marker_idx] = result.reprojection_error
+                        output_cam_counts[frame_offset, marker_idx] = len(result.contributing_cameras)
+
+                        # Set boolean flags for each camera
+                        for cam_idx, cam_name in enumerate(all_camera_names):
+                            bool_col_start = marker_idx * len(all_camera_names)
+                            output_cam_bools[frame_offset, bool_col_start + cam_idx] = cam_name in result.contributing_cameras
 
         # 8. Define the columns for the NumPy array and write to F-Curves
-        columns_3d = []
+        final_columns = []
         for marker_idx, marker_node in enumerate(marker_nodes):
             marker_name = marker_node.name
             # Location (X, Y, Z)
-            columns_3d.append((marker_name, "location", 0))
-            columns_3d.append((marker_name, "location", 1))
-            columns_3d.append((marker_name, "location", 2))
+            final_columns.append((marker_name, "location", 0))
+            final_columns.append((marker_name, "location", 1))
+            final_columns.append((marker_name, "location", 2))
 
-        # For metadata, we need a separate array and column definition
-        columns_meta = []
         for marker_idx, marker_node in enumerate(marker_nodes):
             marker_name = marker_node.name
-            columns_meta.append((marker_name, '["reprojection_error"]', -1))
+            final_columns.append((marker_name, '["reprojection_error"]', -1))
 
-        # Combine location and reprojection error data into one array for writing
-        # The final array needs to match the combined column definitions
-        final_data_array = np.hstack((output_locations, output_reprojection_errors))
-        final_columns = columns_3d + columns_meta
+        for marker_idx, marker_node in enumerate(marker_nodes):
+            marker_name = marker_node.name
+            final_columns.append((marker_name, '["contributing_cam_count"]', -1))
+
+        for marker_idx, marker_node in enumerate(marker_nodes):
+            marker_name = marker_node.name
+            for cam_idx, cam_name in enumerate(all_camera_names):
+                prop_name = f'["contrib_{cam_name}"]'
+                final_columns.append((marker_name, prop_name, -1))
+
+        # Reshape boolean array to be (num_frames, num_markers * num_cameras)
+        output_cam_bools_reshaped = output_cam_bools.reshape((num_frames, -1))
+
+        # Combine all data into one array for writing
+        final_data_array = np.hstack((
+            output_locations,
+            output_reprojection_errors,
+            output_cam_counts,
+            output_cam_bools_reshaped
+        ))
 
         print(f"Writing {final_data_array.shape} data array to action {marker_data_3d.action.name}...")
 
-        # Use the DAL to write the numpy data to the action's f-curves
         dal.replace_fcurve_segment_from_numpy(
             action=marker_data_3d.action,
             columns=final_columns,
