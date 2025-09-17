@@ -1,7 +1,8 @@
+<!--
 # SPDX-FileCopyrightText: 2025 Harri Kaimio
 #
 # SPDX-License-Identifier: BSD-3-Clause
-
+-->
 # 3D Triangulation Pipeline Design
 
 ## 1. Overview
