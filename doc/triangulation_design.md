@@ -105,7 +105,7 @@ Analogous to the 2D `PersonDataView`, we will introduce a new `Person3DView` cla
 - **3D Usage**:
     - A new `MarkerData` instance will be created for each `RealPersonInstance`'s 3D data (e.g., with series name `Alice_3D`).
     - The triangulation process will call `marker_data.set_animation_data_from_numpy()`.
-    - The `columns` parameter will be configured to write to the 3D `location` (index 0, 1, 2) and to custom properties like `['reprojection_error']` and `['contributing_views']` on the marker objects.
+    - The `columns` parameter will be configured to write to the 3D `location` (index 0, 1, 2) and to custom properties like `['reprojection_error']` and `['contributing_views']` on the marker objects.z§
 
 ### 4.2. `core.person_3d_view.Person3DView`
 - **Purpose**: The "View" layer for 3D. It creates and manages the visible Blender objects for the 3D pose.
