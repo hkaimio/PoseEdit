@@ -12,7 +12,10 @@ from ..core.camera_view import CameraView
 
 def get_available_tracks(self, context):
     """Dynamically gets the list of raw tracks for the active camera view."""
-    items = [("-1", "-- Select a Track --", "")]
+    items = [
+        ("-1", "-- Select a Track --", "Don't change the current track"),
+        ("-2", "None", "Mark this segment as untracked (clears keyframes)"),
+    ]
 
     if not context or not context.space_data or not context.space_data.camera:
         return items
