@@ -99,6 +99,35 @@ class RealPersonInstanceFacade:
         all_objs = dal.find_all_objects_by_property(POSE_EDITOR_OBJECT_TYPE, "Person")
         return [cls(obj) for obj in all_objs]
 
+    def bake_stitching_data(self):
+        """Ensures all on-demand stitching data is copied over.
+
+        Iterates through all frames of all associated views and calls
+        update_frame_if_needed to ensure data consistency before a major
+        operation like triangulation.
+        """
+        from .person_data_view import PersonDataView
+
+        print(f"Baking stitching data for {self.name}...")
+
+        all_pdvs = PersonDataView.get_all()
+        person_pdvs = [
+            pdv
+            for pdv in all_pdvs
+            if pdv.get_person() and pdv.get_person().person_id == self.person_id
+        ]
+
+        if not person_pdvs:
+            return
+
+        scene_start, scene_end = dal.get_scene_frame_range()
+
+        for frame in range(scene_start, scene_end + 1):
+            for pdv in person_pdvs:
+                pdv.update_frame_if_needed(frame)
+        
+        print(f"Finished baking stitching data for {self.name}.")
+
     def _get_dataseries_for_view(self, view_name: str) -> dal.BlenderObjRef | None:
         """Finds the data series object for this person in a specific view."""
         # This facade assumes a specific naming convention established by the UI/operators
