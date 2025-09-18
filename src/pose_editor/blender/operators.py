@@ -244,6 +244,7 @@ class PE_OT_AssignTrack(bpy.types.Operator):
     def execute(self, context):
         from ..blender import dal
         from ..core.person_facade import RealPersonInstanceFacade
+        from ..core.person_data_view import PersonDataView
 
         start_frame = context.scene.frame_current
         stitching_ui_state = context.scene.pose_editor_stitching_ui
@@ -254,32 +255,43 @@ class PE_OT_AssignTrack(bpy.types.Operator):
             self.report({"ERROR"}, "No active camera view found.")
             return {"CANCELLED"}
         view_name = "View_" + active_camera.name.replace("Cam_", "")
-        pvd_name = f"DS.{view_name}"
-
-        # TODO: This is a temporary way to get a skeleton. This should
-        # be retrieved from the RealPersonInstance in the future.
-        skeleton = COCO133Skeleton()
 
         persons = {person.name: person for person in RealPersonInstanceFacade.get_all()}
+        all_pdvs = PersonDataView.get_all()
+        pdvs_by_person_and_view = {}
+        for pdv in all_pdvs:
+            person = pdv.get_person()
+            cam_view = pdv.get_camera_view()
+            if person and cam_view and cam_view._obj.name == view_name:
+                pdvs_by_person_and_view[person.name] = pdv
 
         for item in stitching_ui_state.items:
             facade = persons.get(item.person_name)
             if not facade:
                 continue
 
-            current_track_index = facade.get_active_track_index_at_frame(view_name, start_frame)
+            pdv = pdvs_by_person_and_view.get(facade.name)
+            if not pdv:
+                continue
+
             selected_track_index = int(item.selected_track)
 
-            if selected_track_index != -1 and selected_track_index != current_track_index:
-                print(f"Assigning track {selected_track_index} to {item.person_name} at frame {start_frame}")
-                facade.assign_source_track_for_segment(
-                    view_name=view_name,
-                    source_track_index=selected_track_index,
-                    start_frame=start_frame,
-                    skeleton=skeleton,
-                )
+            # Get current requested id to avoid redundant updates
+            marker_data = pdv.get_data_series()
+            if not marker_data:
+                continue
 
-        self.report({"INFO"}, f"Stitching applied at frame {start_frame}.")
+            req_fcurve = dal.get_fcurve_on_object(marker_data.obj_ref, '["requested_source_id"]')
+            current_requested_id = int(req_fcurve.evaluate(start_frame)) if req_fcurve else -1
+
+            if selected_track_index != current_requested_id:
+                pdv.set_requested_source_id(selected_track_index, start_frame)
+                # Trigger immediate update for better UX while scrubbing
+                pdv.update_frame_if_needed(start_frame - 1)
+                pdv.update_frame_if_needed(start_frame)
+                pdv.update_frame_if_needed(start_frame + 1)
+
+        self.report({"INFO"}, f"Stitching request applied at frame {start_frame}.")
         return {"FINISHED"}
 
 

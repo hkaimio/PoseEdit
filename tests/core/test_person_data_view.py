@@ -360,3 +360,155 @@ class TestPersonDataView:
         # Assert
         assert marker_objects_dict == {"Nose": mock_nose_marker_ref, "LEye": mock_leye_marker_ref}
         mock_dal.get_children_of_object.assert_called_once()
+
+class TestPersonDataViewStitching:
+    @patch("pose_editor.core.person_data_view.dal")
+    def test_set_requested_source_id(self, mock_dal):
+        """Test that set_requested_source_id adds a keyframe."""
+        from pose_editor.core.person_data_view import PersonDataView, REQUESTED_SOURCE_ID
+
+        # Arrange
+        with patch.object(PersonDataView, "__init__", lambda s, r: None):
+            pdv = PersonDataView(MagicMock())
+
+        mock_marker_data = MagicMock()
+        mock_md_obj = MagicMock()
+        mock_marker_data.obj_ref = mock_md_obj
+        pdv.get_data_series = MagicMock(return_value=mock_marker_data)
+
+        track_id = 1
+        frame = 10
+
+        # Act
+        pdv.set_requested_source_id(track_id, frame)
+
+        # Assert
+        mock_dal.add_keyframe.assert_called_once_with(
+            mock_md_obj, frame, {'["requested_source_id"]': [track_id]}
+        )
+        mock_dal.set_custom_property.assert_called_once_with(
+            mock_md_obj, REQUESTED_SOURCE_ID, track_id
+        )
+
+    @patch("pose_editor.core.person_data_view.dal")
+    def test_update_frame_if_needed_no_change(self, mock_dal):
+        """Test that update_frame_if_needed does nothing if IDs match."""
+        from pose_editor.core.person_data_view import PersonDataView
+
+        # Arrange
+        with patch.object(PersonDataView, "__init__", lambda s, r: None):
+            pdv = PersonDataView(MagicMock())
+        
+        pdv.get_person = MagicMock(return_value=MagicMock()) # Make it a real person view
+        pdv.get_data_series = MagicMock(return_value=MagicMock())
+        pdv.skeleton = MagicMock()
+
+        mock_req_fcurve = MagicMock()
+        mock_req_fcurve.evaluate.return_value = 1
+        mock_app_fcurve = MagicMock()
+        mock_app_fcurve.evaluate.return_value = 1
+
+        def get_fcurve_side_effect(obj, prop):
+            if prop == '["requested_source_id"]':
+                return mock_req_fcurve
+            if prop == '["applied_source_id"]':
+                return mock_app_fcurve
+            return None
+        mock_dal.get_fcurve_on_object.side_effect = get_fcurve_side_effect
+        mock_dal.get_scene_frame_range.return_value = (1, 100)
+
+        # Act
+        pdv.update_frame_if_needed(50)
+
+        # Assert
+        mock_dal.replace_fcurve_segment_from_numpy.assert_not_called()
+
+    @patch("pose_editor.core.person_data_view.dal")
+    def test_update_frame_if_needed_performs_copy(self, mock_dal, mock_skeleton):
+        """Test that update_frame_if_needed performs a copy if IDs differ."""
+        from pose_editor.core.person_data_view import PersonDataView
+        from anytree import PreOrderIter
+
+        # Arrange
+        with patch.object(PersonDataView, "__init__", lambda s, r: None):
+            pdv = PersonDataView(MagicMock())
+
+        pdv.get_person = MagicMock(return_value=MagicMock())
+        pdv.skeleton = mock_skeleton
+        
+        mock_marker_data = MagicMock()
+        mock_md_obj = MagicMock()
+        mock_marker_data.obj_ref = mock_md_obj
+        mock_marker_data.action = MagicMock()
+        pdv.get_data_series = MagicMock(return_value=mock_marker_data)
+
+        mock_req_fcurve = MagicMock()
+        mock_req_fcurve.evaluate.return_value = 1 # Request track 1
+        mock_app_fcurve = MagicMock()
+        mock_app_fcurve.evaluate.return_value = -1 # Applied is default
+
+        def get_fcurve_side_effect(obj, prop):
+            if prop == '["requested_source_id"]':
+                return mock_req_fcurve
+            if prop == '["applied_source_id"]':
+                return mock_app_fcurve
+            return None
+        mock_dal.get_fcurve_on_object.side_effect = get_fcurve_side_effect
+        mock_dal.get_scene_frame_range.return_value = (1, 100)
+
+        mock_cam_view = MagicMock()
+        mock_raw_pdv = MagicMock()
+        mock_raw_md = MagicMock()
+        mock_raw_md.action = MagicMock()
+        mock_raw_pdv.get_data_series.return_value = mock_raw_md
+        mock_cam_view.get_raw_person_views.return_value = [MagicMock(), mock_raw_pdv] # track 0, track 1
+        pdv.get_camera_view = MagicMock(return_value=mock_cam_view)
+
+        # Act
+        pdv.update_frame_if_needed(50)
+
+        # Assert
+        # 1. Check that it got the animation data from the source
+        columns = []
+        for joint_node in PreOrderIter(mock_skeleton._skeleton):
+            if hasattr(joint_node, "id") and joint_node.id is not None:
+                joint_name = joint_node.name
+                columns.append((joint_name, "location", 0))
+                columns.append((joint_name, "location", 1))
+                columns.append((joint_name, '["quality"]', -1))
+
+        mock_dal.get_animation_data_as_numpy.assert_called_once_with(
+            mock_raw_md.action,
+            columns,
+            50,
+            50,
+        )
+
+        # 2. Check that it wrote the data to the target
+        mock_dal.replace_fcurve_segment_from_numpy.assert_called_once()
+
+        # 3. Check that it updated the applied_id
+        mock_dal.add_keyframe.assert_called_once_with(
+            mock_md_obj, 50, {'["applied_source_id"]': [1]}
+        )
+
+    @patch.object(PersonDataView, "update_frame_if_needed")
+    def test_check_and_update_frame_calls_update(self, mock_update):
+        """Test that _check_and_update_frame calls update_frame_if_needed 3 times."""
+        from pose_editor.core.person_data_view import PersonDataView
+        
+        # Arrange
+        with patch.object(PersonDataView, "__init__", lambda s, r: None):
+            pdv = PersonDataView(MagicMock())
+
+        mock_scene = MagicMock()
+        mock_scene.frame_current = 50
+
+        # Act
+        pdv._check_and_update_frame(mock_scene)
+
+        # Assert
+        assert mock_update.call_count == 3
+        mock_update.assert_any_call(49)
+        mock_update.assert_any_call(50)
+        mock_update.assert_any_call(51)

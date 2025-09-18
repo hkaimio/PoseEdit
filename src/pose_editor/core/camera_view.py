@@ -114,6 +114,27 @@ class CameraView:
         camera_view_refs = dal.find_all_objects_by_property(dal.IS_CAMERA_VIEW, True)
         return [cls.from_blender_obj(ref) for ref in camera_view_refs]
 
+    def get_raw_person_views(self) -> list[PersonDataView]:
+        """
+        Returns a list of all raw PersonDataView instances associated with this camera view.
+        A raw view is one that is not linked to a RealPersonInstance.
+        """
+        if not self._obj:
+            return []
+
+        all_pdvs = PersonDataView.get_all()
+        raw_views = []
+        for pdv in all_pdvs:
+            cam_view = pdv.get_camera_view()
+            if cam_view and cam_view._obj and cam_view._obj._id == self._obj._id:
+                if pdv.get_person() is None:
+                    raw_views.append(pdv)
+        
+        # Sort by person index from the name, e.g., "cam1_person0", "cam1_person1"
+        raw_views.sort(key=lambda v: int(re.findall(r'person(\d+)', v.view_name)[0]) if re.findall(r'person(\d+)', v.view_name) else -1)
+        
+        return raw_views
+
     def get_transform_scale(self) -> tuple[float, float, float]:
         """Returns the scale transformation for this camera view."""
         if not self._obj:

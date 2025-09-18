@@ -401,7 +401,106 @@ class PersonDataView:
             return
         marker_data.shift(delta_frames)
 
-    def _check_and_update_frame(self, scene, depsgraph):
-        """Placeholder for the frame change callback logic."""
-        # This method will be implemented in Phase 2
-        pass
+    def _check_and_update_frame(self, scene, depsgraph=None):
+        """Callback for the frame change handler.
+        
+        Checks and updates the current frame, and pre-emptively updates the
+        next and previous frames to improve responsiveness during scrubbing.
+        """
+        current_frame = scene.frame_current
+        self.update_frame_if_needed(current_frame - 1)
+        self.update_frame_if_needed(current_frame)
+        self.update_frame_if_needed(current_frame + 1)
+
+    def set_requested_source_id(self, track_id: int, frame: int):
+        """Sets a keyframe on the requested_source_id property.
+
+        Args:
+            track_id: The ID of the raw track to request.
+            frame: The frame at which to set the request.
+        """
+        marker_data = self.get_data_series()
+        if not marker_data:
+            print(f"Warning: Cannot set requested source ID for {self.view_name} as it has no MarkerData.")
+            return
+
+        md_obj = marker_data.obj_ref
+        dal.set_custom_property(md_obj, REQUESTED_SOURCE_ID, track_id)
+        dal.add_keyframe(md_obj, frame, {'["requested_source_id"]': [track_id]})
+
+    def update_frame_if_needed(self, frame: int):
+        """Checks if the applied source matches the requested source for a given
+        frame and performs a single-frame data copy if they differ.
+        """
+        # Guard clause: If this isn't a real person view, do nothing.
+        if self.get_person() is None:
+            return
+
+        marker_data = self.get_data_series()
+        if not marker_data or not self.skeleton:
+            return
+
+        md_obj = marker_data.obj_ref
+        scene_start, scene_end = dal.get_scene_frame_range()
+        if not (scene_start <= frame <= scene_end):
+            return
+
+        # 1. Evaluate Properties
+        req_fcurve = dal.get_fcurve_on_object(md_obj, '["requested_source_id"]')
+        app_fcurve = dal.get_fcurve_on_object(md_obj, '["applied_source_id"]')
+
+        requested_id = int(req_fcurve.evaluate(frame)) if req_fcurve else -1
+        applied_id = int(app_fcurve.evaluate(frame)) if app_fcurve else -1
+
+        # 2. Compare
+        if requested_id == applied_id:
+            return
+
+        # 3. Perform Single-Frame Copy
+        # Find the source PersonDataView (raw track)
+        source_pdv = None
+        if requested_id >= 0:
+            cam_view = self.get_camera_view()
+            if cam_view:
+                raw_views = cam_view.get_raw_person_views()
+                if requested_id < len(raw_views):
+                    source_pdv = raw_views[requested_id]
+
+        # Get the columns to copy from the skeleton
+        columns_to_process: list[tuple[str, str, int]] = []
+        from anytree import PreOrderIter
+        for joint_node in PreOrderIter(self.skeleton._skeleton):
+            if not (hasattr(joint_node, "id") and joint_node.id is not None):
+                continue
+            joint_name = joint_node.name
+            columns_to_process.append((joint_name, "location", 0))  # X
+            columns_to_process.append((joint_name, "location", 1))  # Y
+            columns_to_process.append((joint_name, '["quality"]', -1))  # Quality
+
+        # Get the data to write (either from source or NaNs)
+        if requested_id == -2 or source_pdv is None: # -2 is "None"
+            num_columns = len(columns_to_process)
+            data_to_write = np.full((1, num_columns), np.nan)
+            # Set quality to 0 for "None" source
+            for i, col_def in enumerate(columns_to_process):
+                if col_def[1] == '["quality"]':
+                    data_to_write[:, i] = 0
+        else:
+            source_md = source_pdv.get_data_series()
+            if not source_md or not source_md.action:
+                return # Should not happen if everything is set up correctly
+            data_to_write = dal.get_animation_data_as_numpy(
+                source_md.action,
+                columns_to_process,
+                frame,
+                frame,
+            )
+
+        # Write the single frame of data
+        if marker_data.action:
+            dal.replace_fcurve_segment_from_numpy(
+                marker_data.action, columns_to_process, frame, frame, data_to_write
+            )
+
+        # 4. Update Applied ID
+        dal.add_keyframe(md_obj, frame, {'["applied_source_id"]': [requested_id]})
