@@ -14,6 +14,7 @@ from .blender.operators import (
     PE_OT_TriangulatePerson,
 )
 from .blender.properties import CameraViewSettings, StitchingUIItem, StitchingUIState
+from .core.frame_handler import frame_handler
 from .ui.panels import (
     PE_PT_3DPipelinePanel,
     PE_PT_ProjectPanel,
@@ -54,6 +55,7 @@ _classes = [
 def on_load_post(dummy):
     """Handler for file load."""
     register_drivers()
+    frame_handler.register_handler()
 
 
 def register():
@@ -63,6 +65,9 @@ def register():
 
     # Register driver functions
     register_drivers()
+
+    # Register frame change handler
+    frame_handler.register_handler()
 
     # Add handler for loading new files
     if on_load_post not in bpy.app.handlers.load_post:
@@ -88,6 +93,9 @@ def unregister():
 
     # Unregister driver functions
     unregister_drivers()
+
+    # Unregister frame change handler
+    frame_handler.unregister_handler()
 
     # Remove the handler
     if on_load_post in bpy.app.handlers.load_post:

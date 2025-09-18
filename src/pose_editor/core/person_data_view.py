@@ -4,7 +4,10 @@
 
 from typing import Optional, TYPE_CHECKING
 
+import numpy as np
+
 from ..blender import dal
+from .frame_handler import frame_handler
 
 if TYPE_CHECKING:
     from .camera_view import CameraView
@@ -14,6 +17,9 @@ from .person_facade import RealPersonInstanceFacade, PERSON_DEFINITION_REF
 from ..blender.dal import CAMERA_VIEW_ID
 
 SKELETON_NAME = dal.CustomProperty[str]("skeleton_name")
+REQUESTED_SOURCE_ID = dal.CustomProperty[int]("requested_source_id")
+APPLIED_SOURCE_ID = dal.CustomProperty[int]("applied_source_id")
+
 
 class PersonDataView:
     """A facade for a person's 2D data view (View layer).
@@ -50,6 +56,16 @@ class PersonDataView:
         """
         self._obj = view_root_obj_ref
         self.skeleton: Optional[SkeletonBase] = None
+        self._init_from_blender_ref(view_root_obj_ref)
+
+        # If this is a "Real Person" view, register for frame changes.
+        if self.get_person() is not None:
+            frame_handler.add_callback(self._check_and_update_frame)
+
+    def __del__(self):
+        """Destructor to unregister the callback when the object is garbage collected."""
+        if hasattr(self, "_check_and_update_frame") and self.get_person() is not None:
+            frame_handler.remove_callback(self._check_and_update_frame)
 
     def _init_from_blender_ref(self, view_root_obj_ref: dal.BlenderObjRef):
         """Initializes the PersonDataView from an existing Blender object.
@@ -63,7 +79,6 @@ class PersonDataView:
                                existing PersonDataView (e.g., PV.Alice.cam1).
         """
         self.view_root_object = view_root_obj_ref
-
 
         # Populate marker objects and find armature from existing Blender objects
         self._marker_objects_by_role = {}
@@ -86,6 +101,7 @@ class PersonDataView:
         camera_view,
         collection=None,
         person: Optional[RealPersonInstanceFacade] = None,
+        marker_data: Optional[MarkerData] = None,
     ) -> "PersonDataView":
         """
         Creates a new PersonDataView object in Blender.
@@ -97,13 +113,15 @@ class PersonDataView:
             camera_view: CameraView object.
             collection: Blender collection to add to.
             person: Optional RealPersonInstanceFacade to associate.
+            marker_data: Optional MarkerData to connect to.
 
         Returns:
             PersonDataView: The newly created instance.
         """
         from .camera_view import CameraView
+
         if collection is None:
-            collection = dal.get_or_create_collection("PersonViews")    
+            collection = dal.get_or_create_collection("PersonViews")
 
         obj = dal.get_or_create_object(
             name=view_name, obj_type="EMPTY", collection_name=collection.name if collection else None, parent=camera_view._obj
@@ -116,7 +134,7 @@ class PersonDataView:
         dal.set_custom_property(obj, PERSON_DEFINITION_REF, person.obj._id if person and person.obj else "")
         dal.set_custom_property(obj, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
         instance = cls(obj)
-        
+
         instance._init_from_blender_ref(obj)
         instance._create_marker_objects(collection)
         instance._populate_marker_objects_by_role()
@@ -125,6 +143,25 @@ class PersonDataView:
 
         obj._get_obj().location = camera_view.translation
         obj._get_obj().scale = camera_view.scale
+
+        # If it's a real person, initialize the new animated properties
+        if person:
+            marker_data = instance.get_data_series()
+            if marker_data:
+                md_obj = marker_data.obj_ref
+                scene_start, scene_end = dal.get_scene_frame_range()
+
+                # Requested ID: Sparse, just one keyframe at the start
+                dal.set_custom_property(md_obj, REQUESTED_SOURCE_ID, -1)
+                dal.add_keyframe(md_obj, scene_start, {'["requested_source_id"]': [-1]})
+
+                # Applied ID: Dense, one keyframe for every frame
+                dal.set_custom_property(md_obj, APPLIED_SOURCE_ID, -1)
+                keyframes = [(frame, [-1]) for frame in range(scene_start, scene_end + 1)]
+                dal.set_fcurve_from_data(md_obj, '["applied_source_id"]', keyframes)
+
+        if marker_data:
+            instance.connect_to_series(marker_data)
 
         return instance
 
@@ -135,16 +172,12 @@ class PersonDataView:
         camera_view_id = dal.get_custom_property(self._obj, CAMERA_VIEW_ID)
         if not camera_view_id:
             return None
-        # Import here to avoid circular import
         from .camera_view import CameraView
+
         return CameraView.get_by_id(camera_view_id)
 
-
-    def get_person(self) -> RealPersonInstanceFacade | None:
-        """
-        Returns the RealPersonInstanceFacade associated with this view, or None if not assigned.
-        """
-
+    def get_person(self) -> Optional[RealPersonInstanceFacade]:
+        """Returns the RealPersonInstanceFacade associated with this view."""
         from .person_facade import RealPersonInstanceFacade, PERSON_DEFINITION_REF
 
         person_id = dal.get_custom_property(self._obj, PERSON_DEFINITION_REF)
@@ -161,14 +194,14 @@ class PersonDataView:
     def color(self) -> tuple[float, float, float, float]:
         """Returns the RGBA color of this PersonDataView."""
         return dal.get_custom_property(self._obj, dal.COLOR) or (1.0, 1.0, 1.0, 1.0)
-    
-    
+
     def camera_view(self) -> Optional["CameraView"]:
-        """Returns the CameraView this PersonDataView belongs to, or None if not set."""
+        """Returns the CameraView this PersonDataView belongs to."""
         camera_view_id = dal.get_custom_property(self._obj, CAMERA_VIEW_ID)
         if not camera_view_id:
             return None
         from .camera_view import CameraView
+
         return CameraView.get_by_id(camera_view_id)
 
     @classmethod
@@ -205,17 +238,13 @@ class PersonDataView:
         if not view_root_obj_ref or not view_root_obj_ref._get_obj():
             return None
 
-        # Check if it's a valid PersonDataView root object
         obj_type = dal.get_custom_property(view_root_obj_ref, dal.POSE_EDITOR_OBJECT_TYPE)
         if obj_type != "PersonDataView":
-            print(f"Object {view_root_obj_ref.name} is not a PersonDataView root.")
             return None
 
-        # Instantiate PersonDataView by calling its __init__ with the existing ref
         instance = cls(view_root_obj_ref)
         instance._init_from_blender_ref(view_root_obj_ref)
         return instance
-
 
     @classmethod
     def get_all(cls) -> list["PersonDataView"]:
@@ -287,14 +316,11 @@ class PersonDataView:
 
                 if parent_marker and child_marker:
                     bone_name = f"{parent_marker_role}-{child_marker_role}"
-                    # Placeholder head/tail, will be positioned by constraints
                     bones_to_add.append((bone_name, (0, 0, 0), (0, 1, 0)))
 
-        # Create all bones in one go
         if bones_to_add:
             dal.add_bones_in_bulk(self._armature_object, bones_to_add)
 
-        # Now, add constraints and drivers in a separate loop
         for node in self.skeleton._skeleton.descendants:
             if (
                 node.parent
@@ -311,11 +337,9 @@ class PersonDataView:
 
                 if parent_marker and child_marker:
                     bone_name = f"{parent_marker_role}-{child_marker_role}"
-
                     dal.add_bone_constraint(self._armature_object, bone_name, "COPY_LOCATION", parent_marker)
                     dal.add_bone_constraint(self._armature_object, bone_name, "STRETCH_TO", child_marker)
 
-                    # Add driver to hide bone
                     expression = "var1 or var2"
                     variables = [
                         ("var1", "SINGLE_PROP", parent_marker.name, "hide_viewport"),
@@ -341,20 +365,22 @@ class PersonDataView:
             marker_data: The MarkerData series to connect to.
         """
         marker_data.apply_to_view(self)
-        # Store the marker_data_id in the root object's custom property
         dal.set_custom_property(
             self.view_root_object,
             dal.MARKER_DATA_ID,
             marker_data.data_series_object_name
         )
 
-    def get_data_series(self) -> Optional[MarkerData]:
-        """Returns the MarkerData series connected to this view, or None if not connected."""
-        marker_data_if = dal.get_custom_property(self.view_root_object, dal.MARKER_DATA_ID)
-        if not marker_data_if:
+    def get_data_series(self) -> Optional["MarkerData"]:
+        """Returns the MarkerData series connected to this view."""
+        marker_data_id = dal.get_custom_property(self.view_root_object, dal.MARKER_DATA_ID)
+        if not marker_data_id:
             return None
-        return MarkerData.from_blender_object(dal.BlenderObjRef(marker_data_if))
-    
+        md_obj = dal.get_object_by_name(marker_data_id)
+        if not md_obj:
+            return None
+        return MarkerData.from_blender_object(md_obj)
+
     def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
         """Returns a dictionary of marker objects in this view, keyed by their role."""
         return self._marker_objects_by_role
@@ -369,12 +395,13 @@ class PersonDataView:
         if delta_frames == 0:
             return
 
-        marker_data_if = dal.get_custom_property(self.view_root_object, dal.MARKER_DATA_ID)
-        if not marker_data_if:
+        marker_data = self.get_data_series()
+        if not marker_data:
             print(f"PersonDataView {self.view_name} is not connected to any MarkerData series.")
             return
-        marker_data = MarkerData.from_blender_object(dal.BlenderObjRef(marker_data_if))
-        if not marker_data:
-            print(f"MarkerData series {marker_data_if} not found for PersonDataView {self.view_name}.")
-            return 
         marker_data.shift(delta_frames)
+
+    def _check_and_update_frame(self, scene, depsgraph):
+        """Placeholder for the frame change callback logic."""
+        # This method will be implemented in Phase 2
+        pass

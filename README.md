@@ -22,7 +22,7 @@ current features.
 * Stitch consistent timeline for a person from multiple pieces if the object tracking algorithm has lost the person in middle of the clip
 
 * Edit individual marker positions
-
+'
 * Triangulate 3D markers from the raw data, analyze the results & debug errors 
 
 ### Wish list for V1.0
