@@ -23,7 +23,7 @@ ACTIVE_TRACK_INDEX = dal.CustomProperty[int]("active_track_index")
 PERSON_NAME = dal.CustomProperty[str]("person_name")
 POSE_EDITOR_OBJECT_TYPE = dal.CustomProperty[str]("pose_editor_object_type")
 
-
+_all_person_instances_cache: dict[str, "RealPersonInstanceFacade"] = {}
 class RealPersonInstanceFacade:
     """A facade for a Real Person Instance.
 
@@ -36,6 +36,7 @@ class RealPersonInstanceFacade:
         self.obj = person_instance_obj
         self.person_id = dal.get_custom_property(person_instance_obj, PERSON_NAME) or person_instance_obj.name
         self.name = dal.get_custom_property(person_instance_obj, PERSON_NAME)
+        _all_person_instances_cache[person_instance_obj._id] = self
 
     @classmethod
     def create_new(cls, person_name: str) -> "RealPersonInstanceFacade":
@@ -68,6 +69,10 @@ class RealPersonInstanceFacade:
         """
         if not obj_ref or not obj_ref._get_obj():
             return None
+        
+        if obj_ref._id in _all_person_instances_cache:
+            return _all_person_instances_cache[obj_ref._id]
+        
         obj_type = dal.get_custom_property(obj_ref, POSE_EDITOR_OBJECT_TYPE)
         if obj_type != "Person":
             return None
@@ -171,115 +176,6 @@ class RealPersonInstanceFacade:
                 return int(frame) - 1  # The segment ends the frame before the next stitch
 
         return scene_end
-
-    def assign_source_track_for_segment(
-        self,
-        view_name: str,
-        source_track_index: int,
-        start_frame: int,
-        skeleton: "SkeletonBase",
-    ):
-        """Assigns a new source track for a segment of the timeline."""
-
-        from .person_data_view import PersonDataView
-
-        end_frame = self.find_next_stitch_frame(view_name, start_frame)
-        if end_frame < start_frame:
-            print(f"End frame {end_frame} is before start frame {start_frame}, aborting stitch.")
-            return
-
-        print(f"Stitching segment for {self.person_id} in view {view_name} from frame {start_frame} to {end_frame}.")
-        print(f"Source track index: {source_track_index}")
-
-        target_md_ref: BlenderObjRef | None = None
-        all_md = dal.find_all_objects_by_property(POSE_EDITOR_OBJECT_TYPE, "MarkerData")
-        for ds in all_md:
-            if dal.get_custom_property(ds, CAMERA_VIEW_ID) == view_name:
-                if dal.get_custom_property(ds, PERSON_DEFINITION_REF) == self.obj._id:
-                    target_md_ref = ds
-                    break
-
-        if not target_md_ref:
-            print(f"Error: Target MarkerData for person {self.person_id} in view {view_name} not found.")
-            return
-
-        target_md = MarkerData.from_blender_object(target_md_ref)
-        if not target_md:
-            print("Error: Failed to initialize target MarkerData from Blender object.")
-            return
-
-        # Define the columns of data to be copied or cleared
-        columns_to_process: list[tuple[str, str, int]] = []
-        for joint_node in skeleton._skeleton.descendants:
-            if not hasattr(joint_node, "id") or joint_node.id is None:
-                continue
-            joint_name = joint_node.name
-            columns_to_process.append((joint_name, "location", 0))  # X
-            columns_to_process.append((joint_name, "location", 1))  # Y
-            columns_to_process.append((joint_name, '["quality"]', -1))  # Quality
-
-        # If source is -2 ("None"), create an array of NaNs
-        if source_track_index == -2:
-            print("Source is None, clearing keyframes for segment.")
-            num_frames = end_frame - start_frame + 1
-            num_columns = len(columns_to_process)
-            nan_data = np.full((num_frames, num_columns), np.nan)
-
-            # Set quality columns to 0
-            for i, col_def in enumerate(columns_to_process):
-                if col_def[1] == '["quality"]':
-                    nan_data[:, i] = 0
-
-            data_to_write = nan_data
-        else:
-            # Find the source MarkerData
-            source_md_ref: BlenderObjRef | None = None
-            for ds in all_md:
-                if dal.get_custom_property(ds, CAMERA_VIEW_ID) == view_name:
-                    series_name = dal.get_custom_property(ds, dal.SERIES_NAME) or ""
-                    if f"_person{source_track_index}" in series_name:
-                        source_md_ref = ds
-                        break
-            if not source_md_ref:
-                print(f"Error: Source MarkerData for track index {source_track_index} in view {view_name} not found.")
-                return
-            source_md = MarkerData.from_blender_object(source_md_ref)
-            if not source_md:
-                print("Error: Failed to initialize source MarkerData from Blender object.")
-                return
-
-            print(f"Reading data from {source_md.action.name if source_md.action else 'Unknown'}...")
-            data_to_write = dal.get_animation_data_as_numpy(
-                source_md.action,
-                columns_to_process,
-                start_frame,
-                end_frame,
-            )
-            print(f"Read {data_to_write.shape} data array from source.")
-
-        # Write the data (either from source or NaNs) to the target action
-        print(f"Writing data to {target_md.action.name if target_md.action else 'Unknown'}...")
-        dal.replace_fcurve_segment_from_numpy(
-            target_md.action, columns_to_process, start_frame, end_frame, data_to_write
-        )
-        print("Write complete.")
-
-        # Set the keyframe for the active_track_index
-        print(
-            f"Setting active_track_index keyframe on {target_md_ref.name} at frame {start_frame} to {source_track_index}"
-        )
-        dal.set_custom_property(target_md_ref, ACTIVE_TRACK_INDEX, source_track_index)
-        dal.add_keyframe(target_md_ref, start_frame, {'["active_track_index"]': [source_track_index]})
-
-        # Re-connect the view to apply the changes
-        all_pvs = PersonDataView.get_all()
-        for person_view in all_pvs:
-            pvp = person_view.get_person()
-            pvcam = person_view.camera_view()
-            if pvp and pvcam and pvcam._obj and pvp.person_id == self.person_id and pvcam._obj.name == view_name:
-                person_view.connect_to_series(target_md)
-                print(f"Re-connected PersonDataView {person_view.view_root_object.name} to action.")
-                break
 
     def triangulate(self, frame_start: int, frame_end: int):
         """Performs 3D triangulation for this person over a frame range."""

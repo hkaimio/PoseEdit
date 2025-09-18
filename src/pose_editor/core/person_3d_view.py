@@ -16,6 +16,7 @@ from .skeleton import SkeletonBase, get_skeleton
 if TYPE_CHECKING:
     from .person_facade import RealPersonInstanceFacade
 
+_all_3d_views_cache: dict[str, "Person3DView"] = {}
 
 class Person3DView:
     """A facade for a person's 3D data view.
@@ -40,6 +41,7 @@ class Person3DView:
             self.skeleton = get_skeleton(skeleton_name)
         self.color = dal.get_custom_property(view_root_obj_ref, dal.COLOR)
         self._populate_marker_objects_by_role()
+        _all_3d_views_cache[view_root_obj_ref._id] = self
 
     def _populate_marker_objects_by_role(self):
         """Populates the marker dictionary by finding child objects with a MARKER_ROLE."""
@@ -55,10 +57,15 @@ class Person3DView:
         """Builds a Person3DView from an existing Blender object."""
         if not view_root_obj_ref or not view_root_obj_ref._get_obj():
             return None
+        
+        if view_root_obj_ref._id in _all_3d_views_cache:
+            return _all_3d_views_cache[view_root_obj_ref._id]
+        
         obj_type = dal.get_custom_property(view_root_obj_ref, dal.POSE_EDITOR_OBJECT_TYPE)
         if obj_type != "Person3DView":
             return None
-        return cls(view_root_obj_ref)
+        instance = cls(view_root_obj_ref)
+        return instance
 
     @classmethod
     def get_for_person(cls, person: "RealPersonInstanceFacade") -> Optional["Person3DView"]:

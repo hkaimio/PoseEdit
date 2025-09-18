@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from ..blender.dal import CAMERA_VIEW_ID
 
+_all_marker_data_cache: dict[str, "MarkerData"] = {}
 class MarkerData:
     """A facade for a marker data series (model layer).
 
@@ -49,6 +50,7 @@ class MarkerData:
         self.skeleton_name = skeleton_name
         self.data_series_object = data_series_object
         self.action = action
+        _all_marker_data_cache[obj._id] = self
 
     @classmethod
     def create_new(cls, series_name: str, skeleton_name: str | None = None, camera_view: "CameraView" = None, person: "RealPersonInstanceFacade" = None) -> "MarkerData":
@@ -95,6 +97,8 @@ class MarkerData:
         if not data_series_obj_ref or not data_series_obj_ref._get_obj():
             return None
 
+        if data_series_obj_ref._id in _all_marker_data_cache:
+            return _all_marker_data_cache[data_series_obj_ref._id]
         series_name = dal.get_custom_property(data_series_obj_ref, dal.SERIES_NAME)
         if not series_name:
             return None

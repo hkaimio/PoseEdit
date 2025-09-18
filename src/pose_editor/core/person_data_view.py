@@ -20,6 +20,7 @@ SKELETON_NAME = dal.CustomProperty[str]("skeleton_name")
 REQUESTED_SOURCE_ID = dal.CustomProperty[int]("requested_source_id")
 APPLIED_SOURCE_ID = dal.CustomProperty[int]("applied_source_id")
 
+_all_person_data_views_cache: dict[str, "PersonDataView"] = {}
 
 class PersonDataView:
     """A facade for a person's 2D data view (View layer).
@@ -148,7 +149,7 @@ class PersonDataView:
         if person:
             marker_data = instance.get_data_series()
             if marker_data:
-                md_obj = marker_data.obj_ref
+                md_obj = marker_data._obj
                 scene_start, scene_end = dal.get_scene_frame_range()
 
                 # Requested ID: Sparse, just one keyframe at the start
@@ -238,12 +239,16 @@ class PersonDataView:
         if not view_root_obj_ref or not view_root_obj_ref._get_obj():
             return None
 
+        if view_root_obj_ref._id in _all_person_data_views_cache:
+            return _all_person_data_views_cache[view_root_obj_ref._id]
+
         obj_type = dal.get_custom_property(view_root_obj_ref, dal.POSE_EDITOR_OBJECT_TYPE)
         if obj_type != "PersonDataView":
             return None
 
         instance = cls(view_root_obj_ref)
         instance._init_from_blender_ref(view_root_obj_ref)
+        _all_person_data_views_cache[view_root_obj_ref._id] = instance
         return instance
 
     @classmethod
@@ -424,7 +429,7 @@ class PersonDataView:
             print(f"Warning: Cannot set requested source ID for {self.view_name} as it has no MarkerData.")
             return
 
-        md_obj = marker_data.obj_ref
+        md_obj = marker_data._obj
         dal.set_custom_property(md_obj, REQUESTED_SOURCE_ID, track_id)
         dal.add_keyframe(md_obj, frame, {'["requested_source_id"]': [track_id]})
 
@@ -440,7 +445,7 @@ class PersonDataView:
         if not marker_data or not self.skeleton:
             return
 
-        md_obj = marker_data.obj_ref
+        md_obj = marker_data._obj
         scene_start, scene_end = dal.get_scene_frame_range()
         if not (scene_start <= frame <= scene_end):
             return
