@@ -11,14 +11,12 @@ from .frame_handler import frame_handler
 
 if TYPE_CHECKING:
     from .camera_view import CameraView
-from .marker_data import MarkerData
+from .marker_data import MarkerData, REQUESTED_SOURCE_ID, APPLIED_SOURCE_ID
 from .skeleton import SkeletonBase, get_skeleton
 from .person_facade import RealPersonInstanceFacade, PERSON_DEFINITION_REF
 from ..blender.dal import CAMERA_VIEW_ID
 
 SKELETON_NAME = dal.CustomProperty[str]("skeleton_name")
-REQUESTED_SOURCE_ID = dal.CustomProperty[int]("requested_source_id")
-APPLIED_SOURCE_ID = dal.CustomProperty[int]("applied_source_id")
 
 _all_person_data_views_cache: dict[str, "PersonDataView"] = {}
 
@@ -144,22 +142,6 @@ class PersonDataView:
 
         obj._get_obj().location = camera_view.translation
         obj._get_obj().scale = camera_view.scale
-
-        # If it's a real person, initialize the new animated properties
-        if person:
-            marker_data = instance.get_data_series()
-            if marker_data:
-                md_obj = marker_data._obj
-                scene_start, scene_end = dal.get_scene_frame_range()
-
-                # Requested ID: Sparse, just one keyframe at the start
-                dal.set_custom_property(md_obj, REQUESTED_SOURCE_ID, -1)
-                dal.add_keyframe(md_obj, scene_start, {'["requested_source_id"]': [-1]})
-
-                # Applied ID: Dense, one keyframe for every frame
-                dal.set_custom_property(md_obj, APPLIED_SOURCE_ID, -1)
-                keyframes = [(frame, [-1]) for frame in range(scene_start, scene_end + 1)]
-                dal.set_fcurve_from_data(md_obj, '["applied_source_id"]', keyframes)
 
         if marker_data:
             instance.connect_to_series(marker_data)
@@ -431,7 +413,7 @@ class PersonDataView:
 
         md_obj = marker_data._obj
         dal.set_custom_property(md_obj, REQUESTED_SOURCE_ID, track_id)
-        dal.add_keyframe(md_obj, frame, {'["requested_source_id"]': [track_id]})
+        dal.add_keyframe(md_obj, frame, {"requested_source_id": [track_id]})
 
     def update_frame_if_needed(self, frame: int):
         """Checks if the applied source matches the requested source for a given
@@ -508,4 +490,6 @@ class PersonDataView:
             )
 
         # 4. Update Applied ID
-        dal.add_keyframe(md_obj, frame, {'["applied_source_id"]': [requested_id]})
+        if app_fcurve:
+            app_fcurve.keyframe_points.insert(frame, requested_id)
+        # dal.add_keyframe(md_obj, frame, {'["applied_source_id"]': [requested_id]})

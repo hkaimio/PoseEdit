@@ -281,7 +281,7 @@ class PE_OT_AssignTrack(bpy.types.Operator):
             if not marker_data:
                 continue
 
-            req_fcurve = dal.get_fcurve_on_object(marker_data.obj_ref, '["requested_source_id"]')
+            req_fcurve = dal.get_fcurve_on_object(marker_data._obj, '["requested_source_id"]')
             current_requested_id = int(req_fcurve.evaluate(start_frame)) if req_fcurve else -1
 
             if selected_track_index != current_requested_id:

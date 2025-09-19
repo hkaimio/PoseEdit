@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 
 from ..blender.dal import CAMERA_VIEW_ID
 
+REQUESTED_SOURCE_ID = dal.CustomProperty[int]("requested_source_id")
+APPLIED_SOURCE_ID = dal.CustomProperty[int]("applied_source_id")
+
 _all_marker_data_cache: dict[str, "MarkerData"] = {}
 class MarkerData:
     """A facade for a marker data series (model layer).
@@ -80,6 +83,19 @@ class MarkerData:
         dal.set_custom_property(data_series_object, PERSON_DEFINITION_REF, person_id)
 
         action = dal.get_or_create_action(f"AC.{series_name}")
+
+        # If it's a real person, initialize the new animated properties
+        if person:
+            scene_start, scene_end = dal.get_scene_frame_range()
+
+            # Requested ID: Sparse, just one keyframe at the start
+            dal.set_custom_property(data_series_object, REQUESTED_SOURCE_ID, -1)
+            dal.add_keyframe(data_series_object, scene_start, {'["requested_source_id"]': [-1]})
+
+            # Applied ID: Dense, one keyframe for every frame
+            dal.set_custom_property(data_series_object, APPLIED_SOURCE_ID, -1)
+            keyframes = [(frame, [-1]) for frame in range(scene_start, scene_end + 1)]
+            dal.set_fcurve_from_data(data_series_object, '["applied_source_id"]', keyframes)
 
         return cls(data_series_object, series_name, skeleton_name, action=action, data_series_object=data_series_object)
 
