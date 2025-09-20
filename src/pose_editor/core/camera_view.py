@@ -182,6 +182,13 @@ class CameraView:
         # update_scene_frame_range()
 
     @property
+    def name(self) -> str | None:
+        """Returns the name of the camera view."""
+        if not self._obj:
+            return None
+        return dal.get_custom_property(self._obj, SERIES_NAME)
+
+    @property
     def translation(self) -> tuple[float, float, float]:
         """Returns the translation (offset) for this camera view."""
         if not self._obj:

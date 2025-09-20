@@ -8,6 +8,7 @@ import bpy
 
 from ..blender import dal
 from ..core.camera_view import CameraView
+from ..core.person_facade import RealPersonInstanceFacade
 
 
 def get_available_tracks(self, context):
@@ -96,3 +97,59 @@ class StitchingUIState(bpy.types.PropertyGroup):
     active_camera_view: bpy.props.StringProperty(
         name="Active Camera View", description="The camera view currently being displayed in the UI"
     )
+
+def get_persons_for_enum(scene, context):
+    """Returns a list of Real Persons for an EnumProperty."""
+    items = []
+    persons = RealPersonInstanceFacade.get_all()
+    for i, person in enumerate(persons):
+        items.append((person.name, person.name, f"Copy stitching for {person.name}", i))
+    return items
+
+def get_camera_views_for_enum(scene, context):
+    """Returns a list of camera views for an EnumProperty."""
+    items = []
+    camera_views = CameraView.get_all()
+    for i, view in enumerate(camera_views):
+        items.append((view.name, view.name, f"Copy from {view.name}", i))
+    return items
+
+
+class CopyStitchingProperties(bpy.types.PropertyGroup):
+    """Properties for the Copy Stitching operator."""
+    source_camera: bpy.props.EnumProperty(
+        name="Source Camera",
+        description="The camera view to copy the stitching data from",
+        items=get_camera_views_for_enum,
+    )
+
+    person_to_copy: bpy.props.EnumProperty(
+        name="Person",
+        description="The person whose stitching data will be copied",
+        items=get_persons_for_enum,
+    )
+
+
+classes = [
+    CameraViewSettings,
+    StitchingUIItem,
+    StitchingUIState,
+    CopyStitchingProperties,
+]
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+    
+    bpy.types.Scene.camera_view_settings = bpy.props.PointerProperty(type=CameraViewSettings)
+    bpy.types.Scene.pose_editor_stitching_ui = bpy.props.PointerProperty(type=StitchingUIState)
+    bpy.types.Scene.pose_editor_copy_stitching = bpy.props.PointerProperty(type=CopyStitchingProperties)
+
+
+def unregister():
+    del bpy.types.Scene.pose_editor_copy_stitching
+    del bpy.types.Scene.stitching_ui_state
+    del bpy.types.Scene.camera_view_settings
+
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

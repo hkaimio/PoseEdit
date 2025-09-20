@@ -379,3 +379,78 @@ class PE_OT_TriangulatePerson(bpy.types.Operator):
         elif self.frame_range == "CUSTOM_RANGE":
             return self.start_frame, self.end_frame
         return context.scene.frame_start, context.scene.frame_end
+
+
+class PE_OT_CopyStitching(bpy.types.Operator):
+    """Copies the stitching (requested_source_id) f-curve from one camera view to another for the selected person(s)."""
+
+    bl_idname = "pose_editor.copy_stitching"
+    bl_label = "Copy Stitching Data"
+    bl_description = "Copy stitching data from a source camera to the active camera for the selected person(s)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.pose_editor_copy_stitching
+
+        # 1. Get person from properties
+        person_name = props.person_to_copy
+        if not person_name:
+            self.report({"WARNING"}, "No person selected.")
+            return {"CANCELLED"}
+
+        all_persons = {p.name: p for p in RealPersonInstanceFacade.get_all()}
+        facade = all_persons.get(person_name)
+
+        if not facade:
+            self.report({"ERROR"}, f"Person '{person_name}' not found.")
+            return {"CANCELLED"}
+
+        # 2. Get source and target camera views
+        source_camera_name = props.source_camera
+
+        active_camera = context.space_data.camera
+        if not active_camera or not active_camera.name.startswith("Cam_"):
+            self.report({"ERROR"}, "No active camera view. Select a view to copy stitching data TO.")
+            return {"CANCELLED"}
+
+        target_camera_short_name = active_camera.name.replace("Cam_", "")
+
+        if source_camera_name == target_camera_short_name:
+            self.report({"ERROR"}, "Source and target camera cannot be the same.")
+            return {"CANCELLED"}
+
+        all_camera_views = {view.name: view for view in CameraView.get_all()}
+        source_camera_view = all_camera_views.get(source_camera_name)
+        target_camera_view = all_camera_views.get(target_camera_short_name)
+
+        if not source_camera_view:
+            self.report({"ERROR"}, f"Source camera view '{source_camera_name}' not found.")
+            return {"CANCELLED"}
+        if not target_camera_view:
+            self.report({"ERROR"}, f"Target camera view '{target_camera_short_name}' not found.")
+            return {"CANCELLED"}
+
+        # 3. Perform the copy for the selected person
+        facade.copy_stitching_from_view(source_camera_view, target_camera_view)
+        self.report({"INFO"}, f"Copied stitching for {facade.name} from {source_camera_name} to {target_camera_short_name}")
+
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        # Check if there are persons to copy
+        if not RealPersonInstanceFacade.get_all():
+            self.report({"ERROR"}, "No Real Persons exist in the scene.")
+            return {"CANCELLED"}
+
+        # Check if there's at least one other camera view to copy from
+        if len(CameraView.get_all()) < 2:
+            self.report({"ERROR"}, "At least two camera views are needed to copy stitching data.")
+            return {"CANCELLED"}
+
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.pose_editor_copy_stitching
+        layout.prop(props, "person_to_copy")
+        layout.prop(props, "source_camera")

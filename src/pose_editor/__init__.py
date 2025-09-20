@@ -12,8 +12,14 @@ from .blender.operators import (
     PE_OT_LoadCameraViews,
     PE_OT_LoadCalibration,
     PE_OT_TriangulatePerson,
+    PE_OT_CopyStitching,
 )
-from .blender.properties import CameraViewSettings, StitchingUIItem, StitchingUIState
+from .blender.properties import (
+    CameraViewSettings,
+    StitchingUIItem,
+    StitchingUIState,
+    CopyStitchingProperties,
+)
 from .core.frame_handler import frame_handler
 from .ui.panels import (
     PE_PT_3DPipelinePanel,
@@ -42,6 +48,7 @@ _classes = [
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
     PE_OT_TriangulatePerson,
+    PE_OT_CopyStitching,
     PE_PT_ProjectPanel,
     PE_PT_ViewPanel,
     PE_PT_StitchingPanel,
@@ -49,6 +56,7 @@ _classes = [
     StitchingUIItem,
     StitchingUIState,
     CameraViewSettings,
+    CopyStitchingProperties,
 ]
 
 
@@ -81,6 +89,9 @@ def register():
     bpy.types.Scene.pose_editor_view_settings = bpy.props.PointerProperty(
         type=CameraViewSettings
     )
+    bpy.types.Scene.pose_editor_copy_stitching = bpy.props.PointerProperty(
+        type=CopyStitchingProperties
+    )
 
 
 def unregister():
@@ -88,6 +99,7 @@ def unregister():
     # Delete the scene properties
     del bpy.types.Scene.pose_editor_stitching_ui
     del bpy.types.Scene.pose_editor_view_settings
+    del bpy.types.Scene.pose_editor_copy_stitching
 
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

@@ -122,9 +122,45 @@ class RealPersonInstanceFacade:
         for pdv in all_pdvs:
             pdv_person = pdv.get_person()
             pdv_camera_view = pdv.get_camera_view()
-            if pdv_person and pdv_person.person_id == self.person_id and pdv_camera_view and pdv_camera_view == camera_view:
+            if pdv_person and pdv_person.person_id == self.person_id and pdv_camera_view and pdv_camera_view.name == camera_view.name:
                 return pdv
         return None
+
+    def copy_stitching_from_view(self, source_camera_view: "CameraView", target_camera_view: "CameraView"):
+        """Copies the requested_source_id f-curve from a source view to a target view."""
+        source_pdv = self.get_view(source_camera_view)
+        target_pdv = self.get_view(target_camera_view)
+
+        if not source_pdv or not target_pdv:
+            print("Error: Could not find source or target PersonDataView.")
+            return
+
+        source_md = source_pdv.get_data_series()
+        target_md = target_pdv.get_data_series()
+
+        if not source_md or not target_md:
+            print("Error: Could not find source or target MarkerData.")
+            return
+
+        source_fcurve = dal.get_fcurve_on_object(source_md.data_series_object, '["requested_source_id"]')
+        target_fcurve = dal.get_fcurve_on_object(target_md.data_series_object, '["requested_source_id"]')
+
+        if not source_fcurve:
+            print(f"Error: No stitching data (f-curve) found for {self.name} in {source_camera_view.name}.")
+            return
+
+        if not target_fcurve:
+            # This shouldn't happen if views are created correctly, but we can create it.
+            target_fcurve = dal.get_or_create_fcurve(
+                target_md.action, target_md.data_series_object.name, '["requested_source_id"]', -1
+            )
+
+        source_keyframes = dal.get_fcurve_keyframes(source_fcurve)
+        scene_start, scene_end = dal.get_scene_frame_range()
+
+        dal.replace_fcurve_keyframes_in_range(target_fcurve, scene_start, scene_end, source_keyframes, interpolation="CONSTANT")
+
+        print(f"Copied stitching data for {self.name} from {source_camera_view.name} to {target_camera_view.name}.")
 
     def bake_stitching_data(self):
         """Ensures all on-demand stitching data is copied over.

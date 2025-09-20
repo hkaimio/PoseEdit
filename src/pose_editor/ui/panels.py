@@ -112,7 +112,10 @@ class PE_PT_StitchingPanel(bpy.types.Panel):
             row.prop(item, "selected_track", text="")
 
         layout.operator("pose_editor.assign_track", text="Assign Source at Current Frame")
-        layout.operator("pose_editor.load_camera_views")
+
+        layout.separator()
+
+        layout.operator("pose_editor.copy_stitching", text="Copy Stitching from...")
 
 
 class PE_PT_3DPipelinePanel(bpy.types.Panel):
