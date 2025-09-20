@@ -245,6 +245,7 @@ class PersonDataView:
             if pdv is not None:
                 ret.append(pdv)
         return ret
+    
 
     @classmethod
     def get_all_for_camera_view(cls, camera_view: "CameraView") -> list["PersonDataView"]:

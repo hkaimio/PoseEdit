@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from anytree import PreOrderIter
@@ -14,6 +14,10 @@ from .calibration import Calibration
 from .marker_data import MarkerData
 from .skeleton import SkeletonBase, get_skeleton
 from .triangulation import TriangulationOutput, triangulate_point
+
+if TYPE_CHECKING:
+    from .person_data_view import PersonDataView
+    from .camera_view import CameraView
 
 
 PERSON_DEFINITION_ID = dal.CustomProperty[str]("person_definition_id")
@@ -103,6 +107,24 @@ class RealPersonInstanceFacade:
         """
         all_objs = dal.find_all_objects_by_property(POSE_EDITOR_OBJECT_TYPE, "Person")
         return [cls(obj) for obj in all_objs]
+
+    def get_view(self, camera_view: "CameraView") -> Optional["PersonDataView"]:
+        """Gets the MarkerData for this person in a specific camera view.
+
+        Args:
+            camera_view: The CameraView instance representing the camera.
+
+        Returns:
+            MarkerData instance if found, otherwise None.
+        """
+        from .person_data_view import PersonDataView
+        all_pdvs = PersonDataView.get_all()
+        for pdv in all_pdvs:
+            pdv_person = pdv.get_person()
+            pdv_camera_view = pdv.get_camera_view()
+            if pdv_person and pdv_person.person_id == self.person_id and pdv_camera_view and pdv_camera_view == camera_view:
+                return pdv
+        return None
 
     def bake_stitching_data(self):
         """Ensures all on-demand stitching data is copied over.

@@ -83,21 +83,37 @@ class MarkerData:
         dal.set_custom_property(data_series_object, PERSON_DEFINITION_REF, person_id)
 
         action = dal.get_or_create_action(f"AC.{series_name}")
+        
+        instance = cls(data_series_object, series_name, skeleton_name, action=action, data_series_object=data_series_object)
 
-        # If it's a real person, initialize the new animated properties
+        # If it's a real person, initialize the new animated properties using slot-aware functions.
         if person:
+            # Assign the main action to the data-series object and give it its own slot.
+            # This prevents other DAL functions from creating a new, incorrect action.
+            dal.assign_action_to_object(data_series_object, action, slot_name=data_series_object.name)
+
             scene_start, scene_end = dal.get_scene_frame_range()
 
-            # Requested ID: Sparse, just one keyframe at the start
-            dal.set_custom_property(data_series_object, REQUESTED_SOURCE_ID, -1)
-            dal.add_keyframe(data_series_object, scene_start, {'["requested_source_id"]': [-1]})
+            # Requested ID: Sparse, just one keyframe at the start.
+            # Use slot-aware DAL functions to create and populate the F-Curve.
+            req_fcurve = dal.get_or_create_fcurve(action, data_series_object.name, '["requested_source_id"]', -1)
+            dal.set_fcurve_keyframes(req_fcurve, [(float(scene_start), -1.0)])
 
-            # Applied ID: Dense, one keyframe for every frame
-            dal.set_custom_property(data_series_object, APPLIED_SOURCE_ID, -1)
-            keyframes = [(frame, [-1]) for frame in range(scene_start, scene_end + 1)]
-            dal.set_fcurve_from_data(data_series_object, '["applied_source_id"]', keyframes)
+            # Applied ID: Dense, one keyframe for every frame.
+            # Use the high-performance, slot-aware `set_fcurves_from_numpy`.
+            num_frames = scene_end - scene_start + 1
+            applied_id_data = np.full((num_frames, 1), -1.0)
+            applied_id_columns = [(data_series_object.name, '["applied_source_id"]', -1)]
+            dal.set_fcurves_from_numpy(action, applied_id_columns, scene_start, applied_id_data)
 
-        return cls(data_series_object, series_name, skeleton_name, action=action, data_series_object=data_series_object)
+            # The action must be applied to the view for the markers to be animated.
+            if camera_view:
+                from .person_data_view import PersonDataView
+                person_data_view = person.get_view(camera_view)
+                if person_data_view:
+                    instance.apply_to_view(person_data_view)
+
+        return instance
 
     @classmethod
     def from_blender_object(cls, data_series_obj_ref: dal.BlenderObjRef) -> "MarkerData | None":

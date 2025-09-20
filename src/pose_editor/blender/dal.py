@@ -178,7 +178,7 @@ def add_keyframe(obj_ref: BlenderObjRef, frame: int, values: dict[str, any]) -> 
             if len(value) == 1:
                 value = value[0]
             blender_object[data_path] = value
-        blender_object.keyframe_insert(data_path=data_path, frame=frame)
+        blender_object.keyframe_insert(data_path=f'["{data_path}"]', frame=frame)
 
 
 def set_fcurve_from_data(obj_ref: BlenderObjRef, data_path: str, keyframes: list[tuple[int, list[float]]]) -> None:
@@ -571,7 +571,7 @@ def _get_or_create_channelbag(action: bpy.types.Action, slot: bpy.types.ActionSl
         strip = layer.strips[0]
 
     return strip.channelbag(slot, ensure=True)
-
+        
 
 def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> bpy.types.FCurve:
     """Gets or creates an F-Curve within the correct channelbag for a slot.
