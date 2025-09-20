@@ -46,7 +46,7 @@ class Person3DView:
     def _populate_marker_objects_by_role(self):
         """Populates the marker dictionary by finding child objects with a MARKER_ROLE."""
         self._marker_objects_by_role = {}
-        children = dal.get_children_of_object(self.view_root_object, recursive=False)
+        children = dal.get_children_of_object(self.view_root_object, recursive=True)
         for child_ref in children:
             role = dal.get_custom_property(child_ref, dal.MARKER_ROLE)
             if role:
@@ -103,10 +103,20 @@ class Person3DView:
         """Creates a new Person3DView, including its Blender objects."""
         from .person_facade import PERSON_DEFINITION_REF
 
+        # Create collection hierarchy
+        person_views_col = dal.get_or_create_collection("PersonViews")
+        triangulated_col = dal.get_or_create_collection("Triangulated", parent_collection=person_views_col)
+        p3d_col = dal.get_or_create_collection(view_name, parent_collection=triangulated_col)
+
+        body_part_collections = {}
+        for part_name in skeleton.body_parts():
+            body_part_collections[part_name] = dal.get_or_create_collection(part_name, parent_collection=p3d_col)
+
+        # The main P3D object goes into the triangulated_col
         view_root_object = dal.get_or_create_object(
             name=view_name,
             obj_type="EMPTY",
-            collection_name="PersonViews",
+            collection_name=triangulated_col.name,
             parent=parent_ref,
         )
 
@@ -120,7 +130,7 @@ class Person3DView:
         instance.color = color
         instance._marker_objects_by_role = {}
 
-        instance._create_marker_objects()
+        instance._create_marker_objects(body_part_collections)
         instance._create_armature()
         instance._create_drivers()
 
@@ -149,31 +159,34 @@ class Person3DView:
 
         print(f"Connected 3D view '{self.view_root_object.name}' to action '{marker_data.action.name}'.")
 
-    def _create_marker_objects(self):
+    def _create_marker_objects(self, body_part_collections: dict[str, "bpy.types.Collection"]):
         """Creates a marker object for each joint in the skeleton."""
-        collection = self.view_root_object._get_obj().users_collection[0]
         calibration = Calibration()
         all_camera_names = calibration.get_camera_names() if calibration._data else []
 
         for node in PreOrderIter(self.skeleton._skeleton):
             marker_name = node.name
+            body_part = self.skeleton.body_part(marker_name)
+            marker_collection = body_part_collections.get(body_part)
+
             marker_ref = None
             if hasattr(node, "id") and node.id is not None:
                 marker_ref = dal3d.create_sphere_marker(
                     parent=self.view_root_object,
                     name=marker_name,
                     color=self.color,
-                    collection=collection,
+                    collection=marker_collection,
                 )
             else:
                 marker_ref = dal.create_empty(
                     name=f"{self.view_root_object.name}_{marker_name}",
-                    collection=collection,
+                    collection=marker_collection,
                     parent_obj=self.view_root_object,
                 )
 
             # Initialize all custom properties that will be driven by F-Curves
             dal.set_custom_property(marker_ref, dal.MARKER_ROLE, marker_name)
+            dal.set_custom_property(marker_ref, dal.BODY_PART, body_part)
             marker_obj = marker_ref._get_obj()
             marker_obj["reprojection_error"] = 0.0
             marker_obj["contributing_cam_count"] = 0
@@ -222,6 +235,7 @@ class Person3DView:
         virtual_definitions = {
             "Hip": ("LHip", "RHip"),
             "Neck": ("LShoulder", "RShoulder"),
+            "Head":("LEar", "REar")
         }
 
         for virtual_name, (source1_name, source2_name) in virtual_definitions.items():

@@ -90,6 +90,7 @@ SERIES_NAME = CustomProperty[str]("series_name")
 SKELETON = CustomProperty[str]("skeleton")
 ACTION_NAME = CustomProperty[str]("action_name")
 MARKER_ROLE = CustomProperty[str]("marker_role")
+BODY_PART = CustomProperty[str]("body_part")
 IS_CAMERA_VIEW = CustomProperty[bool]("is_camera_view")
 POSE_EDITOR_OBJECT_TYPE = CustomProperty[str]("pose_editor_object_type")
 POSE_EDITOR_OBJECT_ID = CustomProperty[str]("pose_editor_object_id")
@@ -244,6 +245,7 @@ def create_marker(
     color: tuple[float, float, float, float],
     collection: bpy.types.Collection = None,
     image_path: str = "C:\\Users\\HarriKaimio\\projects\\pose-editor\\assets\\marker-128x128.png",
+    body_part: str | None = None,
 ) -> BlenderObjRef:
     """
     Creates a new empty object with an image, to be used as a marker.
@@ -254,6 +256,7 @@ def create_marker(
         color: A tuple (R, G, B, A) representing the emission color of the marker.
         collection: The collection to link the marker to.
         image_path: The path to the image file to use for the empty.
+        body_part: The name of the body part this marker belongs to.
 
     Returns:
         The newly created marker object wrapped in a BlenderObjRef.
@@ -287,8 +290,11 @@ def create_marker(
     # Add "quality" custom property
     marker_obj["quality"] = 1.0
 
-    # Store the marker role as a custom property
-    set_custom_property(BlenderObjRef(marker_obj.name), MARKER_ROLE, name)
+    # Store the marker role and body part as custom properties
+    marker_ref = BlenderObjRef(marker_obj.name)
+    set_custom_property(marker_ref, MARKER_ROLE, name)
+    if body_part:
+        set_custom_property(marker_ref, BODY_PART, body_part)
 
     # Store original color components as custom properties for drivers
     marker_obj["_original_color_r"] = color[0]
@@ -343,7 +349,7 @@ def create_marker(
     var_quality_hide.targets[0].id = marker_obj
     var_quality_hide.targets[0].data_path = '["quality"]'
 
-    return BlenderObjRef(marker_obj.name)
+    return marker_ref
 
 
 def create_camera(

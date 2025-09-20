@@ -348,16 +348,6 @@ COCO_133 = Node(
             id=None,
             children=[
                 Node(
-                    "Nose",
-                    id=0,
-                    children=[
-                        Node("REye", id=2),
-                        Node("LEye", id=1),
-                        Node("REar", id=4),
-                        Node("LEar", id=3),
-                    ],
-                ),
-                Node(
                     "RShoulder",
                     id=6,
                     children=[
@@ -369,6 +359,7 @@ COCO_133 = Node(
                                     "RWrist",
                                     id=10,
                                     children=[
+                                        Node("RPalm", id=112, children=[
                                         Node(
                                             "RThumb1",
                                             id=113,
@@ -463,7 +454,7 @@ COCO_133 = Node(
                                                     ],
                                                 ),
                                             ],
-                                        ),
+                                        )]),
                                     ],
                                 ),
                             ],
@@ -482,6 +473,8 @@ COCO_133 = Node(
                                     "LWrist",
                                     id=9,
                                     children=[
+                                        Node(
+                                            "LPalm", id=91, children=[
                                         Node(
                                             "LThumb1",
                                             id=92,
@@ -576,13 +569,27 @@ COCO_133 = Node(
                                                     ],
                                                 ),
                                             ],
-                                        ),
+                                        )])
                                     ],
                                 )
                             ],
                         ),
                     ],
                 ),
+                Node(
+                    "Head",
+                    id=None,
+                    children=[
+                    Node(
+                        "Nose",
+                        id=0,
+                        children=[
+                            Node("REye", id=2),
+                            Node("LEye", id=1),
+                            Node("REar", id=4),
+                            Node("LEar", id=3),
+                        ],
+                    ),
                 Node(
                     "Jaw1",
                     id=23,
@@ -954,7 +961,7 @@ COCO_133 = Node(
             ],
         ),
     ],
-)
+)])
 
 
 """COCO_17 (full-body without hands and feet, from OpenPose, AlphaPose, OpenPifPaf, YOLO-pose, MMPose, etc.)

@@ -98,7 +98,7 @@ class PersonDataView:
         skeleton,
         color,
         camera_view,
-        collection=None,
+        collection=None, # This will be ignored and re-calculated
         person: Optional[RealPersonInstanceFacade] = None,
         marker_data: Optional[MarkerData] = None,
     ) -> "PersonDataView":
@@ -110,7 +110,7 @@ class PersonDataView:
             skeleton: Skeleton object.
             color: Color tuple.
             camera_view: CameraView object.
-            collection: Blender collection to add to.
+            collection: (Ignored) The collection to add to.
             person: Optional RealPersonInstanceFacade to associate.
             marker_data: Optional MarkerData to connect to.
 
@@ -119,11 +119,19 @@ class PersonDataView:
         """
         from .camera_view import CameraView
 
-        if collection is None:
-            collection = dal.get_or_create_collection("PersonViews")
+        # Create the collection hierarchy
+        person_views_col = dal.get_or_create_collection("PersonViews")
+        camera_col = dal.get_or_create_collection(f"CameraView_{camera_view._obj.name}", parent_collection=person_views_col)
+        pv_col = dal.get_or_create_collection(view_name, parent_collection=camera_col)
 
+        # Create body part sub-collections
+        body_part_collections = {}
+        for part_name in skeleton.body_parts():
+            body_part_collections[part_name] = dal.get_or_create_collection(f"{part_name}_{view_name}", parent_collection=pv_col)
+
+        # The main PV object goes into the camera-level collection
         obj = dal.get_or_create_object(
-            name=view_name, obj_type="EMPTY", collection_name=collection.name if collection else None, parent=camera_view._obj
+            name=view_name, obj_type="EMPTY", collection_name=camera_col.name, parent=camera_view._obj
         )
         # Set custom properties
         dal.set_custom_property(obj, dal.SERIES_NAME, view_name)
@@ -135,7 +143,8 @@ class PersonDataView:
         instance = cls(obj)
 
         instance._init_from_blender_ref(obj)
-        instance._create_marker_objects(collection)
+        # Pass the body part collections to _create_marker_objects
+        instance._create_marker_objects(body_part_collections)
         instance._populate_marker_objects_by_role()
         instance._create_armature()
         instance._init_from_blender_ref(obj)
@@ -263,7 +272,7 @@ class PersonDataView:
                 ret.append(pdv)
         return ret
 
-    def _create_marker_objects(self, collection: "bpy.types.Collection"):
+    def _create_marker_objects(self, collections: dict[str,"bpy.types.Collection"]):
         """Creates a marker object for each joint in the skeleton."""
         if self.skeleton is None or self.skeleton._skeleton is None:
             return
@@ -275,7 +284,7 @@ class PersonDataView:
                 continue
 
             marker_name = node.name
-            dal.create_marker(parent=self.view_root_object, name=marker_name, color=self.color, collection=collection)
+            dal.create_marker(parent=self.view_root_object, name=marker_name, color=self.color, collection=collections.get(self.skeleton.body_part(node.name), None))
 
     def _create_armature(self):
         """Creates an armature with bones connecting the markers."""
