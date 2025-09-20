@@ -3,12 +3,16 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 
+from anytree import PreOrderIter
 import numpy as np
 
 # No direct 'import bpy' here! All Blender interactions go through the DAL.
 from ..blender import dal
 
 from typing import TYPE_CHECKING
+
+from .skeleton import get_skeleton
+
 if TYPE_CHECKING:
     from .camera_view import CameraView
     from .person_data_view import PersonDataView
@@ -88,6 +92,27 @@ class MarkerData:
 
         # If it's a real person, initialize the new animated properties using slot-aware functions.
         if person:
+            # Proactively create all f-curves and slots for the markers in the skeleton.
+            # This ensures that when `apply_to_view` is called, the slots already exist.
+            skeleton = get_skeleton(skeleton_name)
+            if skeleton:
+                marker_columns = []
+                for joint_node in PreOrderIter(skeleton._skeleton):
+                    if not (hasattr(joint_node, "id") and joint_node.id is not None):
+                        continue
+                    marker_name = joint_node.name
+                    marker_columns.extend([
+                        (marker_name, "location", 0),
+                        (marker_name, "location", 1),
+                        (marker_name, "location", 2),
+                        (marker_name, '["quality"]', -1),
+                    ])
+                # Create a 1-frame array of NaNs. `set_fcurves_from_numpy` will create
+                # the f-curves but won't add keyframes for NaN values.
+                nan_data = np.full((1, len(marker_columns)), np.nan)
+                scene_start, _ = dal.get_scene_frame_range()
+                dal.set_fcurves_from_numpy(action, marker_columns, scene_start, nan_data)
+
             # Assign the main action to the data-series object and give it its own slot.
             # This prevents other DAL functions from creating a new, incorrect action.
             dal.assign_action_to_object(data_series_object, action, slot_name=data_series_object.name)
@@ -96,15 +121,16 @@ class MarkerData:
 
             # Requested ID: Sparse, just one keyframe at the start.
             # Use slot-aware DAL functions to create and populate the F-Curve.
-            req_fcurve = dal.get_or_create_fcurve(action, data_series_object.name, '["requested_source_id"]', -1)
-            dal.set_fcurve_keyframes(req_fcurve, [(float(scene_start), -1.0)])
+            applied_id_data = np.full((1, 1), -1.0)
+            applied_id_columns = [(data_series_object.name, '["requested_source_id"]', -1)]
+            dal.set_fcurves_from_numpy(action, applied_id_columns, scene_start, applied_id_data, "CONSTANT")
 
             # Applied ID: Dense, one keyframe for every frame.
             # Use the high-performance, slot-aware `set_fcurves_from_numpy`.
             num_frames = scene_end - scene_start + 1
             applied_id_data = np.full((num_frames, 1), -1.0)
             applied_id_columns = [(data_series_object.name, '["applied_source_id"]', -1)]
-            dal.set_fcurves_from_numpy(action, applied_id_columns, scene_start, applied_id_data)
+            dal.set_fcurves_from_numpy(action, applied_id_columns, scene_start, applied_id_data, "CONSTANT")
 
             # The action must be applied to the view for the markers to be animated.
             if camera_view:

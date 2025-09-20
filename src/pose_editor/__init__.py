@@ -21,7 +21,7 @@ from .ui.panels import (
     PE_PT_StitchingPanel,
     PE_PT_ViewPanel,
 )
-
+from bpy.app.handlers import persistent
 
 class PE_OT_dummy(bpy.types.Operator):
     """A dummy operator to verify installation."""
@@ -52,6 +52,7 @@ _classes = [
 ]
 
 
+@persistent
 def on_load_post(dummy):
     """Handler for file load."""
     register_drivers()

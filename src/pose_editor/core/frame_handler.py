@@ -4,15 +4,17 @@
 
 """Module for the global frame change handler."""
 
-from typing import Callable
+from typing import Callable, Optional
 
 import bpy
+from bpy.app.handlers import persistent
+
 
 
 class FrameHandler:
     """A singleton class to manage callbacks for the frame_change_post event."""
 
-    _instance = None
+    _instance: Optional["FrameHandler"] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -54,9 +56,14 @@ class FrameHandler:
         if callback in self._callbacks:
             self._callbacks.remove(callback)
 
-    def _on_frame_change(self, scene, depsgraph):
+    @staticmethod
+    @persistent
+    def _on_frame_change(scene, depsgraph):
         """The actual function that gets called by Blender on frame change."""
-        for callback in self._callbacks:
+        if FrameHandler._instance is None:
+            return
+        
+        for callback in FrameHandler._instance._callbacks:
             try:
                 callback(scene, depsgraph)
             except Exception as e:

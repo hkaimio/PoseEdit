@@ -413,6 +413,10 @@ class PersonDataView:
             return
 
         md_obj = marker_data._obj
+        req_fcurve = dal.get_fcurve_on_object(md_obj, '["requested_source_id"]')
+        if req_fcurve:
+            dal.replace_fcurve_keyframes_in_range(req_fcurve, frame, frame+1, [(frame, track_id)], "CONSTANT")
+
         dal.set_custom_property(md_obj, REQUESTED_SOURCE_ID, track_id)
         dal.add_keyframe(md_obj, frame, {"requested_source_id": [track_id]})
 

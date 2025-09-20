@@ -902,10 +902,18 @@ def get_fcurve_on_object(obj_ref: BlenderObjRef, data_path: str, index: int = -1
         The found F-Curve, or None.
     """
     obj = obj_ref._get_obj()
-    if not obj or not obj.animation_data or not obj.animation_data.action:
+    if not obj or not obj.animation_data:
         return None
 
-    return obj.animation_data.action.fcurves.find(data_path, index=index)
+    action = obj.animation_data.action
+    slot = obj.animation_data.action_slot
+
+    if not action or not slot:
+        return None
+
+    channelbag = _get_or_create_channelbag(action, slot)
+
+    return channelbag.fcurves.find(data_path, index=index)
 
 
 def get_fcurve_keyframes(fcurve: bpy.types.FCurve) -> list[tuple[float, float]]:
@@ -942,7 +950,7 @@ def get_fcurve_keyframes_in_range(
 
 
 def replace_fcurve_keyframes_in_range(
-    fcurve: bpy.types.FCurve, start_frame: int, end_frame: int, new_keyframes: list[tuple[float, float]]
+    fcurve: bpy.types.FCurve, start_frame: int, end_frame: int, new_keyframes: list[tuple[float, float]], interpolation: str = "LINEAR"
 ):
     """Replaces keyframes in a given range with a new set of keyframes.
 
@@ -964,7 +972,7 @@ def replace_fcurve_keyframes_in_range(
     # Add the new keyframes
     for frame, value in new_keyframes:
         kp = fcurve.keyframe_points.insert(frame, value)
-        kp.interpolation = "LINEAR"
+        kp.interpolation = interpolation
 
     fcurve.update()
 
@@ -1008,6 +1016,7 @@ def replace_fcurve_segment_from_numpy(
     start_frame: int,
     end_frame: int,
     data: np.ndarray,
+    interpolation: str = "LINEAR"
 ) -> None:
     """Replaces a segment of multiple F-Curves in an Action from a NumPy array.
 
@@ -1044,7 +1053,7 @@ def replace_fcurve_segment_from_numpy(
             if not np.isnan(value):
                 new_keyframes_for_fcurve.append((float(current_frame), value))
 
-        replace_fcurve_keyframes_in_range(fcurve, start_frame, end_frame, new_keyframes_for_fcurve)
+        replace_fcurve_keyframes_in_range(fcurve, start_frame, end_frame, new_keyframes_for_fcurve, interpolation)
 
     # Update all F-Curves.
     for fcurve in action.fcurves: # Iterate through all fcurves in the action to ensure all are updated
@@ -1052,7 +1061,7 @@ def replace_fcurve_segment_from_numpy(
 
 
 def set_fcurves_from_numpy(
-    action: bpy.types.Action, columns: list[tuple[str, str, int]], start_frame: int, data: np.ndarray
+    action: bpy.types.Action, columns: list[tuple[str, str, int]], start_frame: int, data: np.ndarray, interpolation: str = "LINEAR"
 ) -> None:
     """Populates multiple F-Curves in an Action from a single NumPy array.
 
@@ -1101,7 +1110,7 @@ def set_fcurves_from_numpy(
                 kp_idx = keyframe_indices[col_idx]
                 kp = fcurve.keyframe_points[kp_idx]
                 kp.co = (float(current_frame), value)
-                kp.interpolation = "LINEAR"
+                kp.interpolation = interpolation
                 keyframe_indices[col_idx] += 1
 
     # 5. Update all F-Curves.
