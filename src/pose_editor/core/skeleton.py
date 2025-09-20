@@ -1,6 +1,12 @@
 
 from anytree import Node, findall
 from ..pose2sim.skeletons import COCO_133, get_skeleton_definition
+from dataclasses import dataclass
+@dataclass 
+class BodyPartDef:
+    name: str
+    parent_node_name: str
+    include_parent: bool
 
 class SkeletonBase:
     """
@@ -10,7 +16,9 @@ class SkeletonBase:
     structure of a skeleton with joints identified by names and IDs.
     """
 
-    def __init__(self, skeleton_def: Node, name: str = "UnnamedSkeleton"):
+    _body_part_map : dict[str, str] = {}
+
+    def __init__(self, skeleton_def: Node, name: str = "UnnamedSkeleton", body_parts: list[BodyPartDef] = []):
         """
         Initializes the Skeleton with the root node of an anytree skeleton definition.
 
@@ -19,6 +27,8 @@ class SkeletonBase:
         """
         self._skeleton = skeleton_def
         self._name = name
+        self._body_parts = body_parts
+        self._update_body_part_map_children(self._skeleton, "Unknown", body_parts)
 
     @property
     def name(self) -> str:
@@ -61,6 +71,30 @@ class SkeletonBase:
             return nodes[0].id
         return None
 
+    def body_part(self, joint_name: str) -> str:
+        """
+        Determines the body part associated with a given joint name.
+
+        Args:
+            joint_name: The name of the joint to find.
+
+        Returns:
+            The name of the body part if found, otherwise None.
+        """
+        return self._body_part_map.get(joint_name, "Unknown")
+    
+    def body_parts(self) -> list[str]:
+        """
+        Returns a list of all defined body parts in the skeleton.
+
+        Returns:
+            A list of body part names.
+        """
+        return [bp.name for bp in self._body_parts]
+    
+
+
+
     def calculate_fake_marker_pos(self, name: str, marker_data: dict[str, list[float]]) -> list[float] | None:
         """
         Placeholder for future implementation to calculate fake marker positions.
@@ -75,13 +109,43 @@ class SkeletonBase:
         pass
 
 
+    def _update_body_part_map_children(self, parent_node: Node, body_part_name: str, body_parts: list[BodyPartDef] = []):
+        """
+        Updates the internal mapping of joint names to body parts based on the defined body parts.
+        """
+        node_def = next((bp for bp in body_parts if bp.parent_node_name == parent_node.name), None)
+        current_node_part = body_part_name
+        if node_def:
+            if node_def.include_parent:
+                current_node_part = node_def.name
+            body_part_name = node_def.name
+        self._body_part_map[parent_node.name] = current_node_part
+
+        for child in parent_node.children:
+            self._update_body_part_map_children(child, body_part_name, body_parts)
+
+
+_coco_133_body_parts =  [
+        BodyPartDef("Torso", "Hip", True),
+        BodyPartDef("Left leg", "LHip", False),
+        BodyPartDef("Right leg", "RHip", False),
+        BodyPartDef("Left arm", "LShoulder", False),
+        BodyPartDef("Right arm", "RShoulder", False),
+        BodyPartDef("Head", "Head", False),
+        BodyPartDef("Left hand", "LPalm", True),
+        BodyPartDef("Right hand", "RPalm", True),
+        BodyPartDef("Left foot", "LAnkle", False),
+        BodyPartDef("Right foot", "RAnkle", False),
+    ]
+
 class COCO133Skeleton(SkeletonBase):
     """
     A specialized skeleton class for COCO_133 that calculates fake markers for Hip and Neck.
     """
 
+
     def __init__(self):
-        super().__init__(COCO_133, "COCO_133")
+        super().__init__(COCO_133, "COCO_133", _coco_133_body_parts)
 
     def calculate_fake_marker_pos(self, name: str, marker_data: dict[str, list[float]]) -> list[float] | None:
         """

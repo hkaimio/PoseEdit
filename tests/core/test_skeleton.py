@@ -159,3 +159,18 @@ def test_coco133_skeleton_calculate_fake_marker_pos_unhandled_name():
     skeleton = COCO133Skeleton()
     marker_data = {}
     assert skeleton.calculate_fake_marker_pos("SomeOtherMarker", marker_data) is None
+
+def test_coco133_body_parts_mapping():
+    """
+    Test that COCO133Skeleton correctly maps joints to body parts.
+    """
+    skeleton = COCO133Skeleton()
+    # Check some known mappings
+    assert skeleton.body_part("Nose") == "Head"
+    assert skeleton.body_part("LShoulder") == "Torso"
+    assert skeleton.body_part("RElbow") == "Right arm"
+    assert skeleton.body_part("RKnee") == "Right leg"
+    assert skeleton.body_part("Hip") == "Torso"
+    assert skeleton.body_part("Neck") == "Torso"
+    # Check a joint that doesn't exist
+    assert skeleton.body_part("NonExistentJoint") is "Unknown"
