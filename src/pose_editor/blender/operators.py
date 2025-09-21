@@ -350,8 +350,11 @@ class PE_OT_TriangulatePerson(bpy.types.Operator):
 
         for facade in selected_person_facades:
             try:
-                self.report({"INFO"}, f"Baking stitching data for {facade.name}...")
-                facade.bake_stitching_data()
+                try:
+                    self.report({"INFO"}, f"Baking stitching data for {facade.name}...")
+                    facade.bake_stitching_data()
+                except Exception as e:
+                    self.report({"ERROR"}, f"Baking stitching data failed for {facade.name}: {e}")
                 self.report({"INFO"}, f"Triangulating {facade.name}...")
                 facade.triangulate(start_frame, end_frame)
             except Exception as e:

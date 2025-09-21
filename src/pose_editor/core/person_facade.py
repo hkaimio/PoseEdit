@@ -333,9 +333,13 @@ class RealPersonInstanceFacade:
                     if not marker_data_2d or not marker_data_2d.action:
                         continue
 
-                    fcurve_x = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0)
-                    fcurve_y = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 1)
-                    fcurve_quality = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, '["quality"]', -1)
+                    try:
+                        fcurve_x = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0)
+                        fcurve_y = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 1)
+                        fcurve_quality = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, '["quality"]', -1)
+                    except Exception:
+                        print(f"Warning: Could not get f-curves for marker {marker_name} in view {cam_view.name}")
+                        continue
 
                     if fcurve_x and fcurve_y and fcurve_quality:
                         x = fcurve_x.evaluate(frame)
