@@ -168,6 +168,13 @@ class PersonDataView:
 
         return CameraView.get_by_id(camera_view_id)
 
+    @property
+    def camera_view_id(self) -> Optional[str]:
+        """
+        Returns the ID of the CameraView this PersonDataView belongs to, or None if not assigned.
+        """
+        return dal.get_custom_property(self._obj, CAMERA_VIEW_ID)
+
     def get_person(self) -> Optional[RealPersonInstanceFacade]:
         """Returns the RealPersonInstanceFacade associated with this view."""
         from .person_facade import RealPersonInstanceFacade, PERSON_DEFINITION_REF
@@ -180,7 +187,7 @@ class PersonDataView:
     @property
     def view_name(self) -> str:
         """Returns the name of this PersonDataView."""
-        return dal.get_custom_property(self._obj, dal.SERIES_NAME) or ""
+        return dal.get_custom_property  (self._obj, dal.SERIES_NAME) or ""
 
     @property
     def color(self) -> tuple[float, float, float, float]:
@@ -254,7 +261,6 @@ class PersonDataView:
             if pdv is not None:
                 ret.append(pdv)
         return ret
-    
 
     @classmethod
     def get_all_for_camera_view(cls, camera_view: "CameraView") -> list["PersonDataView"]:

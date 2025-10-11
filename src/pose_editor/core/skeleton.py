@@ -138,6 +138,29 @@ _coco_133_body_parts =  [
         BodyPartDef("Right foot", "RAnkle", False),
     ]
 
+class HALPE26Skeleton(SkeletonBase):
+    """
+    A specialized skeleton class for HALPE_26 that calculates fake markers for Hip and Neck.
+    """
+
+
+    def __init__(self):
+        super().__init__(get_skeleton_definition("HALPE_26"), "HALPE_26", _coco_133_body_parts)
+
+    def calculate_fake_marker_pos(self, name: str, marker_data: dict[str, list[float]]) -> list[float] | None:
+        """
+        Calculates fake marker positions for 'Hip' and 'Neck' based on other joint data.
+
+        Args:
+            name: The name of the fake marker to calculate ('Hip' or 'Neck').
+            marker_data: A dictionary containing existing marker data.
+                         Expected format: {'joint_name': [x, y, z, ...]} or {'joint_name': [x, y, likelihood, ...]}
+
+        Returns:
+            A list of floats representing the calculated position, or None if input data is insufficient.
+        """
+        return None
+
 class COCO133Skeleton(SkeletonBase):
     """
     A specialized skeleton class for COCO_133 that calculates fake markers for Hip and Neck.
@@ -191,6 +214,8 @@ def get_skeleton(skeleton_name: str) -> SkeletonBase:
     """
     if skeleton_name == "COCO_133":
         return COCO133Skeleton()
+    elif skeleton_name == "HALPE_26":
+        return HALPE26Skeleton()
     try:
         skeleton_def = get_skeleton_definition(skeleton_name)
         return SkeletonBase(skeleton_def, skeleton_name)

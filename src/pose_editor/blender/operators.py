@@ -22,7 +22,7 @@ from ..core.person_facade import (
     PERSON_DEFINITION_ID,
     RealPersonInstanceFacade,
 )
-from ..core.skeleton import COCO133Skeleton
+from ..core.skeleton import COCO133Skeleton, HALPE26Skeleton, get_skeleton
 from . import dal, scene_builder
 
 
@@ -72,6 +72,16 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
         subtype="DIR_PATH",
     )
 
+    skeleton_type: bpy.props.EnumProperty(
+        name="Skeleton Type",
+        description="Select the skeleton type for pose data",
+        items=[
+            ("COCO133", "COCO-133", "COCO-133 skeleton with 133 keypoints"),
+            ("HALPE26", "HALPE-26", "HALPE-26 skeleton with 26 keypoints"),
+        ],
+        default="COCO133"
+    )
+
     def execute(self, context):
         base_dir = Path(self.directory)
         videos_dir = base_dir / "videos"
@@ -108,9 +118,14 @@ class PE_OT_LoadCameraViews(bpy.types.Operator):
                 continue
 
             if json_dir.is_dir():
-                # For now, we'll hardcode the COCO-133 skeleton.
-                # This should be a user choice later.
-                skeleton = COCO133Skeleton()
+                # Create skeleton based on user selection
+                if self.skeleton_type == "COCO133":
+                    skeleton = COCO133Skeleton()
+                elif self.skeleton_type == "HALPE26":
+                    skeleton = HALPE26Skeleton()
+                else:
+                    # Fallback to COCO133 if something unexpected happens
+                    skeleton = COCO133Skeleton()
 
                 view = create_camera_view(
                     name=camera_name_short,
@@ -194,8 +209,24 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
         # Find all existing CameraView root objects
         camera_views = CameraView.get_all()
 
-        # For now, hardcode skeleton. In future, this should be from PersonDefinition.
-        skeleton = COCO133Skeleton()
+        # Get skeleton from existing person data views, or use COCO133 as fallback
+        skeleton = None
+        if camera_views:
+            # Try to get skeleton from an existing PersonDataView
+            existing_pdvs = PersonDataView.get_all()
+            if existing_pdvs:
+                skeleton = existing_pdvs[0].skeleton
+            
+            # If no existing PDVs or skeleton, fallback to getting from camera view properties
+            if not skeleton and camera_views:
+                # Get skeleton from first camera view's associated person data if available
+                cam_view_pdvs = PersonDataView.get_all_for_camera_view(camera_views[0])
+                if cam_view_pdvs:
+                    skeleton = cam_view_pdvs[0].skeleton
+        
+        # Final fallback to COCO133 if no skeleton found
+        if not skeleton:
+            skeleton = COCO133Skeleton()
 
         for i, cam_view in enumerate(camera_views):
             cam_view_name = dal.get_custom_property(cam_view._obj, dal.SERIES_NAME)

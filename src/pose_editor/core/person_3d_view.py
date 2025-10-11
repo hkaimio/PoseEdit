@@ -6,6 +6,7 @@
 
 from typing import TYPE_CHECKING, Optional
 
+import numpy as np
 from anytree import PreOrderIter
 
 from ..blender import dal, dal3d
@@ -158,6 +159,100 @@ class Person3DView:
             dal.assign_action_to_object(marker_obj_ref, marker_data.action, slot_name=role)
 
         print(f"Connected 3D view '{self.view_root_object.name}' to action '{marker_data.action.name}'.")
+
+    def get_animation_data_as_numpy(self) -> tuple[np.ndarray, list[tuple[str, str]]]:
+        """
+        Retrieves the triangulated 3D animation data as a NumPy array.
+
+        Returns:
+            A tuple containing:
+            - A 2D NumPy array of shape (frames, columns) with the animation data.
+            - A list of (marker_name, data_description) tuples for each column.
+        """
+        # 1. Get MarkerData and Action
+        marker_data_id = dal.get_custom_property(self.view_root_object, dal.MARKER_DATA_ID)
+        if not marker_data_id:
+            return np.array([]), []
+
+        marker_data_obj_ref = dal.get_object_by_name(marker_data_id)
+        if not marker_data_obj_ref:
+            return np.array([]), []
+
+        marker_data = MarkerData.from_blender_object(marker_data_obj_ref)
+        if not marker_data or not marker_data.action:
+            return np.array([]), []
+
+        action = marker_data.action
+
+        # 2. Get frame range
+        start_frame, end_frame = dal.get_scene_frame_range()
+        num_frames = end_frame - start_frame + 1
+
+        # 3. Get camera names
+        calibration = Calibration()
+        camera_names = calibration.get_camera_names() if calibration._data else []
+
+        column_info = []
+        all_columns_data = []
+
+        # 4. Iterate through markers in skeleton order
+        for node in PreOrderIter(self.skeleton._skeleton):
+            marker_name = node.name
+
+            # Check if it's a real marker that has data
+            if marker_name not in self._marker_objects_by_role:
+                continue
+
+            # -- Location and Interpolated --
+            location_fcurves = [
+                dal.get_fcurve_from_action(action, marker_name, "location", i) for i in range(3)
+            ]
+
+            # Location data
+            for i, axis in enumerate(["x", "y", "z"]):
+                column_info.append((marker_name, axis))
+                if location_fcurves[i]:
+                    all_columns_data.append(dal.sample_fcurve(location_fcurves[i], start_frame, end_frame))
+                else:
+                    all_columns_data.append(np.full(num_frames, np.nan))
+
+            # Interpolated data
+            column_info.append((marker_name, "interpolated"))
+            keyframed_frames = set()
+            for fcurve in location_fcurves:
+                if fcurve:
+                    keyframes = dal.get_fcurve_keyframes(fcurve)
+                    keyframed_frames.update([int(frame) for frame, _ in keyframes])
+
+            interpolated_col = np.zeros(num_frames, dtype=bool)
+            for frame_idx in range(num_frames):
+                if (start_frame + frame_idx) in keyframed_frames:
+                    interpolated_col[frame_idx] = True
+            all_columns_data.append(interpolated_col)
+
+            # -- Custom Properties --
+            properties_to_fetch = [
+                ("reprojection_error", '["reprojection_error"]', -1),
+                ("contributing_cameras_count", '["contributing_cam_count"]', -1),
+            ]
+            for cam_name in camera_names:
+                properties_to_fetch.append((f"contrib_{cam_name}", f'["contrib_{cam_name}"]', -1))
+
+            for prop_name, data_path, index in properties_to_fetch:
+                column_info.append((marker_name, prop_name))
+                fcurve = dal.get_fcurve_from_action(action, marker_name, data_path, index)
+                if fcurve:
+                    all_columns_data.append(dal.sample_fcurve(fcurve, start_frame, end_frame))
+                else:
+                    all_columns_data.append(np.full(num_frames, np.nan))
+
+        # 5. Combine into a single array
+        if not all_columns_data:
+            return np.array([]), []
+
+        final_data = np.column_stack(all_columns_data)
+
+        return final_data, column_info
 
     def _create_marker_objects(self, body_part_collections: dict[str, "bpy.types.Collection"]):
         """Creates a marker object for each joint in the skeleton."""
