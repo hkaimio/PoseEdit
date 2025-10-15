@@ -120,11 +120,16 @@ def build_bone_hierarchy(armature_obj, bone_to_hik_map, use_local_coords=True):
             children_nodes = []
             for child in pose_bone.children:
                 if child.name in bone_to_hik_map:
-                    child_node = process_bone(child, parent_name)
-                    if child_node:
-                        children_nodes.append(child_node)
+                    child_result = process_bone(child, parent_name)
+                    if child_result:
+                        # If it's a single node, add it
+                        if isinstance(child_result, dict):
+                            children_nodes.append(child_result)
+                        # If it's a list of nodes (from nested skipped bones), extend
+                        elif isinstance(child_result, list):
+                            children_nodes.extend(child_result)
             
-            # Return children directly (flatten the hierarchy)
+            # Return list of children (will be flattened by parent)
             return children_nodes if children_nodes else None
         
         # Get transform
@@ -154,12 +159,14 @@ def build_bone_hierarchy(armature_obj, bone_to_hik_map, use_local_coords=True):
             if child.name in bone_to_hik_map:
                 child_result = process_bone(child, bone_name)
                 if child_result:
-                    # If child_result is a list (from skipped bone), extend children
-                    if isinstance(child_result, list):
-                        bone_node['children'].extend(child_result)
-                    else:
+                    # If child_result is a dict (single bone), append it
+                    if isinstance(child_result, dict):
                         bone_node['children'].append(child_result)
+                    # If child_result is a list (from skipped bone), extend children
+                    elif isinstance(child_result, list):
+                        bone_node['children'].extend(child_result)
         
+        # Return single bone node (not a list)
         return bone_node
     
     root_node = process_bone(root_bone)
@@ -296,13 +303,12 @@ def export_armature_animation_to_yaml(armature_name, bone_to_hik_map, output_fil
 
 # Example bone mapping with None for bones to skip
 bone_to_hik_map = {
-    'hips': 'Hips',
-    'spine': 'Spine',
-    'spine.001': 'Spine3',
-    'spine.002': 'Spine6',
-    'chest_root': None,    # Skip this bone but include its children
+    'spine': 'Hips',
+    'spine.001': 'Spine',
+    'spine.002': 'Spine3',
+    'chest_root': 'Spine6',    # Skip this bone but include its children
     'spine.003': 'Spine9',
-    'spine.004': "Neck",  
+    'spine.004': 'Neck',  
     'spine.005': 'Neck1',
     'spine.006': 'Head',
     'shoulder_connect.L': None,    # Skip
@@ -329,16 +335,16 @@ armature_name = "metarig"  # Replace with your armature name
 export_armature_tpose_to_yaml(
     armature_name,
     bone_to_hik_map,
-    "c:\\temp\\skeleton.yaml",
-    use_local_coords=False
+    "c:\\temp\\skeleton_local_coords.yaml",
+    use_local_coords=True
 )
 
 # Export animation (frames 1 to 100)
 export_armature_animation_to_yaml(
     armature_name,
     bone_to_hik_map,
-    "c:\\temp\\animation.yaml",
+    "c:\\temp\\animation_local_coords.yaml",
     frame_start=1,
     frame_end=100,
-    use_local_coords=False
+    use_local_coords=True
 )
