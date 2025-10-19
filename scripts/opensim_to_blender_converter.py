@@ -1127,8 +1127,12 @@ class OpenSimToBlenderConverter:
             bpy.ops.object.mode_set(mode='POSE')
             self._apply_joint_transformations()
             
-            # Step 5: Exit to object mode and finalize
-            print("Step 5: Finalizing...")
+            # Step 5: Setup animation system for PinJoints
+            print("Step 5: Setting up animation system...")
+            self._setup_animation_system()
+            
+            # Step 6: Exit to object mode and finalize
+            print("Step 6: Finalizing...")
             bpy.ops.object.mode_set(mode='OBJECT')
             self._add_metadata()
             
@@ -1325,6 +1329,39 @@ class OpenSimToBlenderConverter:
                 if rotation_quat:
                     final_rotation = final_rotation @ rotation_quat
                     print(f"        Applied rotation: {rotation_quat}")
+        
+        return final_rotation
+
+    def _calculate_coordinate_default_rotation_for_joint(self, joint: Joint) -> Quaternion:
+        """Calculate the rotation from coordinate default values for a Joint object"""
+        if not joint.coordinates:
+            return Quaternion()
+        
+        # Start with identity
+        final_rotation = Quaternion()
+        
+        print(f"    Processing {len(joint.coordinates)} coordinates for joint {joint.name}:")
+        
+        for coord in joint.coordinates:
+            print(f"      {coord.name}: {coord.default_value} ({coord.coordinate_type})")
+            
+            # Only apply rotational coordinates to bone orientation
+            if coord.coordinate_type == 'rotational' and abs(coord.default_value) > 1e-6:
+                # Use SpatialTransform data to determine rotation axis
+                if joint.spatial_transform:
+                    # Convert joint data to dict format for compatibility
+                    coord_list = [
+                        {'name': c.name, 'default_value': c.default_value, 'coordinate_type': c.coordinate_type} 
+                        for c in joint.coordinates
+                    ]
+                    joint_data = {
+                        'spatial_transform': joint.spatial_transform,
+                        'coordinates': coord_list
+                    }
+                    rotation_quat = self._get_coordinate_rotation(coord.name, coord.default_value, joint_data)
+                    if rotation_quat:
+                        final_rotation = final_rotation @ rotation_quat
+                        print(f"        Applied rotation: {rotation_quat}")
         
         return final_rotation
         
@@ -1563,7 +1600,7 @@ class OpenSimToBlenderConverter:
             # Create Joint object
             joint = Joint(
                 name=joint_dict['name'],
-                joint_type=joint_dict.get('type', 'CustomJoint'),
+                joint_type=joint_dict.get('joint_type', 'CustomJoint'),
                 parent_frame=joint_dict.get('parent_frame', ''),
                 child_frame=joint_dict.get('child_frame', ''),
                 parent_body=joint_dict['parent_body'],
@@ -2019,27 +2056,184 @@ class OpenSimToBlenderConverter:
         """Apply coordinate transformations using joint spatial transforms"""
         print("Applying joint transformations using spatial transforms...")
         
+        # Ensure we're in pose mode and have the right armature active
+        bpy.context.view_layer.objects.active = self.armature_obj
+        bpy.ops.object.mode_set(mode='POSE')
+        
         for joint in self.joint_objects:
             print(f"  Processing joint: {joint.name}")
             if not joint.coordinates or not joint.spatial_transform:
                 continue
             
-            # Find the child bone
-            child_bone_name = joint.child_body
-            if child_bone_name not in bpy.context.object.pose.bones:
+            # Try to find corresponding bone by joint name instead of body name
+            joint_bone_name = f"JOINT-{joint.name}"
+            body_bone_name = f"BODY-{joint.child_body}-{joint.name}"
+            
+            # Try joint bone first, then body bone
+            pose_bone = None
+            for bone_name in [joint_bone_name, body_bone_name, joint.child_body]:
+                if bone_name in self.armature_obj.pose.bones:
+                    pose_bone = self.armature_obj.pose.bones[bone_name]
+                    print(f"    Found pose bone: {bone_name}")
+                    break
+            
+            if not pose_bone:
+                print(f"    Warning: No pose bone found for joint {joint.name}")
                 continue
             
-            print(f"    Applying to child bone: {child_bone_name}")
-            pose_bone = bpy.context.object.pose.bones[child_bone_name]
+            # Calculate coordinate default rotation safely
+            try:
+                coord_rotation = self._calculate_coordinate_default_rotation_for_joint(joint)
+                print(f"    Applying coordinate rotation: {coord_rotation}")
+                
+                # Apply the rotation to the pose bone
+                pose_bone.rotation_mode = 'QUATERNION'
+                pose_bone.rotation_quaternion = coord_rotation
+                
+                print(f"Applied coordinate rotation to {pose_bone.name}: {[c.name for c in joint.coordinates]}")
+            except Exception as e:
+                print(f"    Error applying rotation to {pose_bone.name}: {e}")
+                continue
+
+    def _setup_animation_system(self):
+        """Setup animation system for PinJoints"""
+        print("Setting up animation system...")
+        
+        # First, create the coordinates bone in edit mode
+        bpy.ops.object.mode_set(mode='EDIT')
+        self._create_coordinates_bone()
+        
+        # Switch back to pose mode and add custom properties and drivers
+        bpy.ops.object.mode_set(mode='POSE')
+        self._add_pin_joint_custom_properties()
+        self._add_pin_joint_drivers()
+    
+    def _create_coordinates_bone(self):
+        """Create a special bone to hold coordinate custom properties"""
+        print("Creating coordinates bone...")
+        
+        # Create the coordinates bone
+        coords_bone = self.armature_data.edit_bones.new("COORDINATES")
+        
+        # Position it at the origin, small size
+        coords_bone.head = Vector((0, 0, 0))
+        coords_bone.tail = Vector((0, 0, 0.1))
+        
+        # Make it independent (no parent)
+        coords_bone.parent = None
+        
+        print("Created COORDINATES bone")
+    
+    def _add_pin_joint_custom_properties(self):
+        """Add custom properties for each PinJoint coordinate"""
+        print("Adding custom properties for PinJoint coordinates...")
+        
+        # Ensure we have the right armature active
+        bpy.context.view_layer.objects.active = self.armature_obj
+        
+        # Get the COORDINATES pose bone
+        coords_pose_bone = self.armature_obj.pose.bones.get("COORDINATES")
+        if not coords_pose_bone:
+            print("Error: COORDINATES bone not found in pose mode")
+            return
+        
+        pin_joint_count = 0
+        
+        for joint in self.joint_objects:
+            if joint.joint_type.lower() != 'pinjoint':
+                continue
             
-            # Get coordinate default rotation
-            coord_rotation = joint.get_coordinate_default_rotation()
-            print(f"    Applying coordinate rotation: {coord_rotation}")
-            # Apply the rotation to the pose bone
-            pose_bone.rotation_mode = 'QUATERNION'
-            pose_bone.rotation_quaternion = coord_rotation.to_quaternion()
+            pin_joint_count += 1
+            print(f"  Processing PinJoint: {joint.name}")
             
-            print(f"Applied coordinate rotation to {child_bone_name}: {[c.name for c in joint.coordinates]}")
+            # PinJoints should have exactly one rotational coordinate
+            rotational_coords = [c for c in joint.coordinates if c.coordinate_type == 'rotational']
+            
+            if not rotational_coords:
+                print(f"    Warning: PinJoint {joint.name} has no rotational coordinates")
+                continue
+            
+            coord = rotational_coords[0]  # Take the first (should be only) rotational coordinate
+            
+            # Create custom property name
+            prop_name = f"{joint.name}_{coord.name}"
+            
+            # Set the property with default value and range
+            coords_pose_bone[prop_name] = coord.default_value
+            
+            # Set property UI range and description
+            if hasattr(coords_pose_bone, 'id_properties_ui'):
+                ui = coords_pose_bone.id_properties_ui(prop_name)
+                ui.update(
+                    min=coord.range_min,
+                    max=coord.range_max,
+                    description=f"Rotation angle for {joint.name} ({coord.name})"
+                )
+            
+            print(f"    Added property: {prop_name} = {coord.default_value:.3f} "
+                  f"(range: [{coord.range_min:.1f}, {coord.range_max:.1f}])")
+        
+        print(f"Added custom properties for {pin_joint_count} PinJoints")
+    
+    def _add_pin_joint_drivers(self):
+        """Add drivers to PinJoint bones that read from custom properties"""
+        print("Adding drivers for PinJoint coordinates...")
+        
+        # Ensure we have the right armature active
+        bpy.context.view_layer.objects.active = self.armature_obj
+        
+        pin_joint_count = 0
+        
+        for joint in self.joint_objects:
+            if joint.joint_type.lower() != 'pinjoint':
+                continue
+            
+            pin_joint_count += 1
+            
+            # Find the joint bone
+            joint_bone_name = f"JOINT-{joint.name}"
+            joint_pose_bone = self.armature_obj.pose.bones.get(joint_bone_name)
+            
+            if not joint_pose_bone:
+                print(f"    Warning: Joint bone {joint_bone_name} not found")
+                continue
+            
+            print(f"  Adding driver for PinJoint: {joint.name}")
+            
+            # Get the rotational coordinate
+            rotational_coords = [c for c in joint.coordinates if c.coordinate_type == 'rotational']
+            if not rotational_coords:
+                continue
+            
+            coord = rotational_coords[0]
+            prop_name = f"{joint.name}_{coord.name}"
+            
+            # Set rotation mode to XYZ Euler for easier driver setup
+            joint_pose_bone.rotation_mode = 'XYZ'
+            
+            # Add driver to X rotation (PinJoint rotates around X axis)
+            driver = joint_pose_bone.driver_add("rotation_euler", 0)  # 0 = X axis
+            
+            # Set driver type to scripted expression
+            driver.driver.type = 'SCRIPTED'
+            
+            # Add variable for the custom property
+            var = driver.driver.variables.new()
+            var.name = "prop_value"
+            var.type = 'SINGLE_PROP'
+            
+            # Set the variable to read from the COORDINATES bone custom property
+            target = var.targets[0]
+            target.id = self.armature_obj
+            target.data_path = f'pose.bones["COORDINATES"]["{prop_name}"]'
+            
+            # Set the driver expression (subtract default value since it's baked into rest pose)
+            default_value = coord.default_value
+            driver.driver.expression = f"prop_value - ({default_value})"
+            
+            print(f"    Added X rotation driver: {prop_name} - {default_value:.3f}")
+        
+        print(f"Added drivers for {pin_joint_count} PinJoints")
 
 
 # IMPORTANT!!! DO NOT CHANGE THE CODE BELOW THIS LINE WITHOUT CONSULTING THE USER !!!
@@ -2057,7 +2251,7 @@ opensim_data = analyzer.analyze()
 # Convert to Blender armature
 converter = OpenSimToBlenderConverter(opensim_data)
 armature = converter.convert("OpenSim_Skeleton")
-print_body_joint_hierarchy(converter)
+# print_body_joint_hierarchy(converter)
 
 print(f"Created armature: {armature.name}")
 print(f"Total bones: {len(armature.data.bones)}")
