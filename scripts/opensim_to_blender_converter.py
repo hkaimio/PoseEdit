@@ -1106,6 +1106,10 @@ class OpenSimToBlenderConverter:
             self._create_body_objects()
             print(f"Created {len(self.body_objects)} body objects")
             
+            # Print hierarchy for debugging
+            print("\nBody/Joint Hierarchy:")
+            print_body_joint_hierarchy(self)
+            
             # Step 2: Create armature
             print("Step 2: Creating armature...")
             self._create_armature(armature_name)
@@ -1492,97 +1496,6 @@ class OpenSimToBlenderConverter:
         # Set as active object
         bpy.context.view_layer.objects.active = self.armature_obj
     
-    def _create_bone_collections(self):
-        """Create bone collections for organization"""
-        if hasattr(self.armature_data, 'collections'):  # Blender 4.0+
-            joint_collection = self.armature_data.collections.new("OpenSim Joints")
-            body_collection = self.armature_data.collections.new("OpenSim Bodies")
-        # For older Blender versions, we'll assign collections after creation
-    
-    def _create_bones(self):
-        """Create all bones in the armature"""
-        edit_bones = self.armature_data.edit_bones
-        
-        # Create bones in order: bodies first, then joints
-        # This ensures parents exist before children
-        for bone in self.bones.values():
-            if bone.bone_type == 'body':
-                edit_bone = edit_bones.new(bone.name)
-                edit_bone.head = bone.head_position
-                edit_bone.tail = bone.tail_position
-        
-        for bone in self.bones.values():
-            if bone.bone_type == 'joint':
-                edit_bone = edit_bones.new(bone.name)
-                edit_bone.head = bone.head_position
-                edit_bone.tail = bone.tail_position
-    
-    def _position_bones(self):
-        """Adjust bone positions and orientations to point towards children"""
-        edit_bones = self.armature_data.edit_bones
-        
-        for bone_name, bone_data in self.bones.items():
-            edit_bone = edit_bones.get(bone_name)
-            if not edit_bone:
-                continue
-            
-            # Update the edit bone's head position from calculated global position
-            edit_bone.head = bone_data.head_position
-            
-            # Calculate tail position based on children
-            if bone_data.children:
-                # Point towards first child
-                child_name = bone_data.children[0]
-                child_bone_data = self.bones.get(child_name)
-                if child_bone_data:
-                    direction = child_bone_data.head_position - bone_data.head_position
-                    if direction.length > self.min_bone_length:
-                        edit_bone.tail = bone_data.head_position + direction
-                    else:
-                        # Use default direction if too close
-                        edit_bone.tail = bone_data.head_position + Vector((0, 0, self.default_bone_length))
-                else:
-                    # Child bone not found, use default direction
-                    edit_bone.tail = bone_data.head_position + Vector((0, 0, self.default_bone_length))
-            else:
-                # No children, use default direction
-                edit_bone.tail = bone_data.head_position + Vector((0, 0, self.default_bone_length))
-            
-            # Ensure minimum bone length
-            bone_length = (edit_bone.tail - edit_bone.head).length
-            if bone_length < self.min_bone_length:
-                direction = (edit_bone.tail - edit_bone.head).normalized()
-                edit_bone.tail = edit_bone.head + direction * self.min_bone_length
-                
-            # Debug output
-            print(f"Bone {bone_name}: head={edit_bone.head}, tail={edit_bone.tail}, length={bone_length:.3f}")
-    
-    def _setup_hierarchy(self):
-        """Establish parent-child relationships"""
-        edit_bones = self.armature_data.edit_bones
-        
-        for bone_name, bone_data in self.bones.items():
-            if bone_data.parent_name:
-                edit_bone = edit_bones.get(bone_name)
-                parent_bone = edit_bones.get(bone_data.parent_name)
-                
-                if edit_bone and parent_bone:
-                    edit_bone.parent = parent_bone
-    
-    def _assign_bone_collections(self):
-        """Assign bones to their respective collections"""
-        if hasattr(self.armature_data, 'collections'):  # Blender 4.0+
-            joint_collection = self.armature_data.collections.get("OpenSim Joints")
-            body_collection = self.armature_data.collections.get("OpenSim Bodies")
-            
-            for bone_name, bone_data in self.bones.items():
-                pose_bone = self.armature_obj.pose.bones.get(bone_name)
-                if pose_bone:
-                    if bone_data.bone_type == 'joint' and joint_collection:
-                        joint_collection.assign(pose_bone)
-                    elif bone_data.bone_type == 'body' and body_collection:
-                        body_collection.assign(pose_bone)
-    
     def _add_metadata(self):
         """Add OpenSim metadata as custom properties"""
         # Add model info as custom properties
@@ -1700,98 +1613,306 @@ class OpenSimToBlenderConverter:
         print(f"Created {len(self.body_objects)} Body objects and {len(self.joint_objects)} Joint objects")
 
     def _create_bones_from_body_hierarchy(self):
-        """Create Blender bones using the Body/Joint hierarchy"""
-        print("Creating bones from Body/Joint hierarchy...")
+        """
+        Create Blender bones with new approach:
+        - JOINT-<joint_name>: from parent socket to child socket
+        - BODY-<child_joint_name>: from parent joint socket to each child joint socket
+        """
+        print("Creating bones with new socket-based approach...")
         
-        # Find the root body (usually 'ground' or one with no parent)
-        root_bodies = []
-        child_bodies = set()
-        
+        # Step 1: Create all joint bones (JOINT-<joint_name>)
+        print("Creating joint bones...")
         for joint in self.joint_objects:
-            child_bodies.add(joint.child_body)
+            self._create_joint_bone(joint)
         
-        for body_name in self.body_objects:
-            if body_name not in child_bodies:
-                root_bodies.append(body_name)
+        # Step 2: Create all body bones (BODY-<child_joint_name>)
+        print("Creating body bones...")
+        for joint in self.joint_objects:
+            self._create_body_bone(joint)
         
-        if not root_bodies:
-            # Fallback: use first body as root
-            root_bodies = [list(self.body_objects.keys())[0]]
-        
-        print(f"Root bodies: {root_bodies}")
-        root_bodies = ["pelvis"]
-        
-        # Create bones recursively from root
-        created_bones = set()
-        for root_body in root_bodies:
-            self._create_bone_recursive(root_body, None, created_bones)
+        # Step 3: Setup hierarchy relationships
+        print("Setting up bone hierarchy...")
+        self._setup_new_bone_hierarchy()
 
-    def _create_bone_recursive(self, body_name: str, parent_bone_name: str, created_bones: set):
-        """Recursively create bones for a body and its children"""
-        if body_name in created_bones:
-            return
+    def _create_joint_bone(self, joint):
+        """Create a bone from parent socket to child socket for a joint"""
+        joint_bone_name = f"JOINT-{joint.name}"
         
-        created_bones.add(body_name)
+        # Get socket positions
+        parent_socket_pos = self._get_joint_socket_position(joint, is_parent=True)
+        child_socket_pos = self._get_joint_socket_position(joint, is_parent=False)
         
-        # Get body object
-        body = self.body_objects.get(body_name)
-        if not body:
-            print(f"Warning: Body {body_name} not found")
-            return
+        # Create the bone
+        bone = self.armature_data.edit_bones.new(joint_bone_name)
+        bone.head = parent_socket_pos
+        bone.tail = child_socket_pos
         
-        # Create bone for this body
-        bone = self.armature_data.edit_bones.new(body_name)
+        # Ensure minimum bone length
+        bone_length = (bone.tail - bone.head).length
+        if bone_length < 0.01:
+            # Add small offset in Z direction
+            bone.tail = bone.head + Vector((0, 0, 0.05))
         
-        if parent_bone_name and parent_bone_name in self.armature_data.edit_bones:
-            bone.parent = self.armature_data.edit_bones[parent_bone_name]
+        print(f"Created joint bone: {joint_bone_name} from {parent_socket_pos} to {child_socket_pos}")
+
+    def _create_body_bone(self, joint):
+        """Create a bone from parent joint socket to child joint socket for body"""
+        body_bone_name = f"BODY-{joint.name}"
+        
+        # Find the parent joint that connects to this joint's parent body
+        parent_joint = None
+        for j in self.joint_objects:
+            if j.child_body == joint.parent_body:
+                parent_joint = j
+                break
+        
+        if parent_joint is None:
+            # This is connected to ground/root - create from origin
+            parent_socket_pos = Vector((0, 0, 0))
+        else:
+            # Get socket position from parent joint
+            parent_socket_pos = self._get_joint_socket_position(parent_joint, is_parent=False)
+        
+        # Get socket position for this joint
+        child_socket_pos = self._get_joint_socket_position(joint, is_parent=True)
+        
+        # Create the bone
+        bone = self.armature_data.edit_bones.new(body_bone_name)
+        bone.head = parent_socket_pos
+        bone.tail = child_socket_pos
+        
+        # Ensure minimum bone length
+        bone_length = (bone.tail - bone.head).length
+        if bone_length < 0.01:
+            # Add small offset in Z direction
+            bone.tail = bone.head + Vector((0, 0, 0.05))
+        
+        print(f"Created body bone: {body_bone_name} from {parent_socket_pos} to {child_socket_pos}")
+
+    def _get_joint_socket_position(self, joint, is_parent: bool):
+        """Get the global socket position for a joint (parent or child side)"""
+        try:
+            # Get the appropriate offset frame
+            if is_parent:
+                offset_frame = joint.parent_offset_frame
+                body_name = joint.parent_body
+            else:
+                offset_frame = joint.child_offset_frame
+                body_name = joint.child_body
             
-            # Find the joint connecting parent to this body
-            connecting_joint = None
-            for joint in self.joint_objects:
-                if joint.child_body == body_name:
-                    connecting_joint = joint
+            if offset_frame is None:
+                # No offset frame - use body center or origin
+                if body_name == "ground":
+                    return Vector((0, 0, 0))
+                else:
+                    # For bodies without offset frames, use the global transform chain
+                    return self._get_body_global_position(body_name)
+            
+            # Calculate global position by traversing hierarchy from root
+            global_transform = self._get_global_transform_to_body(body_name)
+            
+            # Get local transform from offset frame
+            local_transform = offset_frame.get_transform_matrix()
+            
+            # Combine global body transform with local offset frame transform
+            final_transform = global_transform @ local_transform
+            
+            # Extract translation (socket position)
+            translation = final_transform.to_translation()
+            
+            # Convert from OpenSim coordinate system (Y-up) to Blender (Z-up)
+            blender_pos = Vector((translation.x, translation.z, -translation.y))
+            
+            return blender_pos
+            
+        except Exception as e:
+            print(f"Error getting socket position for joint {joint.name} ({'parent' if is_parent else 'child'}): {e}")
+            return Vector((0, 0, 0))
+
+    def _get_body_global_position(self, body_name: str):
+        """Get the global position of a body's center"""
+        body = self.body_objects.get(body_name)
+        if body:
+            # Convert body mass center to Blender coordinates
+            mc = body.mass_center
+            return Vector((mc[0], mc[2], -mc[1]))
+        return Vector((0, 0, 0))
+
+    def _get_global_transform_to_body(self, target_body_name: str):
+        """
+        Calculate the global transformation matrix from root to the target body
+        by traversing the joint hierarchy
+        """
+        if target_body_name == "ground":
+            return Matrix.Identity(4)
+        
+        # Find the chain of joints from root to target body
+        joint_chain = self._find_joint_chain_to_body(target_body_name)
+        
+        if not joint_chain:
+            print(f"Warning: No joint chain found to body {target_body_name}")
+            return Matrix.Identity(4)
+        
+        # Accumulate transformations along the chain
+        global_transform = Matrix.Identity(4)
+        
+        for joint in joint_chain:
+            # Get the joint's transformation
+            joint_transform = self._get_joint_global_transform(joint)
+            global_transform = global_transform @ joint_transform
+        
+        return global_transform
+
+    def _find_joint_chain_to_body(self, target_body_name: str):
+        """
+        Find the chain of joints from root (ground) to the target body
+        Returns list of joints in order from root to target
+        """
+        if target_body_name == "ground":
+            return []
+        
+        # Find the joint that creates this body
+        target_joint = None
+        for joint in self.joint_objects:
+            if joint.child_body == target_body_name:
+                target_joint = joint
+                break
+        
+        if not target_joint:
+            print(f"Warning: No joint found that creates body {target_body_name}")
+            return []
+        
+        # Recursively build the chain
+        parent_chain = self._find_joint_chain_to_body(target_joint.parent_body)
+        return parent_chain + [target_joint]
+
+    def _get_joint_global_transform(self, joint):
+        """
+        Get the transformation matrix for a joint, combining:
+        1. Parent offset frame transform (if exists)
+        2. Joint spatial transform with default coordinate values
+        3. Child offset frame transform (if exists)
+        """
+        # Start with identity
+        transform = Matrix.Identity(4)
+        
+        # 1. Apply parent offset frame transformation
+        if joint.parent_offset_frame:
+            parent_offset_transform = joint.parent_offset_frame.get_transform_matrix()
+            transform = transform @ parent_offset_transform
+        
+        # 2. Apply joint's spatial transformation with default coordinate values
+        if joint.spatial_transform and joint.coordinates:
+            joint_spatial_transform = self._get_joint_spatial_transform(joint)
+            transform = transform @ joint_spatial_transform
+        
+        # 3. Apply child offset frame transformation (inverse)
+        if joint.child_offset_frame:
+            child_offset_transform = joint.child_offset_frame.get_transform_matrix()
+            # Note: For joint chain, we typically want the inverse of child offset
+            # but this depends on OpenSim convention. May need adjustment.
+            transform = transform @ child_offset_transform.inverted()
+        
+        return transform
+
+    def _get_joint_spatial_transform(self, joint):
+        """Get the spatial transformation matrix for a joint using coordinate default values"""
+        if not joint.spatial_transform or not joint.coordinates:
+            return Matrix.Identity(4)
+        
+        # Build coordinate name to value mapping
+        coord_values = {}
+        for coord in joint.coordinates:
+            coord_values[coord.name] = coord.default_value
+        
+        # Apply transformations based on spatial transform axes
+        transform = Matrix.Identity(4)
+        
+        axes = joint.spatial_transform.get('axes', [])
+        for axis_data in axes:
+            axis_name = axis_data.get('name', '')
+            coordinates = axis_data.get('coordinates', '')
+            axis_vector = axis_data.get('axis', (1, 0, 0))
+            
+            # Find the coordinate value for this axis
+            coord_value = coord_values.get(coordinates, 0.0)
+            
+            if coord_value == 0.0:
+                continue  # No transformation needed
+            
+            # Create transformation based on axis type
+            if 'rotation' in axis_name.lower() or any(coord.coordinate_type == 'rotational' 
+                                                     for coord in joint.coordinates 
+                                                     if coord.name == coordinates):
+                # Rotational transformation
+                axis_vec = Vector(axis_vector).normalized()
+                rotation_matrix = Matrix.Rotation(coord_value, 4, axis_vec)
+                transform = transform @ rotation_matrix
+            else:
+                # Translational transformation
+                translation_vec = Vector(axis_vector) * coord_value
+                translation_matrix = Matrix.Translation(translation_vec)
+                transform = transform @ translation_matrix
+        
+        return transform
+
+    def _get_coordinate_transform(self, coordinate):
+        """Get the transformation matrix for a coordinate with its default value"""
+        # This is a simplified version - the proper implementation is in _get_joint_spatial_transform
+        if coordinate.coordinate_type == 'rotational':
+            # Create rotation matrix based on default angle
+            angle = coordinate.default_value
+            # Assume rotation around Z-axis for now (this should use spatial transform info)
+            return Matrix.Rotation(angle, 4, 'Z')
+        elif coordinate.coordinate_type == 'translational':
+            # Create translation matrix
+            translation = coordinate.default_value
+            # Assume translation along Z-axis for now (this should use spatial transform info)
+            return Matrix.Translation(Vector((0, 0, translation)))
+        
+        return Matrix.Identity(4)
+
+    def _setup_new_bone_hierarchy(self):
+        """Setup parent-child relationships for the new bone structure"""
+        edit_bones = self.armature_data.edit_bones
+        
+        # For each joint, setup hierarchy: BODY bone is parent of JOINT bone
+        for joint in self.joint_objects:
+            body_bone_name = f"BODY-{joint.name}"
+            joint_bone_name = f"JOINT-{joint.name}"
+            
+            body_bone = edit_bones.get(body_bone_name)
+            joint_bone = edit_bones.get(joint_bone_name)
+            
+            if body_bone and joint_bone:
+                joint_bone.parent = body_bone
+                print(f"Set hierarchy: {joint_bone_name}.parent = {body_bone_name}")
+        
+        # Setup body bone chain hierarchy
+        for joint in self.joint_objects:
+            current_body_bone_name = f"BODY-{joint.name}"
+            current_body_bone = edit_bones.get(current_body_bone_name)
+            
+            if not current_body_bone:
+                continue
+            
+            # Find parent body bone (the body bone that connects to this joint's parent body)
+            parent_joint = None
+            for j in self.joint_objects:
+                if j.child_body == joint.parent_body:
+                    parent_joint = j
                     break
             
-            if connecting_joint:
-                # Use joint transformation to position bone
-                joint_transform = connecting_joint.get_joint_transform()
+            if parent_joint:
+                parent_body_bone_name = f"BODY-{parent_joint.name}"
+                parent_body_bone = edit_bones.get(parent_body_bone_name)
                 
-                # Convert to Blender coordinate system and apply to bone
-                parent_bone = self.armature_data.edit_bones[parent_bone_name]
-                
-                # Start from parent bone's tail
-                bone.head = parent_bone.tail
-                
-                # Apply transformation to get bone direction and length
-                # Extract translation from transform matrix
-                translation = joint_transform.to_translation()
-                blender_translation = Vector((translation.x, translation.z, -translation.y))
-                
-                # Set bone tail position
-                bone.tail = bone.head + blender_translation
-                
-                # Ensure minimum bone length
-                if (bone.tail - bone.head).length < 0.01:
-                    bone.tail = bone.head + Vector((0, 0, 0.05))
+                if parent_body_bone:
+                    current_body_bone.parent = parent_body_bone
+                    print(f"Set hierarchy: {current_body_bone_name}.parent = {parent_body_bone_name}")
             else:
-                # Default positioning relative to parent
-                parent_bone = self.armature_data.edit_bones[parent_bone_name]
-                bone.head = parent_bone.tail
-                bone.tail = bone.head + Vector((0, 0, 0.1))
-        else:
-            # Root bone positioning
-            bone.head = Vector((0, 0, 0))
-            bone.tail = Vector((0, 0, 0.1))
-        
-        # Find child bodies connected through joints
-        child_bodies = []
-        for joint in self.joint_objects:
-            if joint.parent_body == body_name:
-                child_bodies.append(joint.child_body)
-        
-        # Recursively create bones for children
-        for child_body in child_bodies:
-            self._create_bone_recursive(child_body, body_name, created_bones)
+                # This connects to ground/root - no parent
+                print(f"Body bone {current_body_bone_name} is root (connects to {joint.parent_body})")
 
     def _apply_joint_transformations(self):
         """Apply coordinate transformations using joint spatial transforms"""
