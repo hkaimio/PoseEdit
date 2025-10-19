@@ -218,9 +218,9 @@ class Joint:
                 axis_vector = coord_axis.get('axis', (0, 0, 0))
                 
                 # Convert OpenSim axis vector to Blender coordinate system
-                # OpenSim: Y-up (x, y, z) → Blender: Z-up (x, z, -y)
+                # OpenSim: Y-up  → Blender: Z-up
                 opensim_axis = Vector(axis_vector)
-                blender_axis = Vector((opensim_axis.x, opensim_axis.z, -opensim_axis.y))
+                blender_axis = Vector((opensim_axis.x, -opensim_axis.z, opensim_axis.y))
                 
                 if blender_axis.length > 0:
                     blender_axis.normalize()
@@ -1372,7 +1372,7 @@ class OpenSimToBlenderConverter:
         # Blender: Z-up coordinate system (X, Z, -Y) 
         # Transformation: OpenSim (x,y,z) → Blender (x,z,-y)
         opensim_axis = Vector(axis_vector)
-        blender_axis = Vector((opensim_axis.x, opensim_axis.z, -opensim_axis.y))
+        blender_axis = Vector((opensim_axis.x, -opensim_axis.z, opensim_axis.y))
         
         # Normalize the axis vector
         if blender_axis.length > 0:
@@ -1721,7 +1721,7 @@ class OpenSimToBlenderConverter:
             translation = final_transform.to_translation()
             
             # Convert from OpenSim coordinate system (Y-up) to Blender (Z-up)
-            blender_pos = Vector((translation.x, translation.z, -translation.y))
+            blender_pos = Vector((translation.x, -translation.z, translation.y))
             
             return blender_pos
             
