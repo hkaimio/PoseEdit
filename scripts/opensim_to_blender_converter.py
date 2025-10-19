@@ -26,18 +26,24 @@ class Coordinate:
     default_value: float
     range_min: float
     range_max: float
-    clamped: bool
-    locked: bool
-    prescribed: bool
+    clamped: bool 
+    locked: bool 
+    prescribed: bool 
     coordinate_type: str  # 'rotational' or 'translational'
 
 @dataclass 
 class OffsetFrame:
     """Represents a PhysicalOffsetFrame with translation and orientation"""
     name: str
+    joint_name: str  # The joint this offset frame belongs to
     parent_body: str
     translation: Tuple[float, float, float]  # meters
     orientation: Tuple[float, float, float]  # radians (x-y-z rotation sequence)
+    
+    @property
+    def unique_name(self) -> str:
+        """Get globally unique name by combining joint and frame names"""
+        return f"{self.joint_name}:{self.name}"
     
     def get_transform_matrix(self) -> Matrix:
         """Get the 4x4 transformation matrix for this offset frame"""
@@ -69,36 +75,48 @@ class Body:
         if self.child_joints is None:
             self.child_joints = []
     
-    def get_offset_frame(self, frame_name: str) -> Optional[OffsetFrame]:
-        """Get an offset frame by name"""
-        return self.offset_frames.get(frame_name)
+    def get_offset_frame(self, frame_name: str, joint_name: str = None) -> Optional[OffsetFrame]:
+        """Get an offset frame by name, optionally filtered by joint"""
+        if joint_name:
+            # Look for frame with specific joint
+            unique_name = f"{joint_name}:{frame_name}"
+            return self.offset_frames.get(unique_name)
+        else:
+            # Look for any frame with this name
+            for unique_name, frame in self.offset_frames.items():
+                if frame.name == frame_name:
+                    return frame
+            return None
     
-    def get_transform(self, from_frame: str, to_frame: str) -> Matrix:
+    def get_transform(self, from_frame: str = None, to_frame: str = None, 
+                     from_joint: str = None, to_joint: str = None) -> Matrix:
         """
         Get transformation matrix from one frame to another within this body
         
         Args:
-            from_frame: Source frame name (or 'body' for body's root frame)
-            to_frame: Target frame name (or 'body' for body's root frame)
+            from_frame: Source frame name (optional if only one frame for from_joint)
+            to_frame: Target frame name (optional if only one frame for to_joint)
+            from_joint: Joint name for source frame (None for body's root frame)
+            to_joint: Joint name for target frame (None for body's root frame)
             
         Returns:
             4x4 transformation matrix
         """
         # Identity if same frame
-        if from_frame == to_frame:
+        if from_frame == to_frame and from_joint == to_joint:
             return Matrix.Identity(4)
         
         # Get transform from body root to target frame
-        if from_frame == 'body':
-            target_frame = self.get_offset_frame(to_frame)
+        if from_joint is None:  # from body root
+            target_frame = self._get_frame_for_joint(to_frame, to_joint)
             if target_frame:
                 return target_frame.get_transform_matrix()
             else:
                 return Matrix.Identity(4)
         
         # Get transform from source frame to body root
-        elif to_frame == 'body':
-            source_frame = self.get_offset_frame(from_frame)
+        elif to_joint is None:  # to body root
+            source_frame = self._get_frame_for_joint(from_frame, from_joint)
             if source_frame:
                 return source_frame.get_transform_matrix().inverted()
             else:
@@ -106,8 +124,8 @@ class Body:
         
         # Transform from one frame to another via body root
         else:
-            source_frame = self.get_offset_frame(from_frame)
-            target_frame = self.get_offset_frame(to_frame)
+            source_frame = self._get_frame_for_joint(from_frame, from_joint)
+            target_frame = self._get_frame_for_joint(to_frame, to_joint)
             
             if source_frame and target_frame:
                 # from_frame -> body -> to_frame
@@ -116,6 +134,34 @@ class Body:
                 return source_to_body @ body_to_target
             else:
                 return Matrix.Identity(4)
+    
+    def _get_frame_for_joint(self, frame_name: str = None, joint_name: str = None) -> OffsetFrame | None:
+        """
+        Helper method to get a frame for a specific joint
+        If frame_name is None and there's only one frame for the joint, return that frame
+        """
+        if joint_name is None:
+            return None
+            
+        if frame_name is not None:
+            # Look for specific frame
+            unique_name = f"{joint_name}:{frame_name}"
+            return self.offset_frames.get(unique_name)
+        else:
+            # Look for any frame from this joint (useful when there's only one)
+            matching_frames = []
+            for unique_name, frame in self.offset_frames.items():
+                if frame.joint_name == joint_name:
+                    matching_frames.append(frame)
+            
+            if len(matching_frames) == 1:
+                return matching_frames[0]
+            elif len(matching_frames) > 1:
+                # Multiple frames for this joint, need to specify frame_name
+                print(f"Warning: Multiple frames found for joint {joint_name}, specify frame_name")
+                return None
+            else:
+                return None
 
 @dataclass
 class Joint:
@@ -178,7 +224,7 @@ class Joint:
                 
                 if blender_axis.length > 0:
                     blender_axis.normalize()
-                    
+                     
                     # Create rotation matrix around the Blender axis
                     rotation_matrix = Matrix.Rotation(default_value, 4, blender_axis)
                     combined_rotation = combined_rotation @ rotation_matrix
@@ -414,6 +460,9 @@ class OpenSimSkeletonAnalyzer:
         """Extract parent and child offset frames from a joint"""
         frames_section = joint_elem.find('.//frames')
         
+        # Get joint name for unique frame identification
+        joint_name = joint_elem.get('name', 'unknown')
+        
         # Get parent and child frame names from sockets
         parent_frame_elem = joint_elem.find('.//socket_parent_frame')
         child_frame_elem = joint_elem.find('.//socket_child_frame')
@@ -463,6 +512,7 @@ class OpenSimSkeletonAnalyzer:
                 
                 offset_frame = OffsetFrame(
                     name=frame_name,
+                    joint_name=joint_name,
                     parent_body=parent_body,
                     translation=translation,
                     orientation=orientation
@@ -812,6 +862,148 @@ def print_detailed_joint_info(results: Dict[str, Any]):
             print(f"    Orientation: [{math.degrees(cof['orientation'][0]):.1f}°, {math.degrees(cof['orientation'][1]):.1f}°, {math.degrees(cof['orientation'][2]):.1f}°]")
 
 
+def print_body_joint_hierarchy(converter: 'OpenSimToBlenderConverter', indent_size: int = 2):
+    """
+    Print the Body/Joint hierarchy as an indented tree with key parameters
+    
+    Args:
+        converter: OpenSimToBlenderConverter instance with body_objects and joint_objects
+        indent_size: Number of spaces per indentation level
+    """
+    if not hasattr(converter, 'body_objects') or not hasattr(converter, 'joint_objects'):
+        print("Error: Converter must have body_objects and joint_objects created")
+        return
+    
+    print("\n=== BODY/JOINT HIERARCHY ===")
+    
+    # Find root bodies (bodies that are not children of any joint)
+    child_bodies = set()
+    for joint in converter.joint_objects:
+        child_bodies.add(joint.child_body)
+    
+    root_bodies = []
+    for body_name in converter.body_objects:
+        if body_name not in child_bodies:
+            root_bodies.append(body_name)
+    
+    if not root_bodies:
+        root_bodies = [list(converter.body_objects.keys())[0]]  # Fallback
+    
+    root_bodies = ["pelvis"]
+    print(f"Root bodies: {', '.join(root_bodies)}")
+    
+    # Print hierarchy recursively from each root
+    visited = set()
+    for root_body in root_bodies:
+        _print_body_recursive(converter, root_body, 0, indent_size, visited)
+
+
+def _print_body_recursive(converter: 'OpenSimToBlenderConverter', body_name: str, depth: int, indent_size: int, visited: set):
+    """Recursively print body and its connected joints/bodies"""
+    if body_name in visited:
+        prefix = " " * (depth * indent_size)
+        print(f"{prefix}[CIRCULAR REFERENCE: {body_name}]")
+        return
+    
+    visited.add(body_name)
+    prefix = " " * (depth * indent_size)
+    
+    # Print body information
+    body = converter.body_objects.get(body_name)
+    if body:
+        print(f"{prefix}📦 BODY: {body_name}")
+        print(f"{prefix}   Mass: {body.mass:.3f} kg")
+        print(f"{prefix}   Mass Center: [{body.mass_center[0]:.3f}, {body.mass_center[1]:.3f}, {body.mass_center[2]:.3f}] m")
+        
+        # Print offset frames
+        if body.offset_frames:
+            print(f"{prefix}   📍 Offset Frames ({len(body.offset_frames)}):")
+            for unique_name, frame in body.offset_frames.items():
+                print(f"{prefix}     • {frame.name} (from {frame.joint_name})")
+                print(f"{prefix}       Translation: [{frame.translation[0]:.3f}, {frame.translation[1]:.3f}, {frame.translation[2]:.3f}] m")
+                print(f"{prefix}       Orientation: [{math.degrees(frame.orientation[0]):.1f}°, {math.degrees(frame.orientation[1]):.1f}°, {math.degrees(frame.orientation[2]):.1f}°]")
+        else:
+            print(f"{prefix}   📍 No offset frames")
+    else:
+        print(f"{prefix}📦 BODY: {body_name} [NOT FOUND]")
+    
+    # Find and print child joints
+    child_joints = []
+    for joint in converter.joint_objects:
+        if joint.parent_body == body_name:
+            child_joints.append(joint)
+    
+    for joint in child_joints:
+        joint_prefix = " " * ((depth + 1) * indent_size)
+        print(f"{joint_prefix}🔗 JOINT: {joint.name} ({joint.joint_type})")
+        print(f"{joint_prefix}   Parent Frame: {joint.parent_frame}")
+        print(f"{joint_prefix}   Child Frame: {joint.child_frame}")
+        print(f"{joint_prefix}   Connection: {joint.parent_body} → {joint.child_body}")
+        
+        # Print coordinates (DOFs)
+        if joint.coordinates:
+            print(f"{joint_prefix}   🎛️ Coordinates ({len(joint.coordinates)}):")
+            for coord in joint.coordinates:
+                coord_info = f"{coord.name}: {coord.default_value:.3f}"
+                if coord.coordinate_type == 'rotational':
+                    coord_info += f" rad ({math.degrees(coord.default_value):.1f}°)"
+                else:
+                    coord_info += " m"
+                
+                flags = []
+                if coord.locked:
+                    flags.append("LOCKED")
+                if coord.prescribed:
+                    flags.append("PRESCRIBED")
+                if coord.clamped:
+                    flags.append("CLAMPED")
+                
+                if flags:
+                    coord_info += f" [{', '.join(flags)}]"
+                
+                print(f"{joint_prefix}     • {coord_info}")
+                print(f"{joint_prefix}       Range: [{coord.range_min:.2f}, {coord.range_max:.2f}]")
+        else:
+            print(f"{joint_prefix}   🎛️ No coordinates (0 DOF)")
+        
+        # Print offset frames
+        if joint.parent_offset_frame or joint.child_offset_frame:
+            print(f"{joint_prefix}   📍 Offset Frames:")
+            if joint.parent_offset_frame:
+                pof = joint.parent_offset_frame
+                print(f"{joint_prefix}     • Parent: {pof.name}")
+                print(f"{joint_prefix}       Translation: [{pof.translation[0]:.3f}, {pof.translation[1]:.3f}, {pof.translation[2]:.3f}] m")
+                print(f"{joint_prefix}       Orientation: [{math.degrees(pof.orientation[0]):.1f}°, {math.degrees(pof.orientation[1]):.1f}°, {math.degrees(pof.orientation[2]):.1f}°]")
+            if joint.child_offset_frame:
+                cof = joint.child_offset_frame
+                print(f"{joint_prefix}     • Child: {cof.name}")
+                print(f"{joint_prefix}       Translation: [{cof.translation[0]:.3f}, {cof.translation[1]:.3f}, {cof.translation[2]:.3f}] m")
+                print(f"{joint_prefix}       Orientation: [{math.degrees(cof.orientation[0]):.1f}°, {math.degrees(cof.orientation[1]):.1f}°, {math.degrees(cof.orientation[2]):.1f}°]")
+        
+        # Print spatial transform info
+        if joint.spatial_transform:
+            st = joint.spatial_transform
+            if st.get('axes'):
+                print(f"{joint_prefix}   🎯 Spatial Transform ({len(st['axes'])} axes):")
+                for axis in st['axes']:
+                    axis_info = f"{axis.get('name', 'unknown')}: {axis.get('coordinates', 'none')}"
+                    axis_vector = axis.get('axis', (0, 0, 0))
+                    axis_info += f" → [{axis_vector[0]:.1f}, {axis_vector[1]:.1f}, {axis_vector[2]:.1f}]"
+                    print(f"{joint_prefix}     • {axis_info}")
+        
+        # Print body relationships
+        if joint.parent_body_obj and joint.child_body_obj:
+            print(f"{joint_prefix}   🔗 Body Objects: Connected")
+        elif joint.parent_body_obj or joint.child_body_obj:
+            missing = "child" if not joint.child_body_obj else "parent"
+            print(f"{joint_prefix}   🔗 Body Objects: Missing {missing}")
+        else:
+            print(f"{joint_prefix}   🔗 Body Objects: Not connected")
+        
+        # Recursively print child body
+        _print_body_recursive(converter, joint.child_body, depth + 2, indent_size, visited.copy())
+
+
 class CoordinateTransformer:
     """Handles coordinate system conversions between OpenSim and Blender"""
     
@@ -891,7 +1083,9 @@ class OpenSimToBlenderConverter:
     
     def __init__(self, opensim_analysis: Dict[str, Any]):
         self.opensim_data = opensim_analysis
-        self.bones: Dict[str, OpenSimBone] = {}
+        self.body_objects: Dict[str, Body] = {}  # New Body/Joint hierarchy
+        self.joint_objects: list[Joint] = []  # New Joint objects
+        self.bones: Dict[str, OpenSimBone] = {}  # Keep for compatibility
         self.armature_obj = None
         self.armature_data = None
         
@@ -901,40 +1095,36 @@ class OpenSimToBlenderConverter:
         
     def convert(self, armature_name: str = "OpenSim_Skeleton") -> bpy.types.Object:
         """
-        Main conversion method
+        Main conversion method using new Body/Joint hierarchy
         Returns the created armature object
         """
         try:
             print(f"Starting conversion to armature: {armature_name}")
             
-            # Step 1: Analyze and prepare bone data
-            print("Step 1: Preparing bone data...")
-            self._prepare_bone_data()
-            print(f"Created {len(self.bones)} bones")
+            # Step 1: Create Body objects for better organization
+            print("Step 1: Creating Body objects...")
+            self._create_body_objects()
+            print(f"Created {len(self.body_objects)} body objects")
             
             # Step 2: Create armature
             print("Step 2: Creating armature...")
             self._create_armature(armature_name)
             
-            # Step 3: Create bone collections
-            print("Step 3: Creating bone collections...")
-            self._create_bone_collections()
-            
-            # Step 4: Enter edit mode and create bones
-            print("Step 4: Creating bones in edit mode...")
+            # Step 3: Enter edit mode and create bones using Body/Joint hierarchy
+            print("Step 3: Creating bones from Body/Joint hierarchy...")
             bpy.context.view_layer.objects.active = self.armature_obj
             bpy.ops.object.mode_set(mode='EDIT')
             
-            self._create_bones()
-            print("Step 5: Positioning bones...")
-            self._position_bones()
-            print("Step 6: Setting up hierarchy...")
-            self._setup_hierarchy()
+            self._create_bones_from_body_hierarchy()
             
-            # Step 5: Exit edit mode and finalize
-            print("Step 7: Finalizing...")
+            # Step 4: Switch to pose mode and apply coordinate transformations
+            print("Step 4: Applying joint transformations...")
+            bpy.ops.object.mode_set(mode='POSE')
+            self._apply_joint_transformations()
+            
+            # Step 5: Exit to object mode and finalize
+            print("Step 5: Finalizing...")
             bpy.ops.object.mode_set(mode='OBJECT')
-            self._assign_bone_collections()
             self._add_metadata()
             
             print(f"Conversion completed successfully!")
@@ -1409,22 +1599,82 @@ class OpenSimToBlenderConverter:
         """Create Body objects from the OpenSim analysis for better organization"""
         print("Creating Body objects for better organization...")
         
-        # Get analysis object
-        analyzer = OpenSimSkeletonAnalyzer("")  # Empty path since we have data
-        analyzer.bodies = self.opensim_data.get('bodies', {})
-        analyzer.joints = self.opensim_data.get('joints', [])
+        # Get data from opensim_data (these are dictionaries, not objects yet)
+        joints_data = self.opensim_data.get('joints', [])
+        bodies_data = self.opensim_data.get('bodies', {})
         
-        # Create a mapping from body name to Body object
+        # First, convert joint dictionaries to Joint objects
+        self.joint_objects = []
+        for joint_dict in joints_data:
+            # Create Coordinate objects from joint data
+            coordinates = []
+            if 'coordinates' in joint_dict:
+                for coord_dict in joint_dict['coordinates']:
+                    coord = Coordinate(
+                        name=coord_dict['name'],
+                        default_value=coord_dict.get('default_value', 0.0),
+                        range_min=coord_dict.get('range', [-180, 180])[0],
+                        range_max=coord_dict.get('range', [-180, 180])[1],
+                        clamped=coord_dict.get('clamped', False),
+                        locked=coord_dict.get('locked', False), 
+                        prescribed=coord_dict.get('prescribed', False),
+                        coordinate_type=coord_dict.get('coordinate_type', 'rotational')
+                    )
+                    coordinates.append(coord)
+            
+            # Create OffsetFrame objects
+            parent_offset_frame = None
+            child_offset_frame = None
+            
+            if 'parent_offset_frame' in joint_dict:
+                pof_data = joint_dict['parent_offset_frame']
+                parent_offset_frame = OffsetFrame(
+                    name=pof_data['name'],
+                    joint_name=joint_dict['name'],
+                    parent_body=joint_dict['parent_body'],
+                    translation=pof_data.get('translation', (0, 0, 0)),
+                    orientation=pof_data.get('orientation', (0, 0, 0))
+                )
+            
+            if 'child_offset_frame' in joint_dict:
+                cof_data = joint_dict['child_offset_frame']
+                child_offset_frame = OffsetFrame(
+                    name=cof_data['name'],
+                    joint_name=joint_dict['name'],
+                    parent_body=joint_dict['child_body'],
+                    translation=cof_data.get('translation', (0, 0, 0)),
+                    orientation=cof_data.get('orientation', (0, 0, 0))
+                )
+            
+            # Create Joint object
+            joint = Joint(
+                name=joint_dict['name'],
+                joint_type=joint_dict.get('type', 'CustomJoint'),
+                parent_frame=joint_dict.get('parent_frame', ''),
+                child_frame=joint_dict.get('child_frame', ''),
+                parent_body=joint_dict['parent_body'],
+                child_body=joint_dict['child_body'],
+                coordinates=coordinates,
+                parent_offset_frame=parent_offset_frame,
+                child_offset_frame=child_offset_frame,
+                spatial_transform=joint_dict.get('spatial_transform')
+            )
+            
+            self.joint_objects.append(joint)
+        
+        # Create Body objects
         self.body_objects = {}
         
-        for body_name, body_data in analyzer.bodies.items():
-            # Find offset frames for this body
-            offset_frames = []
-            for joint in analyzer.joints:
+        for body_name, body_data in bodies_data.items():
+            # Find offset frames for this body from joints
+            offset_frames = {}  # Use dict with unique names
+            for joint in self.joint_objects:
                 if joint.parent_body == body_name and joint.parent_offset_frame:
-                    offset_frames.append(joint.parent_offset_frame)
+                    frame = joint.parent_offset_frame
+                    offset_frames[frame.unique_name] = frame
                 if joint.child_body == body_name and joint.child_offset_frame:
-                    offset_frames.append(joint.child_offset_frame)
+                    frame = joint.child_offset_frame
+                    offset_frames[frame.unique_name] = frame
             
             # Create the Body object
             body_obj = Body(
@@ -1438,7 +1688,7 @@ class OpenSimToBlenderConverter:
             self.body_objects[body_name] = body_obj
         
         # Set up body-to-body relationships through joints
-        for joint in analyzer.joints:
+        for joint in self.joint_objects:
             parent_body = self.body_objects.get(joint.parent_body)
             child_body = self.body_objects.get(joint.child_body)
             
@@ -1447,20 +1697,17 @@ class OpenSimToBlenderConverter:
                 joint.parent_body_obj = parent_body
                 joint.child_body_obj = child_body
         
-        print(f"Created {len(self.body_objects)} Body objects")
+        print(f"Created {len(self.body_objects)} Body objects and {len(self.joint_objects)} Joint objects")
 
     def _create_bones_from_body_hierarchy(self):
         """Create Blender bones using the Body/Joint hierarchy"""
         print("Creating bones from Body/Joint hierarchy...")
         
-        # Get joints from opensim_data
-        joints = self.opensim_data.get('joints', [])
-        
         # Find the root body (usually 'ground' or one with no parent)
         root_bodies = []
         child_bodies = set()
         
-        for joint in joints:
+        for joint in self.joint_objects:
             child_bodies.add(joint.child_body)
         
         for body_name in self.body_objects:
@@ -1472,13 +1719,14 @@ class OpenSimToBlenderConverter:
             root_bodies = [list(self.body_objects.keys())[0]]
         
         print(f"Root bodies: {root_bodies}")
+        root_bodies = ["pelvis"]
         
         # Create bones recursively from root
         created_bones = set()
         for root_body in root_bodies:
-            self._create_bone_recursive(root_body, None, created_bones, joints)
+            self._create_bone_recursive(root_body, None, created_bones)
 
-    def _create_bone_recursive(self, body_name: str, parent_bone_name: str, created_bones: set, joints: list):
+    def _create_bone_recursive(self, body_name: str, parent_bone_name: str, created_bones: set):
         """Recursively create bones for a body and its children"""
         if body_name in created_bones:
             return
@@ -1499,7 +1747,7 @@ class OpenSimToBlenderConverter:
             
             # Find the joint connecting parent to this body
             connecting_joint = None
-            for joint in joints:
+            for joint in self.joint_objects:
                 if joint.child_body == body_name:
                     connecting_joint = joint
                     break
@@ -1537,21 +1785,19 @@ class OpenSimToBlenderConverter:
         
         # Find child bodies connected through joints
         child_bodies = []
-        for joint in joints:
+        for joint in self.joint_objects:
             if joint.parent_body == body_name:
                 child_bodies.append(joint.child_body)
         
         # Recursively create bones for children
         for child_body in child_bodies:
-            self._create_bone_recursive(child_body, body_name, created_bones, joints)
+            self._create_bone_recursive(child_body, body_name, created_bones)
 
     def _apply_joint_transformations(self):
         """Apply coordinate transformations using joint spatial transforms"""
         print("Applying joint transformations using spatial transforms...")
         
-        joints = self.opensim_data.get('joints', [])
-        
-        for joint in joints:
+        for joint in self.joint_objects:
             if not joint.coordinates or not joint.spatial_transform:
                 continue
             
@@ -1587,6 +1833,7 @@ opensim_data = analyzer.analyze()
 # Convert to Blender armature
 converter = OpenSimToBlenderConverter(opensim_data)
 armature = converter.convert("OpenSim_Skeleton")
+print_body_joint_hierarchy(converter)
 
 print(f"Created armature: {armature.name}")
 print(f"Total bones: {len(armature.data.bones)}")
