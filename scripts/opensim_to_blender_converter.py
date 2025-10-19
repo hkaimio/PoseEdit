@@ -1616,7 +1616,7 @@ class OpenSimToBlenderConverter:
         """
         Create Blender bones with new approach:
         - JOINT-<joint_name>: from parent socket to child socket
-        - BODY-<child_joint_name>: from parent joint socket to each child joint socket
+        - BODY-<body_name>-<joint_name>: for each body, from connection point to body coordinate frame
         """
         print("Creating bones with new socket-based approach...")
         
@@ -1625,10 +1625,9 @@ class OpenSimToBlenderConverter:
         for joint in self.joint_objects:
             self._create_joint_bone(joint)
         
-        # Step 2: Create all body bones (BODY-<child_joint_name>)
+        # Step 2: Create body bones for all bodies (including leaf bodies)
         print("Creating body bones...")
-        for joint in self.joint_objects:
-            self._create_body_bone(joint)
+        self._create_all_body_bones()
         
         # Step 3: Setup hierarchy relationships
         print("Setting up bone hierarchy...")
@@ -1655,39 +1654,69 @@ class OpenSimToBlenderConverter:
         
         print(f"Created joint bone: {joint_bone_name} from {parent_socket_pos} to {child_socket_pos}")
 
-    def _create_body_bone(self, joint):
-        """Create a bone from parent joint socket to child joint socket for body"""
-        body_bone_name = f"BODY-{joint.name}"
+    def _create_all_body_bones(self):
+        """Create bones for all bodies in the model, including leaf bodies"""
+        # Get all bodies in the model
+        all_bodies = set(self.body_objects.keys())
         
-        # Find the parent joint that connects to this joint's parent body
-        parent_joint = None
-        for j in self.joint_objects:
-            if j.child_body == joint.parent_body:
-                parent_joint = j
+        # For each body, create a bone from its connection point to its coordinate frame origin
+        for body_name in all_bodies:
+            if body_name == "ground":
+                continue  # Skip ground body
+                
+            self._create_body_bone(body_name)
+    
+    def _create_body_bone(self, body_name: str):
+        """Create a bone for a specific body"""
+        # Find the joint that connects to this body (creates this body)
+        connecting_joint = None
+        for joint in self.joint_objects:
+            if joint.child_body == body_name:
+                connecting_joint = joint
                 break
         
-        if parent_joint is None:
-            # This is connected to ground/root - create from origin
-            parent_socket_pos = Vector((0, 0, 0))
-        else:
-            # Get socket position from parent joint
-            parent_socket_pos = self._get_joint_socket_position(parent_joint, is_parent=False)
+        if connecting_joint is None:
+            print(f"Warning: No connecting joint found for body {body_name}")
+            return
         
-        # Get socket position for this joint
-        child_socket_pos = self._get_joint_socket_position(joint, is_parent=True)
+        # Create bone name with new format: BODY-<body_name>-<joint_name>
+        body_bone_name = f"BODY-{body_name}-{connecting_joint.name}"
+        
+        # Start position: the connection point (child socket of the connecting joint)
+        connection_pos = self._get_joint_socket_position(connecting_joint, is_parent=False)
+        
+        # End position: body's coordinate frame origin
+        body_origin_pos = self._get_body_coordinate_origin(body_name)
         
         # Create the bone
         bone = self.armature_data.edit_bones.new(body_bone_name)
-        bone.head = parent_socket_pos
-        bone.tail = child_socket_pos
+        bone.head = connection_pos
+        bone.tail = body_origin_pos
         
         # Ensure minimum bone length
         bone_length = (bone.tail - bone.head).length
         if bone_length < 0.01:
-            # Add small offset in Z direction
-            bone.tail = bone.head + Vector((0, 0, 0.05))
+            # For very short bones, extend along the body's local coordinate frame
+            # Use a small offset in the direction from head to intended tail, or default to Z
+            direction = (bone.tail - bone.head).normalized() if bone_length > 0 else Vector((0, 0, 1))
+            bone.tail = bone.head + direction * 0.05
         
-        print(f"Created body bone: {body_bone_name} from {parent_socket_pos} to {child_socket_pos}")
+        print(f"Created body bone: {body_bone_name}")
+        print(f"  From {connection_pos} to {body_origin_pos} (length: {bone_length:.3f})")
+    
+    def _get_body_coordinate_origin(self, body_name: str):
+        """Get the origin of a body's coordinate frame in global space"""
+        # The body's coordinate origin is at the global transform to that body
+        global_transform = self._get_global_transform_to_body(body_name)
+        
+        # Extract just the translation component (coordinate origin)
+        origin = global_transform.to_translation()
+        
+        # Convert from OpenSim coordinate system (Y-up) to Blender (Z-up)
+        # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
+        blender_origin = Vector((origin.x, -origin.z, origin.y))
+        
+        return blender_origin
 
     def _get_joint_socket_position(self, joint, is_parent: bool):
         """Get the global socket position for a joint (parent or child side)"""
@@ -1721,6 +1750,7 @@ class OpenSimToBlenderConverter:
             translation = final_transform.to_translation()
             
             # Convert from OpenSim coordinate system (Y-up) to Blender (Z-up)
+            # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
             blender_pos = Vector((translation.x, -translation.z, translation.y))
             
             return blender_pos
@@ -1734,8 +1764,9 @@ class OpenSimToBlenderConverter:
         body = self.body_objects.get(body_name)
         if body:
             # Convert body mass center to Blender coordinates
+            # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
             mc = body.mass_center
-            return Vector((mc[0], mc[2], -mc[1]))
+            return Vector((mc[0], -mc[2], mc[1]))
         return Vector((0, 0, 0))
 
     def _get_global_transform_to_body(self, target_body_name: str):
@@ -1876,27 +1907,16 @@ class OpenSimToBlenderConverter:
         """Setup parent-child relationships for the new bone structure"""
         edit_bones = self.armature_data.edit_bones
         
-        # For each joint, setup hierarchy: BODY bone is parent of JOINT bone
-        for joint in self.joint_objects:
-            body_bone_name = f"BODY-{joint.name}"
-            joint_bone_name = f"JOINT-{joint.name}"
-            
-            body_bone = edit_bones.get(body_bone_name)
-            joint_bone = edit_bones.get(joint_bone_name)
-            
-            if body_bone and joint_bone:
-                joint_bone.parent = body_bone
-                print(f"Set hierarchy: {joint_bone_name}.parent = {body_bone_name}")
-        
         # Setup body bone chain hierarchy
         for joint in self.joint_objects:
-            current_body_bone_name = f"BODY-{joint.name}"
+            # New naming scheme: BODY-<body_name>-<joint_name>
+            current_body_bone_name = f"BODY-{joint.child_body}-{joint.name}"
             current_body_bone = edit_bones.get(current_body_bone_name)
             
             if not current_body_bone:
                 continue
             
-            # Find parent body bone (the body bone that connects to this joint's parent body)
+            # Find parent body bone (the body bone for the parent body)
             parent_joint = None
             for j in self.joint_objects:
                 if j.child_body == joint.parent_body:
@@ -1904,7 +1924,7 @@ class OpenSimToBlenderConverter:
                     break
             
             if parent_joint:
-                parent_body_bone_name = f"BODY-{parent_joint.name}"
+                parent_body_bone_name = f"BODY-{joint.parent_body}-{parent_joint.name}"
                 parent_body_bone = edit_bones.get(parent_body_bone_name)
                 
                 if parent_body_bone:
@@ -1913,6 +1933,10 @@ class OpenSimToBlenderConverter:
             else:
                 # This connects to ground/root - no parent
                 print(f"Body bone {current_body_bone_name} is root (connects to {joint.parent_body})")
+        
+        # Setup joint bone relationships: JOINT bones are independent (no parent-child relationships between them)
+        # Joint bones represent the actual joint connections and don't need hierarchical relationships
+        print("Joint bones created as independent elements representing joint connections")
 
     def _apply_joint_transformations(self):
         """Apply coordinate transformations using joint spatial transforms"""
@@ -1958,4 +1982,4 @@ print_body_joint_hierarchy(converter)
 
 print(f"Created armature: {armature.name}")
 print(f"Total bones: {len(armature.data.bones)}")
-
+ 
