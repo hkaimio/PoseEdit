@@ -1718,14 +1718,14 @@ class OpenSimToBlenderConverter:
                 print(f"Created body bone: {body_bone_name}")
                 print(f"  From {connection_pos} to {child_socket_pos} (length: {bone_length:.3f})")
         else:
-            # This is a leaf body - create a bone to the body's coordinate origin
+            # This is a leaf body - create a bone to the body's mass center
             body_bone_name = f"BODY-{body_name}-{connecting_joint.name}"
-            body_origin_pos = self._get_body_coordinate_origin(body_name)
+            body_mass_center_pos = self._get_body_mass_center_global(body_name)
             
             # Create the bone
             bone = self.armature_data.edit_bones.new(body_bone_name)
             bone.head = connection_pos
-            bone.tail = body_origin_pos
+            bone.tail = body_mass_center_pos
             
             # Ensure minimum bone length
             bone_length = (bone.tail - bone.head).length
@@ -1735,7 +1735,7 @@ class OpenSimToBlenderConverter:
                 bone.tail = bone.head + direction * 0.05
             
             print(f"Created leaf body bone: {body_bone_name}")
-            print(f"  From {connection_pos} to {body_origin_pos} (length: {bone_length:.3f})")
+            print(f"  From {connection_pos} to {body_mass_center_pos} (length: {bone_length:.3f})")
     
     def _get_body_coordinate_origin(self, body_name: str):
         """Get the origin of a body's coordinate frame in global space"""
@@ -1750,6 +1750,30 @@ class OpenSimToBlenderConverter:
         blender_origin = Vector((origin.x, -origin.z, origin.y))
         
         return blender_origin
+
+    def _get_body_mass_center_global(self, body_name: str):
+        """Get the global position of a body's mass center"""
+        body = self.body_objects.get(body_name)
+        if not body:
+            print(f"Warning: Body {body_name} not found")
+            return Vector((0, 0, 0))
+        
+        # Get the global transformation to the body's coordinate frame
+        global_transform = self._get_global_transform_to_body(body_name)
+        
+        # Get the mass center in body's local coordinates
+        local_mass_center = Vector(body.mass_center)
+        
+        # Transform mass center to global coordinates
+        local_mass_center_4d = Vector((local_mass_center.x, local_mass_center.y, local_mass_center.z, 1.0))
+        global_mass_center_4d = global_transform @ local_mass_center_4d
+        global_mass_center = global_mass_center_4d.xyz
+        
+        # Convert from OpenSim coordinate system (Y-up) to Blender (Z-up)
+        # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
+        blender_mass_center = Vector((global_mass_center.x, -global_mass_center.z, global_mass_center.y))
+        
+        return blender_mass_center
 
     def _get_joint_socket_position(self, joint, is_parent: bool):
         """Get the global socket position for a joint (parent or child side)"""
