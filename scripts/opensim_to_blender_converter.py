@@ -359,8 +359,9 @@ class OpenSimSkeletonAnalyzer:
                         jointset.findall('.//PinJoint') + \
                         jointset.findall('.//WeldJoint') + \
                         jointset.findall('.//BallJoint') + \
-                        jointset.findall('.//FreeJoint')
-        
+                        jointset.findall('.//FreeJoint') + \
+                        jointset.findall('.//UniversalJoint')
+
         for joint_elem in joint_elements:
             joint = self._parse_joint(joint_elem)
             if joint:
@@ -1666,6 +1667,14 @@ class OpenSimToBlenderConverter:
                 
             self._create_body_bone(body_name)
     
+    def _get_child_joints_for_body(self, body_name: str):
+        """Get all joints that have this body as parent"""
+        child_joints = []
+        for joint in self.joint_objects:
+            if joint.parent_body == body_name:
+                child_joints.append(joint)
+        return child_joints
+    
     def _create_body_bone(self, body_name: str):
         """Create a bone for a specific body"""
         # Find the joint that connects to this body (creates this body)
@@ -1679,30 +1688,54 @@ class OpenSimToBlenderConverter:
             print(f"Warning: No connecting joint found for body {body_name}")
             return
         
-        # Create bone name with new format: BODY-<body_name>-<joint_name>
-        body_bone_name = f"BODY-{body_name}-{connecting_joint.name}"
+        # Find child joints for this body
+        child_joints = self._get_child_joints_for_body(body_name)
         
         # Start position: the connection point (child socket of the connecting joint)
         connection_pos = self._get_joint_socket_position(connecting_joint, is_parent=False)
         
-        # End position: body's coordinate frame origin
-        body_origin_pos = self._get_body_coordinate_origin(body_name)
-        
-        # Create the bone
-        bone = self.armature_data.edit_bones.new(body_bone_name)
-        bone.head = connection_pos
-        bone.tail = body_origin_pos
-        
-        # Ensure minimum bone length
-        bone_length = (bone.tail - bone.head).length
-        if bone_length < 0.01:
-            # For very short bones, extend along the body's local coordinate frame
-            # Use a small offset in the direction from head to intended tail, or default to Z
-            direction = (bone.tail - bone.head).normalized() if bone_length > 0 else Vector((0, 0, 1))
-            bone.tail = bone.head + direction * 0.05
-        
-        print(f"Created body bone: {body_bone_name}")
-        print(f"  From {connection_pos} to {body_origin_pos} (length: {bone_length:.3f})")
+        if child_joints:
+            # Create bones to each child joint socket
+            for child_joint in child_joints:
+                # Create bone name with new format: BODY-<body_name>-<child_joint_name>
+                body_bone_name = f"BODY-{body_name}-{child_joint.name}"
+                
+                # End position: parent socket of the child joint
+                child_socket_pos = self._get_joint_socket_position(child_joint, is_parent=True)
+                
+                # Create the bone
+                bone = self.armature_data.edit_bones.new(body_bone_name)
+                bone.head = connection_pos
+                bone.tail = child_socket_pos
+                
+                # Ensure minimum bone length
+                bone_length = (bone.tail - bone.head).length
+                if bone_length < 0.01:
+                    # For very short bones, extend in a small offset
+                    direction = (bone.tail - bone.head).normalized() if bone_length > 0 else Vector((0, 0, 1))
+                    bone.tail = bone.head + direction * 0.05
+                
+                print(f"Created body bone: {body_bone_name}")
+                print(f"  From {connection_pos} to {child_socket_pos} (length: {bone_length:.3f})")
+        else:
+            # This is a leaf body - create a bone to the body's coordinate origin
+            body_bone_name = f"BODY-{body_name}-{connecting_joint.name}"
+            body_origin_pos = self._get_body_coordinate_origin(body_name)
+            
+            # Create the bone
+            bone = self.armature_data.edit_bones.new(body_bone_name)
+            bone.head = connection_pos
+            bone.tail = body_origin_pos
+            
+            # Ensure minimum bone length
+            bone_length = (bone.tail - bone.head).length
+            if bone_length < 0.01:
+                # For very short bones, extend in a small offset
+                direction = (bone.tail - bone.head).normalized() if bone_length > 0 else Vector((0, 0, 1))
+                bone.tail = bone.head + direction * 0.05
+            
+            print(f"Created leaf body bone: {body_bone_name}")
+            print(f"  From {connection_pos} to {body_origin_pos} (length: {bone_length:.3f})")
     
     def _get_body_coordinate_origin(self, body_name: str):
         """Get the origin of a body's coordinate frame in global space"""
@@ -1943,6 +1976,7 @@ class OpenSimToBlenderConverter:
         print("Applying joint transformations using spatial transforms...")
         
         for joint in self.joint_objects:
+            print(f"  Processing joint: {joint.name}")
             if not joint.coordinates or not joint.spatial_transform:
                 continue
             
@@ -1951,11 +1985,12 @@ class OpenSimToBlenderConverter:
             if child_bone_name not in bpy.context.object.pose.bones:
                 continue
             
+            print(f"    Applying to child bone: {child_bone_name}")
             pose_bone = bpy.context.object.pose.bones[child_bone_name]
             
             # Get coordinate default rotation
             coord_rotation = joint.get_coordinate_default_rotation()
-            
+            print(f"    Applying coordinate rotation: {coord_rotation}")
             # Apply the rotation to the pose bone
             pose_bone.rotation_mode = 'QUATERNION'
             pose_bone.rotation_quaternion = coord_rotation.to_quaternion()
