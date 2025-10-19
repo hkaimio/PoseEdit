@@ -1954,16 +1954,15 @@ class OpenSimToBlenderConverter:
             for j in self.joint_objects:
                 if j.child_body == joint.parent_body:
                     parent_joint = j
+                    parent_body_bone_name = f"BODY-{joint.parent_body}-{parent_joint.name}"
+                    parent_body_bone = edit_bones.get(parent_body_bone_name)
+                    
+                    if parent_body_bone:
+                        current_body_bone.parent = parent_body_bone
+                        print(f"Set hierarchy: {current_body_bone_name}.parent = {parent_body_bone_name}")
                     break
-            
-            if parent_joint:
-                parent_body_bone_name = f"BODY-{joint.parent_body}-{parent_joint.name}"
-                parent_body_bone = edit_bones.get(parent_body_bone_name)
-                
-                if parent_body_bone:
-                    current_body_bone.parent = parent_body_bone
-                    print(f"Set hierarchy: {current_body_bone_name}.parent = {parent_body_bone_name}")
-            else:
+
+            if parent_joint is None:
                 # This connects to ground/root - no parent
                 print(f"Body bone {current_body_bone_name} is root (connects to {joint.parent_body})")
         
