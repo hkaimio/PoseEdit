@@ -808,9 +808,9 @@ class OpenSimToBlenderConverter:
         # Handle root body (ground/pelvis)
         self._handle_root_body()
         
-        # Calculate positions and relationships
-        self._calculate_bone_positions()
+        # Establish relationships FIRST, then calculate positions
         self._establish_relationships()
+        self._calculate_bone_positions()
     
     def _handle_root_body(self):
         """Handle the root body (typically ground or pelvis)"""
@@ -845,12 +845,21 @@ class OpenSimToBlenderConverter:
         # Find root bones (bones without parents)
         root_bones = [bone for bone in self.bones.values() if not bone.parent_name]
         
+        print(f"\nFound {len(root_bones)} root bones:")
+        for root_bone in root_bones:
+            print(f"  - {root_bone.name} ({root_bone.bone_type})")
+        
         # Calculate positions recursively from each root
         for root_bone in root_bones:
+            print(f"\nCalculating positions from root: {root_bone.name}")
             self._calculate_bone_global_position(root_bone, Matrix.Identity(4))
     
     def _calculate_bone_global_position(self, bone: OpenSimBone, parent_global_matrix: Matrix):
         """Calculate global position for a bone given parent's global matrix"""
+        
+        print(f"  Calculating position for {bone.name} ({bone.bone_type})")
+        print(f"    Parent matrix translation: {parent_global_matrix.translation}")
+        print(f"    Children: {bone.children}")
         
         # Start with parent's global transformation
         global_matrix = parent_global_matrix.copy()
@@ -864,15 +873,21 @@ class OpenSimToBlenderConverter:
                 translation = parent_offset.get('translation', (0, 0, 0))
                 orientation = parent_offset.get('orientation', (0, 0, 0))
                 
+                print(f"    Joint parent offset: translation={translation}, orientation={orientation}")
+                
                 # Convert to Blender coordinates
                 blender_translation = CoordinateTransformer.opensim_to_blender_position(translation)
                 blender_rotation = CoordinateTransformer.opensim_to_blender_rotation(orientation)
+                
+                print(f"    Converted to Blender: translation={blender_translation}, rotation={blender_rotation}")
                 
                 # Create transformation matrix
                 transform_matrix = Matrix.Translation(blender_translation) @ blender_rotation.to_matrix().to_4x4()
                 
                 # Apply transformation
                 global_matrix = global_matrix @ transform_matrix
+            else:
+                print("    No parent offset frame found")
         
         elif bone.bone_type == 'body':
             # For body bones, use the child offset frame of the joint that creates them
@@ -885,6 +900,8 @@ class OpenSimToBlenderConverter:
                     translation = child_offset.get('translation', (0, 0, 0))
                     orientation = child_offset.get('orientation', (0, 0, 0))
                     
+                    print(f"    Body child offset: translation={translation}, orientation={orientation}")
+                    
                     # Convert to Blender coordinates
                     blender_translation = CoordinateTransformer.opensim_to_blender_position(translation)
                     blender_rotation = CoordinateTransformer.opensim_to_blender_rotation(orientation)
@@ -894,11 +911,17 @@ class OpenSimToBlenderConverter:
                     
                     # Apply transformation
                     global_matrix = global_matrix @ transform_matrix
+                else:
+                    print("    No child offset frame found")
+            else:
+                print("    No creating joint found")
         
         # Set the bone's global position
         bone.head_position = global_matrix.translation
         bone.tail_position = bone.head_position + Vector((0, 0, self.default_bone_length))
         bone.rotation = global_matrix.to_quaternion()
+        
+        print(f"    Final position: {bone.head_position}")
         
         # Recursively calculate positions for children
         for child_name in bone.children:
@@ -921,26 +944,43 @@ class OpenSimToBlenderConverter:
         """Establish parent-child relationships between bones"""
         joints = self.opensim_data.get('joints', [])
         
+        print(f"Establishing relationships for {len(joints)} joints...")
+        
         for joint in joints:
             joint_name = BoneNaming.create_joint_bone_name(joint['name'])
             parent_body_name = BoneNaming.create_body_bone_name(joint['parent_body'])
             child_body_name = BoneNaming.create_body_bone_name(joint['child_body'])
             
+            print(f"Processing joint {joint['name']}: {joint['parent_body']} -> {joint['child_body']}")
+            print(f"  Blender names: {parent_body_name} -> {joint_name} -> {child_body_name}")
+            
             # Skip if parent/child don't exist or are unknown
             if (joint['parent_body'] == 'unknown' or 
                 joint['child_body'] == 'unknown' or
                 joint['parent_body'] == joint['child_body']):
+                print("  Skipping - unknown or self-connection")
                 continue
             
             # Joint's parent is the parent body
             if parent_body_name in self.bones:
                 self.bones[joint_name].parent_name = parent_body_name
                 self.bones[parent_body_name].children.append(joint_name)
+                print(f"  Set parent: {joint_name}.parent = {parent_body_name}")
+            else:
+                print(f"  Warning: Parent body bone {parent_body_name} not found")
             
             # Body's parent is the joint
             if child_body_name in self.bones:
                 self.bones[child_body_name].parent_name = joint_name
                 self.bones[joint_name].children.append(child_body_name)
+                print(f"  Set parent: {child_body_name}.parent = {joint_name}")
+            else:
+                print(f"  Warning: Child body bone {child_body_name} not found")
+        
+        # Debug: Print final relationships
+        print("\nFinal bone relationships:")
+        for bone_name, bone in self.bones.items():
+            print(f"  {bone_name}: parent={bone.parent_name}, children={bone.children}")
     
     def _create_armature(self, name: str):
         """Create the Blender armature object"""
@@ -1058,6 +1098,7 @@ class OpenSimToBlenderConverter:
         for key, value in coord_summary.items():
             self.armature_obj[f"opensim_coords_{key}"] = value
 
+# IMPORTANT!!! DO NOT CHANGE THE CODE BELOW THIS LINE WITHOUT CONSULTING THE USER !!!
 import bpy
 
 # Clear existing armatures
@@ -1065,7 +1106,7 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 
 # Load and analyze OpenSim model
-osim_file = "C:/temp/aikido-2024-08-25-harri-tests6/h5koe/kinematics/h5koe_0-700_filt_butterworth.osim"
+osim_file = r"C:/temp/aikido-2024-08-25-harri-tests6/h5koe/kinematics/h5koe_0-700_filt_butterworth.osim"
 analyzer = OpenSimSkeletonAnalyzer(osim_file)
 opensim_data = analyzer.analyze()
 
@@ -1075,4 +1116,4 @@ armature = converter.convert("OpenSim_Skeleton")
 
 print(f"Created armature: {armature.name}")
 print(f"Total bones: {len(armature.data.bones)}")
-        
+
