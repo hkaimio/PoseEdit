@@ -38,6 +38,84 @@ class OffsetFrame:
     parent_body: str
     translation: Tuple[float, float, float]  # meters
     orientation: Tuple[float, float, float]  # radians (x-y-z rotation sequence)
+    
+    def get_transform_matrix(self) -> Matrix:
+        """Get the 4x4 transformation matrix for this offset frame"""
+        # Create translation matrix
+        translation_matrix = Matrix.Translation(Vector(self.translation))
+        
+        # Create rotation matrix from Euler angles (x-y-z sequence)
+        rotation_matrix = Euler(self.orientation, 'XYZ').to_matrix().to_4x4()
+        
+        # Combine translation and rotation
+        return translation_matrix @ rotation_matrix
+
+@dataclass
+class Body:
+    """Represents an OpenSim body with all related information"""
+    name: str
+    mass: float
+    inertia: Tuple[float, float, float, float, float, float]  # Ixx, Iyy, Izz, Ixy, Ixz, Iyz
+    mass_center: Tuple[float, float, float]
+    
+    # Associated frames
+    offset_frames: Dict[str, OffsetFrame]  # frame_name -> OffsetFrame
+    
+    # Hierarchy relationships
+    parent_joint: Optional['Joint'] = None
+    child_joints: List['Joint'] = None
+    
+    def __post_init__(self):
+        if self.child_joints is None:
+            self.child_joints = []
+    
+    def get_offset_frame(self, frame_name: str) -> Optional[OffsetFrame]:
+        """Get an offset frame by name"""
+        return self.offset_frames.get(frame_name)
+    
+    def get_transform(self, from_frame: str, to_frame: str) -> Matrix:
+        """
+        Get transformation matrix from one frame to another within this body
+        
+        Args:
+            from_frame: Source frame name (or 'body' for body's root frame)
+            to_frame: Target frame name (or 'body' for body's root frame)
+            
+        Returns:
+            4x4 transformation matrix
+        """
+        # Identity if same frame
+        if from_frame == to_frame:
+            return Matrix.Identity(4)
+        
+        # Get transform from body root to target frame
+        if from_frame == 'body':
+            target_frame = self.get_offset_frame(to_frame)
+            if target_frame:
+                return target_frame.get_transform_matrix()
+            else:
+                return Matrix.Identity(4)
+        
+        # Get transform from source frame to body root
+        elif to_frame == 'body':
+            source_frame = self.get_offset_frame(from_frame)
+            if source_frame:
+                return source_frame.get_transform_matrix().inverted()
+            else:
+                return Matrix.Identity(4)
+        
+        # Transform from one frame to another via body root
+        else:
+            source_frame = self.get_offset_frame(from_frame)
+            target_frame = self.get_offset_frame(to_frame)
+            
+            if source_frame and target_frame:
+                # from_frame -> body -> to_frame
+                source_to_body = source_frame.get_transform_matrix().inverted()
+                body_to_target = target_frame.get_transform_matrix()
+                return source_to_body @ body_to_target
+            else:
+                return Matrix.Identity(4)
 
 @dataclass
 class Joint:
@@ -48,12 +126,97 @@ class Joint:
     child_frame: str
     parent_body: str
     child_body: str
-    coordinates: List[Coordinate]
+    coordinates: list[Coordinate]
     parent_offset_frame: Optional[OffsetFrame]
     child_offset_frame: Optional[OffsetFrame]
-    
+
     # For CustomJoint, store the spatial transform details
-    spatial_transform: Optional[Dict[str, Any]] = None
+    spatial_transform: Optional[dict[str, Any]] = None
+
+    # Hierarchy relationships
+    parent_body_obj: Optional['Body'] = None
+    child_body_obj: Optional['Body'] = None
+
+    def get_coordinate_default_rotation(self) -> Matrix:
+        """
+        Calculate the rotation matrix from coordinate default values using SpatialTransform data
+        
+        Returns:
+            4x4 rotation matrix representing the rest pose from coordinate defaults
+        """
+        if not self.spatial_transform or not self.coordinates:
+            return Matrix.Identity(4)
+            
+        # Start with identity
+        combined_rotation = Matrix.Identity(4)
+        
+        axes = self.spatial_transform.get('axes', [])
+        
+        for coord in self.coordinates:
+            coord_name = coord.name
+            default_value = coord.default_value
+            
+            # Skip if no default value
+            if abs(default_value) < 1e-6:
+                continue
+                
+            # Find the transform axis that controls this coordinate
+            coord_axis = None
+            for axis in axes:
+                if axis.get('coordinates') == coord_name and axis.get('name', '').startswith('rotation'):
+                    coord_axis = axis
+                    break
+                    
+            if coord_axis:
+                # Get the rotation axis vector
+                axis_vector = coord_axis.get('axis', (0, 0, 0))
+                
+                # Convert OpenSim axis vector to Blender coordinate system
+                # OpenSim: Y-up (x, y, z) → Blender: Z-up (x, z, -y)
+                opensim_axis = Vector(axis_vector)
+                blender_axis = Vector((opensim_axis.x, opensim_axis.z, -opensim_axis.y))
+                
+                if blender_axis.length > 0:
+                    blender_axis.normalize()
+                    
+                    # Create rotation matrix around the Blender axis
+                    rotation_matrix = Matrix.Rotation(default_value, 4, blender_axis)
+                    combined_rotation = combined_rotation @ rotation_matrix
+        
+        return combined_rotation
+    
+    def get_joint_transform(self) -> Matrix:
+        """
+        Calculate the complete transformation from parent body to child body
+        
+        This follows the OpenSim joint transformation chain:
+        1. Start from parent body's coordinate frame
+        2. Transform to parent offset frame (if exists)
+        3. Apply coordinate default rotations (rest pose)
+        4. Transform to child offset frame (if exists)
+        5. End at child body's coordinate frame
+        
+        Returns:
+            4x4 transformation matrix from parent body to child body
+        """
+        transform = Matrix.Identity(4)
+        
+        # Step 1: Transform from parent body to parent offset frame
+        if self.parent_offset_frame:
+            parent_offset_transform = self.parent_offset_frame.get_transform_matrix()
+            transform = transform @ parent_offset_transform
+        
+        # Step 2: Apply coordinate default rotations for rest pose
+        coord_rotation = self.get_coordinate_default_rotation()
+        transform = transform @ coord_rotation
+        
+        # Step 3: Transform from child offset frame to child body
+        if self.child_offset_frame:
+            # Inverse transform from child offset frame to child body
+            child_offset_transform = self.child_offset_frame.get_transform_matrix().inverted()
+            transform = transform @ child_offset_transform
+        
+        return transform
 
 class OpenSimSkeletonAnalyzer:
     """Analyzes OpenSim model files and extracts skeleton structure"""
@@ -156,8 +319,8 @@ class OpenSimSkeletonAnalyzer:
             joint = self._parse_joint(joint_elem)
             if joint:
                 self.joints.append(joint)
-    
-    def _parse_joint(self, joint_elem) -> Joint | None:
+
+    def _parse_joint(self, joint_elem) -> Optional[Joint]:
         """Parse a single joint element"""
         name = joint_elem.get('name')
         joint_type = joint_elem.tag
@@ -246,8 +409,8 @@ class OpenSimSkeletonAnalyzer:
                 ))
         
         return coordinates
-    
-    def _extract_offset_frames(self, joint_elem) -> tuple[OffsetFrame | None, OffsetFrame | None]:
+
+    def _extract_offset_frames(self, joint_elem) -> tuple[Optional[OffsetFrame], Optional[OffsetFrame]]:
         """Extract parent and child offset frames from a joint"""
         frames_section = joint_elem.find('.//frames')
         
@@ -811,10 +974,14 @@ class OpenSimToBlenderConverter:
         # Establish relationships FIRST, then calculate positions
         self._establish_relationships()
         self._calculate_bone_positions()
+        
+        # Apply coordinate default values to achieve rest pose
+        print("\nApplying coordinate default values...")
+        self._apply_coordinate_defaults_to_bodies()
     
     def _handle_root_body(self):
         """Handle the root body (typically ground or pelvis)"""
-        hierarchy_tree = self.opensim_data.get('hierarchy_tree', {})
+        hierarchy_tree = self.opensim_data.get('hierarchy_tree',    {})
         if hierarchy_tree and not hierarchy_tree.get('error'):
             root_body_name = hierarchy_tree['name']
             
@@ -865,7 +1032,7 @@ class OpenSimToBlenderConverter:
         global_matrix = parent_global_matrix.copy()
         
         if bone.bone_type == 'joint':
-            # For joint bones, use the parent offset frame transformation
+            # For joint bones, use the parent offset frame transformation plus coordinate default values
             joint_data = bone.opensim_data
             parent_offset = joint_data.get('parent_offset_frame')
             
@@ -879,10 +1046,17 @@ class OpenSimToBlenderConverter:
                 blender_translation = CoordinateTransformer.opensim_to_blender_position(translation)
                 blender_rotation = CoordinateTransformer.opensim_to_blender_rotation(orientation)
                 
-                print(f"    Converted to Blender: translation={blender_translation}, rotation={blender_rotation}")
+                # Apply coordinate default values to get rest pose
+                coordinate_rotation = self._calculate_coordinate_default_rotation(joint_data)
+                final_rotation = blender_rotation @ coordinate_rotation
+                
+                print(f"    Converted to Blender: translation={blender_translation}")
+                print(f"    Base rotation: {blender_rotation}")
+                print(f"    Coordinate rotation: {coordinate_rotation}")
+                print(f"    Final rotation: {final_rotation}")
                 
                 # Create transformation matrix
-                transform_matrix = Matrix.Translation(blender_translation) @ blender_rotation.to_matrix().to_4x4()
+                transform_matrix = Matrix.Translation(blender_translation) @ final_rotation.to_matrix().to_4x4()
                 
                 # Apply transformation
                 global_matrix = global_matrix @ transform_matrix
@@ -905,12 +1079,16 @@ class OpenSimToBlenderConverter:
                     # Convert to Blender coordinates
                     blender_translation = CoordinateTransformer.opensim_to_blender_position(translation)
                     blender_rotation = CoordinateTransformer.opensim_to_blender_rotation(orientation)
-                    
+                    print(f"    Converted to Blender: translation={blender_translation}, rotation={blender_rotation}")
+
                     # Create transformation matrix
                     transform_matrix = Matrix.Translation(blender_translation) @ blender_rotation.to_matrix().to_4x4()
-                    
+                    print(f"    Transformation matrix:\n{transform_matrix}")
+
                     # Apply transformation
                     global_matrix = global_matrix @ transform_matrix
+                    print(f"    Updated global matrix translation: {global_matrix.translation}")
+                    print(f"    Updated global matrix rotation: {global_matrix.to_quaternion()}")
                 else:
                     print("    No child offset frame found")
             else:
@@ -929,7 +1107,136 @@ class OpenSimToBlenderConverter:
             if child_bone:
                 self._calculate_bone_global_position(child_bone, global_matrix)
     
-    def _find_creating_joint(self, body_bone: OpenSimBone) -> OpenSimBone | None:
+    def _calculate_coordinate_default_rotation(self, joint_data: dict[str, Any]) -> Quaternion:
+        """Calculate the rotation from coordinate default values using SpatialTransform data"""
+        coordinates = joint_data.get('coordinates', [])
+        
+        # Start with identity
+        final_rotation = Quaternion()
+        
+        print(f"    Processing {len(coordinates)} coordinates:")
+        
+        for coord in coordinates:
+            coord_name = coord.get('name', '')
+            default_value = coord.get('default_value', 0.0)
+            coord_type = coord.get('coordinate_type', 'rotational')
+            
+            print(f"      {coord_name}: {default_value} ({coord_type})")
+            
+            # Only apply rotational coordinates to bone orientation
+            if coord_type == 'rotational' and abs(default_value) > 1e-6:
+                # Use SpatialTransform data to determine rotation axis
+                rotation_quat = self._get_coordinate_rotation(coord_name, default_value, joint_data)
+                if rotation_quat:
+                    final_rotation = final_rotation @ rotation_quat
+                    print(f"        Applied rotation: {rotation_quat}")
+        
+        return final_rotation
+        
+        return final_rotation
+
+    def _get_coordinate_rotation(self, coord_name: str, angle: float, joint_data: dict) -> Optional[Quaternion]:
+        """Get rotation quaternion for a coordinate using SpatialTransform data"""
+        
+        # Look for spatial transform data
+        spatial_transform = joint_data.get('spatial_transform')
+        if not spatial_transform:
+            print(f"        No spatial transform data for coordinate '{coord_name}', skipping")
+            return None
+            
+        axes = spatial_transform.get('axes', [])
+        if not axes:
+            print(f"        No transform axes found for coordinate '{coord_name}', skipping")
+            return None
+            
+        # Find the transform axis that controls this coordinate
+        coord_axis = None
+        for axis in axes:
+            axis_coordinates = axis.get('coordinates', '')
+            # Check if this axis is controlled by our coordinate
+            if axis_coordinates == coord_name:
+                coord_axis = axis
+                break
+                
+        if not coord_axis:
+            print(f"        No transform axis found for coordinate '{coord_name}', skipping")
+            return None
+            
+        # Get the rotation axis vector
+        axis_vector = coord_axis.get('axis', (0, 0, 0))
+        axis_name = coord_axis.get('name', 'unknown')
+        
+        print(f"        Coordinate '{coord_name}' maps to axis '{axis_name}': {axis_vector}")
+        
+        # Only process rotation axes (translation axes should not affect bone orientation)
+        if not axis_name.startswith('rotation'):
+            print(f"        Skipping non-rotation axis: {axis_name}")
+            return None
+            
+        # Convert OpenSim axis vector to Blender coordinate system
+        # OpenSim: Y-up coordinate system (X, Y, Z)
+        # Blender: Z-up coordinate system (X, Z, -Y) 
+        # Transformation: OpenSim (x,y,z) → Blender (x,z,-y)
+        opensim_axis = Vector(axis_vector)
+        blender_axis = Vector((opensim_axis.x, opensim_axis.z, -opensim_axis.y))
+        
+        # Normalize the axis vector
+        if blender_axis.length > 0:
+            blender_axis.normalize()
+        else:
+            print(f"        Warning: Zero-length axis vector for {coord_name}")
+            return None
+        
+        print(f"        OpenSim axis: {opensim_axis} → Blender axis: {blender_axis}")
+        
+        # Create rotation quaternion around the Blender axis
+        # The angle is already in the correct OpenSim coordinate space,
+        # we just need to apply it around the converted axis
+        rotation = Quaternion(blender_axis, angle)
+        
+        print(f"        Created rotation: {rotation} (angle: {angle:.3f} rad = {math.degrees(angle):.1f}°)")
+        
+        return rotation
+
+    def _apply_coordinate_defaults_to_bodies(self):
+        """Apply coordinate default rotations to body bones"""
+        print("    Applying coordinate defaults to body bones...")
+        
+        joints = self.opensim_data.get('joints', [])
+        
+        for bone_name, bone_obj in self.bones.items():
+            if bone_obj.bone_type != 'body':
+                continue
+                
+            print(f"      Processing body: {bone_name}")
+            
+            # Find the joint that positions this body
+            positioning_joint = None
+            for joint in joints:
+                if joint.get('child_body') == bone_obj.opensim_data.get('name', ''):
+                    positioning_joint = joint
+                    break
+                    
+            if not positioning_joint:
+                print(f"        No positioning joint found for body {bone_name}")
+                continue
+                
+            print(f"        Positioning joint: {positioning_joint.get('name', 'unknown')}")
+            
+            # Calculate coordinate default rotation
+            coord_rotation = self._calculate_coordinate_default_rotation(positioning_joint)
+            
+            if coord_rotation != Quaternion():
+                # Apply the coordinate rotation to the body's orientation
+                current_orientation = getattr(bone_obj, 'orientation', Quaternion())
+                new_orientation = current_orientation @ coord_rotation
+                bone_obj.orientation = new_orientation
+                
+                print("        Updated body orientation with coordinate defaults")
+                print(f"        Previous: {current_orientation}")
+                print(f"        New: {new_orientation}")
+
+    def _find_creating_joint(self, body_bone: OpenSimBone) -> Optional[OpenSimBone]:
         """Find the joint that creates this body bone"""
         body_name = body_bone.opensim_data.get('name', '')
         
@@ -1098,6 +1405,173 @@ class OpenSimToBlenderConverter:
         for key, value in coord_summary.items():
             self.armature_obj[f"opensim_coords_{key}"] = value
 
+    def _create_body_objects(self):
+        """Create Body objects from the OpenSim analysis for better organization"""
+        print("Creating Body objects for better organization...")
+        
+        # Get analysis object
+        analyzer = OpenSimSkeletonAnalyzer("")  # Empty path since we have data
+        analyzer.bodies = self.opensim_data.get('bodies', {})
+        analyzer.joints = self.opensim_data.get('joints', [])
+        
+        # Create a mapping from body name to Body object
+        self.body_objects = {}
+        
+        for body_name, body_data in analyzer.bodies.items():
+            # Find offset frames for this body
+            offset_frames = []
+            for joint in analyzer.joints:
+                if joint.parent_body == body_name and joint.parent_offset_frame:
+                    offset_frames.append(joint.parent_offset_frame)
+                if joint.child_body == body_name and joint.child_offset_frame:
+                    offset_frames.append(joint.child_offset_frame)
+            
+            # Create the Body object
+            body_obj = Body(
+                name=body_name,
+                mass=body_data.get('mass', 1.0),
+                mass_center=body_data.get('mass_center', (0, 0, 0)),
+                inertia=body_data.get('inertia', (1, 1, 1, 0, 0, 0)),
+                offset_frames=offset_frames
+            )
+            
+            self.body_objects[body_name] = body_obj
+        
+        # Set up body-to-body relationships through joints
+        for joint in analyzer.joints:
+            parent_body = self.body_objects.get(joint.parent_body)
+            child_body = self.body_objects.get(joint.child_body)
+            
+            if parent_body and child_body:
+                # Set joint references in Body objects
+                joint.parent_body_obj = parent_body
+                joint.child_body_obj = child_body
+        
+        print(f"Created {len(self.body_objects)} Body objects")
+
+    def _create_bones_from_body_hierarchy(self):
+        """Create Blender bones using the Body/Joint hierarchy"""
+        print("Creating bones from Body/Joint hierarchy...")
+        
+        # Get joints from opensim_data
+        joints = self.opensim_data.get('joints', [])
+        
+        # Find the root body (usually 'ground' or one with no parent)
+        root_bodies = []
+        child_bodies = set()
+        
+        for joint in joints:
+            child_bodies.add(joint.child_body)
+        
+        for body_name in self.body_objects:
+            if body_name not in child_bodies:
+                root_bodies.append(body_name)
+        
+        if not root_bodies:
+            # Fallback: use first body as root
+            root_bodies = [list(self.body_objects.keys())[0]]
+        
+        print(f"Root bodies: {root_bodies}")
+        
+        # Create bones recursively from root
+        created_bones = set()
+        for root_body in root_bodies:
+            self._create_bone_recursive(root_body, None, created_bones, joints)
+
+    def _create_bone_recursive(self, body_name: str, parent_bone_name: str, created_bones: set, joints: list):
+        """Recursively create bones for a body and its children"""
+        if body_name in created_bones:
+            return
+        
+        created_bones.add(body_name)
+        
+        # Get body object
+        body = self.body_objects.get(body_name)
+        if not body:
+            print(f"Warning: Body {body_name} not found")
+            return
+        
+        # Create bone for this body
+        bone = self.armature_data.edit_bones.new(body_name)
+        
+        if parent_bone_name and parent_bone_name in self.armature_data.edit_bones:
+            bone.parent = self.armature_data.edit_bones[parent_bone_name]
+            
+            # Find the joint connecting parent to this body
+            connecting_joint = None
+            for joint in joints:
+                if joint.child_body == body_name:
+                    connecting_joint = joint
+                    break
+            
+            if connecting_joint:
+                # Use joint transformation to position bone
+                joint_transform = connecting_joint.get_joint_transform()
+                
+                # Convert to Blender coordinate system and apply to bone
+                parent_bone = self.armature_data.edit_bones[parent_bone_name]
+                
+                # Start from parent bone's tail
+                bone.head = parent_bone.tail
+                
+                # Apply transformation to get bone direction and length
+                # Extract translation from transform matrix
+                translation = joint_transform.to_translation()
+                blender_translation = Vector((translation.x, translation.z, -translation.y))
+                
+                # Set bone tail position
+                bone.tail = bone.head + blender_translation
+                
+                # Ensure minimum bone length
+                if (bone.tail - bone.head).length < 0.01:
+                    bone.tail = bone.head + Vector((0, 0, 0.05))
+            else:
+                # Default positioning relative to parent
+                parent_bone = self.armature_data.edit_bones[parent_bone_name]
+                bone.head = parent_bone.tail
+                bone.tail = bone.head + Vector((0, 0, 0.1))
+        else:
+            # Root bone positioning
+            bone.head = Vector((0, 0, 0))
+            bone.tail = Vector((0, 0, 0.1))
+        
+        # Find child bodies connected through joints
+        child_bodies = []
+        for joint in joints:
+            if joint.parent_body == body_name:
+                child_bodies.append(joint.child_body)
+        
+        # Recursively create bones for children
+        for child_body in child_bodies:
+            self._create_bone_recursive(child_body, body_name, created_bones, joints)
+
+    def _apply_joint_transformations(self):
+        """Apply coordinate transformations using joint spatial transforms"""
+        print("Applying joint transformations using spatial transforms...")
+        
+        joints = self.opensim_data.get('joints', [])
+        
+        for joint in joints:
+            if not joint.coordinates or not joint.spatial_transform:
+                continue
+            
+            # Find the child bone
+            child_bone_name = joint.child_body
+            if child_bone_name not in bpy.context.object.pose.bones:
+                continue
+            
+            pose_bone = bpy.context.object.pose.bones[child_bone_name]
+            
+            # Get coordinate default rotation
+            coord_rotation = joint.get_coordinate_default_rotation()
+            
+            # Apply the rotation to the pose bone
+            pose_bone.rotation_mode = 'QUATERNION'
+            pose_bone.rotation_quaternion = coord_rotation.to_quaternion()
+            
+            print(f"Applied coordinate rotation to {child_bone_name}: {[c.name for c in joint.coordinates]}")
+
+
 # IMPORTANT!!! DO NOT CHANGE THE CODE BELOW THIS LINE WITHOUT CONSULTING THE USER !!!
 import bpy
 
@@ -1106,7 +1580,7 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 
 # Load and analyze OpenSim model
-osim_file = r"C:/temp/aikido-2024-08-25-harri-tests6/h5koe/kinematics/h5koe_0-700_filt_butterworth.osim"
+osim_file = "C:/temp/aikido-2024-08-25-harri-tests6/h5koe/kinematics/h5koe_0-700_filt_butterworth.osim"
 analyzer = OpenSimSkeletonAnalyzer(osim_file)
 opensim_data = analyzer.analyze()
 
