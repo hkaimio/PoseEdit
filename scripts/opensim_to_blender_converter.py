@@ -1940,35 +1940,56 @@ class OpenSimToBlenderConverter:
         """Setup parent-child relationships for the new bone structure"""
         edit_bones = self.armature_data.edit_bones
         
-        # Setup body bone chain hierarchy
+        print("Setting up bone hierarchy...")
+        
+        # Step 1: Setup JOINT bone hierarchy (JOINT bones connect to parent BODY bones)
         for joint in self.joint_objects:
-            # New naming scheme: BODY-<body_name>-<joint_name>
-            current_body_bone_name = f"BODY-{joint.child_body}-{joint.name}"
-            current_body_bone = edit_bones.get(current_body_bone_name)
+            joint_bone_name = f"JOINT-{joint.name}"
+            joint_bone = edit_bones.get(joint_bone_name)
             
-            if not current_body_bone:
+            if not joint_bone:
                 continue
             
-            # Find parent body bone (the body bone for the parent body)
-            parent_joint = None
-            for j in self.joint_objects:
-                if j.child_body == joint.parent_body:
-                    parent_joint = j
-                    parent_body_bone_name = f"BODY-{joint.parent_body}-{parent_joint.name}"
-                    parent_body_bone = edit_bones.get(parent_body_bone_name)
-                    
-                    if parent_body_bone:
-                        current_body_bone.parent = parent_body_bone
-                        print(f"Set hierarchy: {current_body_bone_name}.parent = {parent_body_bone_name}")
+            # Find parent body bone(s) - joints connect to body bones of the parent body
+            parent_body_name = joint.parent_body
+            
+            if parent_body_name == "ground":
+                # Root joint - no parent
+                print(f"JOINT bone {joint_bone_name} is root (parent: {parent_body_name})")
+                continue
+            
+            # Find any body bone of the parent body to use as parent
+            parent_body_bone = None
+            for bone_name in edit_bones.keys():
+                if bone_name.startswith(f"BODY-{parent_body_name}-"):
+                    parent_body_bone = edit_bones[bone_name]
                     break
-
-            if parent_joint is None:
-                # This connects to ground/root - no parent
-                print(f"Body bone {current_body_bone_name} is root (connects to {joint.parent_body})")
+            
+            if parent_body_bone:
+                joint_bone.parent = parent_body_bone
+                print(f"Set hierarchy: {joint_bone_name}.parent = {parent_body_bone.name}")
+            else:
+                print(f"Warning: No parent body bone found for joint {joint_bone_name} "
+                      f"(parent body: {parent_body_name})")
         
-        # Setup joint bone relationships: JOINT bones are independent (no parent-child relationships between them)
-        # Joint bones represent the actual joint connections and don't need hierarchical relationships
-        print("Joint bones created as independent elements representing joint connections")
+        # Step 2: Setup BODY bone hierarchy (BODY bones are children of their creating JOINT)
+        for joint in self.joint_objects:
+            joint_bone_name = f"JOINT-{joint.name}"
+            joint_bone = edit_bones.get(joint_bone_name)
+            
+            if not joint_bone:
+                continue
+            
+            child_body_name = joint.child_body
+            
+            # Find all body bones for this child body and set them as children of the joint
+            for bone_name in edit_bones.keys():
+                if bone_name.startswith(f"BODY-{child_body_name}-"):
+                    body_bone = edit_bones[bone_name]
+                    body_bone.parent = joint_bone
+                    print(f"Set hierarchy: {body_bone.name}.parent = {joint_bone_name}")
+        
+        print("Bone hierarchy setup complete")
 
     def _apply_joint_transformations(self):
         """Apply coordinate transformations using joint spatial transforms"""
