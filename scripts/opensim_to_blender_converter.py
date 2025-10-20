@@ -553,14 +553,93 @@ class OpenSimSkeletonAnalyzer:
                     except ValueError:
                         pass
                 
+                # Extract function information
+                function_data = self._extract_transform_function(axis_elem)
+                
                 axes.append({
                     'name': axis_name,
                     'coordinates': coordinates,
-                    'axis': axis_vector
+                    'axis': axis_vector,
+                    'function': function_data
                 })
         
         transform_data['axes'] = axes
         return transform_data
+    
+    def _extract_transform_function(self, axis_elem) -> Dict[str, Any]:
+        """Extract function information from TransformAxis"""
+        function_data = {'type': 'none'}
+        
+        # Check for LinearFunction
+        linear_func = axis_elem.find('.//LinearFunction')
+        if linear_func is not None:
+            function_data['type'] = 'linear'
+            coeffs_elem = linear_func.find('.//coefficients')
+            if coeffs_elem is not None and coeffs_elem.text:
+                try:
+                    coeffs = [float(x) for x in coeffs_elem.text.strip().split()]
+                    function_data['coefficients'] = coeffs
+                except ValueError:
+                    function_data['coefficients'] = [1, 0]  # Default
+            else:
+                function_data['coefficients'] = [1, 0]  # Default
+            return function_data
+        
+        # Check for MultiplierFunction
+        mult_func = axis_elem.find('.//MultiplierFunction')
+        if mult_func is not None:
+            function_data['type'] = 'multiplier'
+            scale_elem = mult_func.find('.//scale')
+            if scale_elem is not None and scale_elem.text:
+                try:
+                    function_data['scale'] = float(scale_elem.text.strip())
+                except ValueError:
+                    function_data['scale'] = 1.0
+            else:
+                function_data['scale'] = 1.0
+            
+            # Check for inner constant function
+            const_func = mult_func.find('.//Constant')
+            if const_func is not None:
+                value_elem = const_func.find('.//value')
+                if value_elem is not None and value_elem.text:
+                    try:
+                        function_data['constant_value'] = float(value_elem.text.strip())
+                    except ValueError:
+                        function_data['constant_value'] = 0.0
+                else:
+                    function_data['constant_value'] = 0.0
+            return function_data
+        
+        # Check for SimmSpline
+        spline_func = axis_elem.find('.//SimmSpline')
+        if spline_func is not None:
+            function_data['type'] = 'spline'
+            
+            # Extract x and y values
+            x_elem = spline_func.find('.//x')
+            y_elem = spline_func.find('.//y')
+            
+            x_values = []
+            y_values = []
+            
+            if x_elem is not None and x_elem.text:
+                try:
+                    x_values = [float(x) for x in x_elem.text.strip().split()]
+                except ValueError:
+                    pass
+            
+            if y_elem is not None and y_elem.text:
+                try:
+                    y_values = [float(y) for y in y_elem.text.strip().split()]
+                except ValueError:
+                    pass
+            
+            function_data['x_values'] = x_values
+            function_data['y_values'] = y_values
+            return function_data
+        
+        return function_data
     
     def _get_body_from_frame(self, joint_elem, offset_frame: Optional[OffsetFrame], frame_name: str) -> str:
         """Determine the body name from frame information"""
@@ -2096,7 +2175,7 @@ class OpenSimToBlenderConverter:
                 continue
 
     def _setup_animation_system(self):
-        """Setup animation system for PinJoints"""
+        """Setup animation system for PinJoints and CustomJoints"""
         print("Setting up animation system...")
         
         # First, create the coordinates bone in edit mode
@@ -2107,6 +2186,10 @@ class OpenSimToBlenderConverter:
         bpy.ops.object.mode_set(mode='POSE')
         self._add_pin_joint_custom_properties()
         self._add_pin_joint_drivers()
+        
+        # Add CustomJoint support
+        self._add_custom_joint_custom_properties()
+        self._add_custom_joint_drivers()
     
     def _create_coordinates_bone(self):
         """Create a special bone to hold coordinate custom properties"""
@@ -2234,6 +2317,228 @@ class OpenSimToBlenderConverter:
             print(f"    Added X rotation driver: {prop_name} - {default_value:.3f}")
         
         print(f"Added drivers for {pin_joint_count} PinJoints")
+
+    def _add_custom_joint_custom_properties(self):
+        """Add custom properties for each CustomJoint coordinate"""
+        print("Adding custom properties for CustomJoint coordinates...")
+        
+        # Ensure we have the right armature active
+        bpy.context.view_layer.objects.active = self.armature_obj
+        
+        # Get the COORDINATES pose bone
+        coords_pose_bone = self.armature_obj.pose.bones.get("COORDINATES")
+        if not coords_pose_bone:
+            print("Error: COORDINATES bone not found in pose mode")
+            return
+        
+        custom_joint_count = 0
+        
+        for joint in self.joint_objects:
+            if joint.joint_type.lower() != 'customjoint':
+                continue
+            
+            if not joint.spatial_transform or not joint.coordinates:
+                continue
+            
+            custom_joint_count += 1
+            print(f"  Processing CustomJoint: {joint.name}")
+            
+            # Process each coordinate
+            for coord in joint.coordinates:
+                # Create custom property name
+                prop_name = f"{joint.name}_{coord.name}"
+                
+                # Set the property with default value and range
+                coords_pose_bone[prop_name] = coord.default_value
+                
+                # Set property UI range and description
+                if hasattr(coords_pose_bone, 'id_properties_ui'):
+                    ui = coords_pose_bone.id_properties_ui(prop_name)
+                    ui.update(
+                        min=coord.range_min,
+                        max=coord.range_max,
+                        description=f"Coordinate {coord.name} for CustomJoint {joint.name}"
+                    )
+                
+                print(f"    Added property: {prop_name} = {coord.default_value:.3f} "
+                      f"(range: [{coord.range_min:.1f}, {coord.range_max:.1f}])")
+        
+        print(f"Added custom properties for {custom_joint_count} CustomJoints")
+
+    def _add_custom_joint_drivers(self):
+        """Add drivers to CustomJoint bones based on SpatialTransform"""
+        print("Adding drivers for CustomJoint coordinates...")
+        
+        # Ensure we have the right armature active
+        bpy.context.view_layer.objects.active = self.armature_obj
+        
+        custom_joint_count = 0
+        
+        for joint in self.joint_objects:
+            if joint.joint_type.lower() != 'customjoint':
+                continue
+            
+            if not joint.spatial_transform or not joint.coordinates:
+                continue
+            
+            custom_joint_count += 1
+            
+            # Find the joint bone
+            joint_bone_name = f"JOINT-{joint.name}"
+            joint_pose_bone = self.armature_obj.pose.bones.get(joint_bone_name)
+            
+            if not joint_pose_bone:
+                print(f"    Warning: Joint bone {joint_bone_name} not found")
+                continue
+            
+            print(f"  Adding drivers for CustomJoint: {joint.name}")
+            
+            # Set rotation mode to XYZ Euler for easier driver setup
+            joint_pose_bone.rotation_mode = 'XYZ'
+            
+            # Process each transform axis
+            axes = joint.spatial_transform.get('axes', [])
+            for axis_data in axes:
+                axis_name = axis_data.get('name', '')
+                coordinate_name = axis_data.get('coordinates', '')
+                axis_vector = axis_data.get('axis', (0, 0, 0))
+                function_data = axis_data.get('function', {'type': 'none'})
+                
+                # Skip axes with no coordinate (constant transforms)
+                if not coordinate_name:
+                    print(f"    Skipping {axis_name} - no coordinate")
+                    continue
+                
+                # Find corresponding coordinate object for default value
+                coord = None
+                for c in joint.coordinates:
+                    if c.name == coordinate_name:
+                        coord = c
+                        break
+                
+                if not coord:
+                    print(f"    Warning: Coordinate {coordinate_name} not found")
+                    continue
+                
+                # Determine which rotation/translation axis to drive
+                driver_info = self._get_driver_info_for_axis(axis_name, axis_vector)
+                if not driver_info:
+                    print(f"    Skipping {axis_name} - unsupported axis type")
+                    continue
+                
+                property_name = f"{joint.name}_{coordinate_name}"
+                
+                # Add the driver
+                try:
+                    self._add_spatial_transform_driver(
+                        joint_pose_bone, 
+                        driver_info, 
+                        property_name, 
+                        function_data, 
+                        coord.default_value
+                    )
+                    print(f"    Added driver for {axis_name}: {property_name}")
+                except Exception as e:
+                    print(f"    Error adding driver for {axis_name}: {e}")
+        
+        print(f"Added drivers for {custom_joint_count} CustomJoints")
+
+    def _get_driver_info_for_axis(self, axis_name: str, axis_vector: tuple) -> dict | None:
+        """Determine which bone property to drive based on axis name and vector"""
+        # Convert axis vector to determine the dominant direction
+        x, y, z = axis_vector
+        
+        if 'rotation' in axis_name.lower():
+            # For rotations, map to rotation_euler axes
+            # OpenSim uses different conventions, so we need to map carefully
+            if abs(x) > abs(y) and abs(x) > abs(z):
+                return {'property': 'rotation_euler', 'index': 0, 'type': 'rotation'}  # X rotation
+            elif abs(y) > abs(z):
+                return {'property': 'rotation_euler', 'index': 1, 'type': 'rotation'}  # Y rotation  
+            else:
+                return {'property': 'rotation_euler', 'index': 2, 'type': 'rotation'}  # Z rotation
+        
+        elif 'translation' in axis_name.lower():
+            # For translations, map to location axes
+            if abs(x) > abs(y) and abs(x) > abs(z):
+                return {'property': 'location', 'index': 0, 'type': 'translation'}  # X translation
+            elif abs(y) > abs(z):
+                return {'property': 'location', 'index': 1, 'type': 'translation'}  # Y translation
+            else:
+                return {'property': 'location', 'index': 2, 'type': 'translation'}  # Z translation
+        
+        return None
+
+    def _add_spatial_transform_driver(self, pose_bone, driver_info: dict, property_name: str, function_data: dict, default_value: float):
+        """Add a driver for a specific spatial transform axis"""
+        property_path = driver_info['property']
+        index = driver_info['index']
+        
+        # Add driver to the specific property
+        driver = pose_bone.driver_add(property_path, index)
+        
+        # Set driver type to scripted expression
+        driver.driver.type = 'SCRIPTED'
+        
+        # Add variable for the custom property
+        var = driver.driver.variables.new()
+        var.name = "coord_value"
+        var.type = 'SINGLE_PROP'
+        
+        # Set the variable to read from the COORDINATES bone custom property
+        target = var.targets[0]
+        target.id = self.armature_obj
+        target.data_path = f'pose.bones["COORDINATES"]["{property_name}"]'
+        
+        # Create driver expression based on function type
+        expression = self._create_driver_expression(function_data, default_value)
+        driver.driver.expression = expression
+        
+        print(f"      Driver expression: {expression}")
+
+    def _create_driver_expression(self, function_data: dict, default_value: float) -> str:
+        """Create driver expression based on transform function type"""
+        function_type = function_data.get('type', 'none')
+        
+        if function_type == 'linear':
+            # LinearFunction: output = coeff1 * input + coeff2
+            coeffs = function_data.get('coefficients', [1, 0])
+            coeff1 = coeffs[0] if len(coeffs) > 0 else 1
+            coeff2 = coeffs[1] if len(coeffs) > 1 else 0
+            
+            # Subtract default value since it's baked into rest pose
+            return f"({coeff1}) * (coord_value - ({default_value})) + ({coeff2})"
+        
+        elif function_type == 'multiplier':
+            # MultiplierFunction: output = scale * constant_value
+            # Since coordinates is empty for these, they're typically constant
+            scale = function_data.get('scale', 1.0)
+            constant = function_data.get('constant_value', 0.0)
+            return f"{scale * constant}"
+        
+        elif function_type == 'spline':
+            # SimmSpline: For now, use linear interpolation approximation
+            # TODO: Implement proper spline using keyframes
+            x_values = function_data.get('x_values', [])
+            y_values = function_data.get('y_values', [])
+            
+            if len(x_values) >= 2 and len(y_values) >= 2:
+                # Simple linear approximation between first and last points
+                x1, x2 = x_values[0], x_values[-1]
+                y1, y2 = y_values[0], y_values[-1]
+                
+                if x2 != x1:
+                    slope = (y2 - y1) / (x2 - x1)
+                    intercept = y1 - slope * x1
+                    # Subtract default value since it's baked into rest pose
+                    return f"({slope}) * (coord_value - ({default_value})) + ({intercept})"
+            
+            # Fallback to simple linear
+            return f"coord_value - ({default_value})"
+        
+        else:
+            # Default: simple 1:1 mapping
+            return f"coord_value - ({default_value})"
 
 
 # IMPORTANT!!! DO NOT CHANGE THE CODE BELOW THIS LINE WITHOUT CONSULTING THE USER !!!
