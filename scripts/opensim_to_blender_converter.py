@@ -1755,74 +1755,18 @@ class OpenSimToBlenderConverter:
         joint_bone_name = f"JOINT-{joint.name}"
         
         # Get socket positions
-        parent_socket_pos = self._get_joint_socket_position(joint, is_parent=True)
-        child_socket_pos = self._get_joint_socket_position(joint, is_parent=False)
         
+        y2zup = Matrix.Rotation(math.radians(90), 4, 'X')
+        joint_matrix = y2zup @ self._get_joint_socket_transform(joint, is_parent=False)
+        joint_head_pos = joint_matrix.to_translation()
+        joint_axis, roll = bpy.types.Bone.AxisRollFromMatrix(joint_matrix.to_3x3())
+        
+
         # Create the bone
         bone = self.armature_data.edit_bones.new(joint_bone_name)
-        bone.head = parent_socket_pos
-        
-        # Set initial tail (will be overridden by matrix if available)
-        bone_length = (child_socket_pos - parent_socket_pos).length
-        if bone_length < 0.01:
-            bone.tail = bone.head + Vector((0, 0, 0.05))  # Temporary
-        else:
-            bone.tail = child_socket_pos
-        
-        # For joints with coordinate systems, set the bone matrix directly
-        if joint.joint_type in ['CustomJoint', 'PinJoint']:
-            try:
-                joint_transform = self._get_joint_transform_matrix_for_bone(joint, parent_socket_pos)
-                if joint_transform is not None:
-                    bone.matrix = joint_transform
-                    print(f"Set matrix for {joint_bone_name}")
-            except Exception as e:
-                print(f"Failed to set matrix for {joint_bone_name}: {e}")
-        
-        print(f"Created joint bone: {joint_bone_name} from {bone.head} to {bone.tail}")
-
-    def _get_joint_transform_matrix_for_bone(self, joint, head_position):
-        """Get the 4x4 transformation matrix for a joint bone"""
-        try:
-            # Get the joint's transformation matrix
-            joint_transform = self._get_joint_global_transform(joint)
-            
-            # Extract rotation matrix (top-left 3x3)
-            rotation_matrix = joint_transform.to_3x3()
-            
-            # Convert from OpenSim coordinates to Blender coordinates
-            # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
-            coord_convert = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))
-            blender_rotation = coord_convert @ rotation_matrix @ coord_convert.transposed()
-            
-            # Create a 4x4 matrix with rotation and translation
-            bone_matrix = Matrix.Identity(4)
-            bone_matrix.translation = head_position
-            
-            # Set the rotation part
-            for i in range(3):
-                for j in range(3):
-                    bone_matrix[i][j] = blender_rotation[i][j]
-            
-            # Ensure the bone has a reasonable length by scaling the Y-axis (bone direction)
-            bone_length = 0.05  # Minimum visible length
-            y_axis = Vector(bone_matrix[1][:3]).normalized() * bone_length
-            
-            # Create the final matrix with proper scaling
-            final_matrix = Matrix.Identity(4)
-            final_matrix.translation = head_position
-            
-            # Set X, Y, Z axes
-            final_matrix[0][:3] = blender_rotation[0]  # X-axis
-            final_matrix[1][:3] = y_axis  # Y-axis (bone direction)  
-            final_matrix[2][:3] = blender_rotation[2]  # Z-axis
-            
-            return final_matrix
-            
-        except Exception as e:
-            print(f"Error creating joint transform matrix for {joint.name}: {e}")
-            return None
-
+        bone.head = joint_head_pos
+        bone.tail = joint_head_pos + joint_axis * 0.1
+        bone.roll = roll
 
 
     def _create_all_body_bones(self):
@@ -1945,8 +1889,9 @@ class OpenSimToBlenderConverter:
         
         return blender_mass_center
 
-    def _get_joint_socket_position(self, joint, is_parent: bool):
-        """Get the global socket position for a joint (parent or child side)"""
+    def _get_joint_socket_transform(self, joint, is_parent: bool):
+
+
         try:
             # Get the appropriate offset frame
             if is_parent:
@@ -1972,19 +1917,27 @@ class OpenSimToBlenderConverter:
             
             # Combine global body transform with local offset frame transform
             final_transform = global_transform @ local_transform
-            
-            # Extract translation (socket position)
-            translation = final_transform.to_translation()
-            
-            # Convert from OpenSim coordinate system (Y-up) to Blender (Z-up)
-            # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
-            blender_pos = Vector((translation.x, -translation.z, translation.y))
-            
-            return blender_pos
-            
+
         except Exception as e:
             print(f"Error getting socket position for joint {joint.name} ({'parent' if is_parent else 'child'}): {e}")
-            return Vector((0, 0, 0))
+            return Matrix.Identity(4)
+
+        return final_transform
+
+    def _get_joint_socket_position(self, joint, is_parent: bool):
+        """Get the global socket position for a joint (parent or child side)"""
+
+        transform = self._get_joint_socket_transform(joint, is_parent)
+
+        # Extract translation (socket position)
+        translation = transform.to_translation()
+
+        # Convert from OpenSim coordinate system (Y-up) to Blender (Z-up)
+        # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
+        blender_pos = Vector((translation.x, -translation.z, translation.y))
+        
+        return blender_pos
+            
 
     def _get_body_global_position(self, body_name: str):
         """Get the global position of a body's center"""
