@@ -1761,21 +1761,69 @@ class OpenSimToBlenderConverter:
         # Create the bone
         bone = self.armature_data.edit_bones.new(joint_bone_name)
         bone.head = parent_socket_pos
-        bone.tail = child_socket_pos
         
-        # Ensure minimum bone length
-        bone_length = (bone.tail - bone.head).length
+        # Set initial tail (will be overridden by matrix if available)
+        bone_length = (child_socket_pos - parent_socket_pos).length
         if bone_length < 0.01:
-            # Add small offset in Z direction
-            bone.tail = bone.head + Vector((0, 0, 0.05))
+            bone.tail = bone.head + Vector((0, 0, 0.05))  # Temporary
+        else:
+            bone.tail = child_socket_pos
         
-        # Set bone roll based on joint transformation for CustomJoints
-        if joint.joint_type == 'CustomJoint':
-            bone_roll = self._calculate_bone_roll_from_joint(joint)
-            if bone_roll is not None:
-                bone.roll = bone_roll
+        # For joints with coordinate systems, set the bone matrix directly
+        if joint.joint_type in ['CustomJoint', 'PinJoint']:
+            try:
+                joint_transform = self._get_joint_transform_matrix_for_bone(joint, parent_socket_pos)
+                if joint_transform is not None:
+                    bone.matrix = joint_transform
+                    print(f"Set matrix for {joint_bone_name}")
+            except Exception as e:
+                print(f"Failed to set matrix for {joint_bone_name}: {e}")
         
-        print(f"Created joint bone: {joint_bone_name} from {parent_socket_pos} to {child_socket_pos}")
+        print(f"Created joint bone: {joint_bone_name} from {bone.head} to {bone.tail}")
+
+    def _get_joint_transform_matrix_for_bone(self, joint, head_position):
+        """Get the 4x4 transformation matrix for a joint bone"""
+        try:
+            # Get the joint's transformation matrix
+            joint_transform = self._get_joint_global_transform(joint)
+            
+            # Extract rotation matrix (top-left 3x3)
+            rotation_matrix = joint_transform.to_3x3()
+            
+            # Convert from OpenSim coordinates to Blender coordinates
+            # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
+            coord_convert = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))
+            blender_rotation = coord_convert @ rotation_matrix @ coord_convert.transposed()
+            
+            # Create a 4x4 matrix with rotation and translation
+            bone_matrix = Matrix.Identity(4)
+            bone_matrix.translation = head_position
+            
+            # Set the rotation part
+            for i in range(3):
+                for j in range(3):
+                    bone_matrix[i][j] = blender_rotation[i][j]
+            
+            # Ensure the bone has a reasonable length by scaling the Y-axis (bone direction)
+            bone_length = 0.05  # Minimum visible length
+            y_axis = Vector(bone_matrix[1][:3]).normalized() * bone_length
+            
+            # Create the final matrix with proper scaling
+            final_matrix = Matrix.Identity(4)
+            final_matrix.translation = head_position
+            
+            # Set X, Y, Z axes
+            final_matrix[0][:3] = blender_rotation[0]  # X-axis
+            final_matrix[1][:3] = y_axis  # Y-axis (bone direction)  
+            final_matrix[2][:3] = blender_rotation[2]  # Z-axis
+            
+            return final_matrix
+            
+        except Exception as e:
+            print(f"Error creating joint transform matrix for {joint.name}: {e}")
+            return None
+
+
 
     def _create_all_body_bones(self):
         """Create bones for all bodies in the model, including leaf bodies"""
@@ -2082,68 +2130,7 @@ class OpenSimToBlenderConverter:
         
         return Matrix.Identity(4)
 
-    def _calculate_bone_roll_from_joint(self, joint):
-        """Calculate bone roll from joint transformation matrix for CustomJoints"""
-        try:
-            # Get the full transformation matrix for the joint
-            joint_transform = self._get_joint_global_transform(joint)
-            
-            # Extract rotation matrix (top-left 3x3)
-            rotation_matrix = joint_transform.to_3x3()
-            
-            # Convert from OpenSim coordinates to Blender coordinates
-            # OpenSim: X-right, Y-up, Z-forward → Blender: X-right, Y-forward, Z-up
-            # Apply coordinate conversion to rotation matrix
-            coord_convert = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))
-            blender_rotation = coord_convert @ rotation_matrix @ coord_convert.transposed()
-            
-            # Get the Y-axis (bone direction) in the rotated coordinate system
-            # In Blender, the bone's default orientation has Y pointing along the bone
-            bone_y_axis = blender_rotation @ Vector((0, 1, 0))
-            
-            # Get the Z-axis (up direction) in the rotated coordinate system 
-            bone_z_axis = blender_rotation @ Vector((0, 0, 1))
-            
-            # Calculate roll: the rotation around the bone's Y-axis (bone direction)
-            # We want the angle between the default Z-up and the transformed Z-axis
-            # projected onto the plane perpendicular to the bone direction
-            
-            # Project the transformed Z-axis onto the plane perpendicular to the bone
-            bone_direction = bone_y_axis.normalized()
-            projected_z = bone_z_axis - bone_z_axis.dot(bone_direction) * bone_direction
-            
-            if projected_z.length < 0.001:
-                # Z-axis is parallel to bone direction, no meaningful roll
-                return 0.0
-            
-            projected_z.normalize()
-            
-            # Default Z-axis in bone space (when roll = 0)
-            default_z = Vector((0, 0, 1))
-            default_z_projected = default_z - default_z.dot(bone_direction) * bone_direction
-            
-            if default_z_projected.length < 0.001:
-                # Default Z-axis is parallel to bone direction, use X-axis as reference
-                default_z_projected = Vector((1, 0, 0))
-                default_z_projected = default_z_projected - default_z_projected.dot(bone_direction) * bone_direction
-            
-            default_z_projected.normalize()
-            
-            # Calculate angle between projected axes
-            dot_product = projected_z.dot(default_z_projected)
-            dot_product = max(-1.0, min(1.0, dot_product))  # Clamp to valid range
-            angle = math.acos(dot_product)
-            
-            # Determine sign using cross product
-            cross = projected_z.cross(default_z_projected)
-            if cross.dot(bone_direction) < 0:
-                angle = -angle
-            
-            return angle
-            
-        except Exception as e:
-            print(f"Error calculating bone roll for joint {joint.name}: {e}")
-            return None
+
 
     def _setup_new_bone_hierarchy(self):
         """Setup parent-child relationships for the new bone structure"""
