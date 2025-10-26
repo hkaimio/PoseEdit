@@ -28,9 +28,9 @@ def get_bone_global_transform(pose_bone):
     
     # Extract position
     position = [
-        global_matrix.translation.x * 100,  # Convert to centimeters
-        global_matrix.translation.z * 100,  # Blender Z -> iClone Y (up)
-        -global_matrix.translation.y * 100  # Blender -Y -> iClone Z (forward)
+        global_matrix.translation.x * 100,  
+        global_matrix.translation.y * 100,  
+        global_matrix.translation.z * 100  
     ]
     
     # Extract rotation as Euler angles (ZXY order for iClone)
@@ -43,16 +43,44 @@ def get_bone_global_transform(pose_bone):
     
     return position, rotation
 
-def get_bone_local_transform(pose_bone):
+def find_exported_parent(pose_bone, bone_to_hik_map):
+    """
+    Find the closest ancestor bone that has a non-None HIK name (is actually exported)
+    Args:
+        pose_bone: The bone to find the exported parent for
+        bone_to_hik_map: Dictionary mapping Blender bone names to HIK bone names
+    Returns:
+        The exported parent pose bone, or None if no exported parent exists
+    """
+    current = pose_bone.parent
+    while current:
+        if current.name in bone_to_hik_map and bone_to_hik_map[current.name] is not None:
+            return current
+        current = current.parent
+    return None
+
+def get_bone_local_transform(pose_bone, bone_to_hik_map=None):
     """
     Get local position and rotation relative to parent bone
+    If bone_to_hik_map is provided, calculates relative to the exported parent
+    (skipping any intermediate bones with None HIK names)
     Returns: (position [x, y, z], rotation [rx, ry, rz] in degrees)
     """
-    # Get local matrix (relative to parent)
-    if pose_bone.parent:
-        local_matrix = pose_bone.parent.matrix.inverted() @ pose_bone.matrix
+    # Get local matrix (relative to exported parent or immediate parent)
+    if bone_to_hik_map:
+        # Find the actual exported parent (skip bones with None HIK names)
+        exported_parent = find_exported_parent(pose_bone, bone_to_hik_map)
+        if exported_parent:
+            local_matrix = exported_parent.matrix.inverted() @ pose_bone.matrix
+        else:
+            # No exported parent, use global transform
+            local_matrix = pose_bone.matrix
     else:
-        local_matrix = pose_bone.matrix
+        # Legacy behavior: use immediate parent
+        if pose_bone.parent:
+            local_matrix = pose_bone.parent.matrix.inverted() @ pose_bone.matrix
+        else:
+            local_matrix = pose_bone.matrix
     
     # Extract position
     position = [
@@ -61,8 +89,8 @@ def get_bone_local_transform(pose_bone):
         -local_matrix.translation.y * 100  # Blender -Y -> iClone Z (forward)
     ]
     
-    # Extract rotation as Euler angles (ZXY order for iClone)
-    euler = local_matrix.to_euler('ZXY')
+    # Extract rotation as Euler angles (ZXY order for iClone)   
+    euler = local_matrix.to_euler('XYZ')
     rotation = [
         math.degrees(euler.x),
         math.degrees(euler.y),
@@ -134,7 +162,7 @@ def build_bone_hierarchy(armature_obj, bone_to_hik_map, use_local_coords=True):
         
         # Get transform
         if use_local_coords:
-            position, rotation = get_bone_local_transform(pose_bone)
+            position, rotation = get_bone_local_transform(pose_bone, bone_to_hik_map)
         else:
             position, rotation = get_bone_global_transform(pose_bone)
         
@@ -202,8 +230,8 @@ def export_armature_tpose_to_yaml(armature_name, bone_to_hik_map, output_file, u
     skeleton = {
         'skeleton': {
             'name': armature_name,
-            'up': 'y',
-            'forward': '-z',
+            'up': 'z',
+            'forward': '-y',
             'handiness': 'right',
             'transform': 'local' if use_local_coords else 'global',
             'units': 'cm',
@@ -269,7 +297,7 @@ def export_armature_animation_to_yaml(armature_name, bone_to_hik_map, output_fil
             
             # Get transform
             if use_local_coords:
-                position, rotation = get_bone_local_transform(pose_bone)
+                position, rotation = get_bone_local_transform(pose_bone, bone_to_hik_map)
             else:
                 position, rotation = get_bone_global_transform(pose_bone)
             
@@ -306,18 +334,18 @@ bone_to_hik_map = {
     'spine': 'Hips',
     'spine.001': 'Spine',
     'spine.002': 'Spine3',
-    'chest_root': 'Spine6',    # Skip this bone but include its children
+#    'chest_root': 'Spine6',    # Skip this bone but include its children
     'spine.003': 'Spine9',
     'spine.004': 'Neck',  
     'spine.005': 'Neck1',
     'spine.006': 'Head',
     'shoulder_connect.L': None,    # Skip
     'shoulder_connect.R': None,    # Skip
-    'shoulder_place.R': 'RightShoulder',
+    'shoulder.R': 'RightShoulder',
     'upper_arm.R': 'RightArm',
     'forearm.R': 'RightForeArm',
     'hand.R': 'RightHand',
-    'shoulder_place.L': 'LeftShoulder',
+    'shoulder.L': 'LeftShoulder',
     'upper_arm.L': 'LeftArm',
     'forearm.L': 'LeftForeArm',
     'hand.L': 'LeftHand',
@@ -329,14 +357,16 @@ bone_to_hik_map = {
     'foot.L': 'LeftFoot',
 }
 
-armature_name = "metarig"  # Replace with your armature name
 
+
+armature_name = "rig-copy"  # Replace with your armature name
+use_local = False
 # Export T-pose (current pose as skeleton definition)
 export_armature_tpose_to_yaml(
     armature_name,
     bone_to_hik_map,
     "c:\\temp\\skeleton_local_coords.yaml",
-    use_local_coords=True
+    use_local_coords=use_local
 )
 
 # Export animation (frames 1 to 100)
@@ -344,7 +374,7 @@ export_armature_animation_to_yaml(
     armature_name,
     bone_to_hik_map,
     "c:\\temp\\animation_local_coords.yaml",
-    frame_start=1,
-    frame_end=100,
-    use_local_coords=True
+    frame_start=0,
+    frame_end=700,
+    use_local_coords=use_local
 )
