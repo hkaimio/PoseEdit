@@ -1,7 +1,9 @@
 import bpy
 import yaml
 import math
+import xml.etree.ElementTree as ET
 from mathutils import Matrix, Euler
+
 
 # Custom YAML representer to ensure strings are quoted
 def str_representer(dumper, data):
@@ -329,6 +331,385 @@ def export_armature_animation_to_yaml(armature_name, bone_to_hik_map, output_fil
     print(f"Frames: {frame_start} to {frame_end} ({len(frames)} frames)")
     print(f"Total bones: {len(bone_list)}")
 
+
+def zup_to_yup_position(T_zup):
+
+        
+    # Define the rotation matrix for -90 degrees around X-axis
+    angle_rad = math.radians(-90)
+    R_x_neg_90 = Matrix.Rotation(angle_rad, 4, 'X')
+
+    # Inverse of the rotation matrix
+    R_x_neg_90_inv = R_x_neg_90.inverted()
+
+    # Convert the transformation matrix from Z-up to Y-up
+    T_yup = R_x_neg_90 @ T_zup @ R_x_neg_90_inv
+    return T_yup
+
+
+def blender_to_opensim_position(blender_pos):
+    """Convert Blender position to OpenSim coordinate system"""
+    # Blender: X-right, Y-forward, Z-up
+    # OpenSim: X-right, Y-up, Z-forward  
+    # return [
+    #     blender_pos[0],    # X stays the same
+    #     blender_pos[2],    # Blender Z -> OpenSim Y (up)
+    #     -blender_pos[1]    # Blender -Y -> OpenSim Z (forward)
+    # ]
+    return blender_pos
+
+def blender_to_opensim_rotation(blender_euler):
+    """Convert Blender Euler rotation to OpenSim coordinate system"""
+    # Convert from Blender coordinate system to OpenSim
+    # This is a simplified conversion - may need refinement based on actual joint behavior
+    # return [
+    #     blender_euler[0],    # X rotation
+    #     blender_euler[2],    # Blender Z -> OpenSim Y 
+    #     -blender_euler[1]    # Blender -Y -> OpenSim Z
+    # ]
+    return blender_euler
+
+def get_bone_length(pose_bone):
+    """Calculate bone length from head to tail"""
+    bone_vector = pose_bone.bone.tail_local - pose_bone.bone.head_local
+    return bone_vector.length
+
+def get_bone_opensim_transform(pose_bone, bone_to_hik_map=None):
+    """
+    Get bone transform in OpenSim coordinate system
+    Returns: (position, rotation, length)
+    """
+    # Get local transform relative to exported parent
+    bone_matrix = pose_bone.matrix
+    if bone_to_hik_map:
+        exported_parent = find_exported_parent(pose_bone, bone_to_hik_map)
+        if exported_parent:
+            parent_matrix = exported_parent.matrix
+        else:
+            parent_matrix = Matrix.Identity(4)
+            rot_y_up_mat = Matrix.Rotation(-math.pi/2, 4, 'X')
+            bone_matrix =   rot_y_up_mat @ bone_matrix
+    else:
+        if pose_bone.parent:
+            parent_matrix = pose_bone.parent.matrix
+        else:
+            parent_matrix = Matrix.Identity(4)
+            rot_y_up_mat = Matrix.Rotation(-math.pi/2, 4, 'X')
+            bone_matrix = rot_y_up_mat @ bone_matrix
+
+    print(f"Bone: {pose_bone.name} trans: {bone_matrix.translation} rot: {bone_matrix.to_euler('XYZ')}")
+    #bone_matrix = zup_to_yup_position(bone_matrix)
+    print(f"   after coord frame change: trans: {bone_matrix.translation} rot: {bone_matrix.to_euler('XYZ')}")
+    bone_trans = bone_matrix.translation
+    #parent_matrix = zup_to_yup_position(parent_matrix)
+    parent_trans = parent_matrix.translation
+    local_matrix = parent_matrix.inverted() @ bone_matrix
+    print(f"   local transform: trans: {local_matrix.translation} rot: {local_matrix.to_euler('XYZ')}")
+    if pose_bone.name == "shoulder.R":
+        print(f"   parent matrix: {parent_matrix}")
+        print(f"   global matrix {bone_matrix}")
+        print(f"   local matrix {local_matrix}")
+        print("Debug upperarm_R")
+
+    # Extract position and rotation
+    position = local_matrix.translation
+    euler = local_matrix.to_euler('ZYX')
+        
+    # Get bone length
+    bone_length = get_bone_length(pose_bone)
+
+    return position, euler, bone_length
+
+def create_opensim_body(name, bone_length):
+    """Create OpenSim Body XML element"""
+    body = ET.Element("Body", name=name)
+    
+    # Add components section with PhysicalOffsetFrame for visualization
+    components = ET.SubElement(body, "components")
+    
+    # Create cylinder frame for visualization
+    cyl_frame_name = f"cyl_{name}_frame"
+    cyl_frame = ET.SubElement(components, "PhysicalOffsetFrame", name=cyl_frame_name)
+    
+    # Frame geometry
+    frame_geom = ET.SubElement(cyl_frame, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(frame_geom, "socket_frame").text = ".."
+    scale_factors = ET.SubElement(frame_geom, "scale_factors")
+    scale_factors.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    
+    # Attached geometry (cylinder)
+    attached_geom = ET.SubElement(cyl_frame, "attached_geometry")
+    cylinder = ET.SubElement(attached_geom, "Cylinder", name=f"{cyl_frame_name}_geom_1")
+    ET.SubElement(cylinder, "socket_frame").text = ".."
+    ET.SubElement(cylinder, "radius").text = "0.02"
+    # Use half the bone length for half_height
+    ET.SubElement(cylinder, "half_height").text = f"{bone_length/2:.6f}"
+    
+    # Frame positioning
+    ET.SubElement(cyl_frame, "socket_parent").text = ".."
+    ET.SubElement(cyl_frame, "translation").text = f"0 {bone_length/2:.6f} 0"
+    ET.SubElement(cyl_frame, "orientation").text = "-0 0 -0"
+    
+    # Body frame geometry
+    body_frame_geom = ET.SubElement(body, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(body_frame_geom, "socket_frame").text = ".."
+    body_scale = ET.SubElement(body_frame_geom, "scale_factors")
+    body_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    
+    # Body properties (defaults as requested)
+    ET.SubElement(body, "mass").text = "1"
+    ET.SubElement(body, "mass_center").text = "0 0 0"
+    ET.SubElement(body, "inertia").text = "1 1 1 0 0 0"
+    
+    return body
+
+def create_opensim_free_joint(name, parent_body, child_body, parent_pos, parent_rot, child_pos, child_rot):
+    """Create OpenSim FreeJoint XML element for root bone"""
+    joint = ET.Element("FreeJoint", name=name)
+    
+    # Socket connections
+    ET.SubElement(joint, "socket_parent_frame").text = f"{name}_parent_offset"
+    ET.SubElement(joint, "socket_child_frame").text = f"{name}_child_offset"
+    
+    # Coordinates (6 DOF for free joint)
+    coordinates = ET.SubElement(joint, "coordinates")
+    for i in range(6):
+        coord = ET.SubElement(coordinates, "Coordinate", name=f"{name}_coord_{i}")
+        # All properties default
+    
+    # Physical offset frames
+    frames = ET.SubElement(joint, "frames")
+    
+    # Parent frame
+    parent_frame = ET.SubElement(frames, "PhysicalOffsetFrame", name=f"{name}_parent_offset")
+    parent_geom = ET.SubElement(parent_frame, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(parent_geom, "socket_frame").text = ".."
+    parent_scale = ET.SubElement(parent_geom, "scale_factors")
+    parent_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    ET.SubElement(parent_frame, "socket_parent").text = f"/bodyset/{parent_body}" if parent_body != "ground" else "/ground"
+    ET.SubElement(parent_frame, "translation").text = f"{parent_pos[0]:.6f} {parent_pos[1]:.6f} {parent_pos[2]:.6f}"
+    ET.SubElement(parent_frame, "orientation").text = f"{parent_rot[0]:.6f} {parent_rot[1]:.6f} {parent_rot[2]:.6f}"
+    
+    # Child frame
+    child_frame = ET.SubElement(frames, "PhysicalOffsetFrame", name=f"{name}_child_offset")
+    child_geom = ET.SubElement(child_frame, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(child_geom, "socket_frame").text = ".."
+    child_scale = ET.SubElement(child_geom, "scale_factors")
+    child_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    ET.SubElement(child_frame, "socket_parent").text = f"/bodyset/{child_body}"
+    ET.SubElement(child_frame, "translation").text = f"{child_pos[0]:.6f} {child_pos[1]:.6f} {child_pos[2]:.6f}"
+    ET.SubElement(child_frame, "orientation").text = f"{child_rot[0]:.6f} {child_rot[1]:.6f} {child_rot[2]:.6f}"
+    
+    return joint
+
+def create_opensim_custom_joint(name, parent_body, child_body, parent_pos, parent_rot, child_pos, child_rot):
+    """Create OpenSim CustomJoint XML element"""
+    joint = ET.Element("CustomJoint", name=name)
+    
+    # Socket connections
+    ET.SubElement(joint, "socket_parent_frame").text = f"{name}_parent_offset"
+    ET.SubElement(joint, "socket_child_frame").text = f"{name}_child_offset"
+    
+    # Coordinates (3 rotational DOF for now)
+    coordinates = ET.SubElement(joint, "coordinates")
+    coord_names = ["rot_x", "rot_y", "rot_z"]
+    for coord_name in coord_names:
+        coord = ET.SubElement(coordinates, "Coordinate", name=f"{name}_coord_{coord_name}")
+        ET.SubElement(coord, "default_value").text = "0"
+        ET.SubElement(coord, "default_speed_value").text = "0"
+        ET.SubElement(coord, "range").text = "-1.5707963300000001 1.5707963300000001"
+        ET.SubElement(coord, "clamped").text = "true"
+        ET.SubElement(coord, "locked").text = "false"
+        ET.SubElement(coord, "prescribed_function")
+    
+    # Physical offset frames
+    frames = ET.SubElement(joint, "frames")
+    
+    # Parent frame
+    parent_frame = ET.SubElement(frames, "PhysicalOffsetFrame", name=f"{name}_parent_offset")
+    parent_geom = ET.SubElement(parent_frame, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(parent_geom, "socket_frame").text = ".."
+    parent_scale = ET.SubElement(parent_geom, "scale_factors")
+    parent_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    ET.SubElement(parent_frame, "socket_parent").text = f"/bodyset/{parent_body}"
+    ET.SubElement(parent_frame, "translation").text = f"{parent_pos[0]:.6f} {parent_pos[1]:.6f} {parent_pos[2]:.6f}"
+    ET.SubElement(parent_frame, "orientation").text = f"{parent_rot[0]:.6f} {parent_rot[1]:.6f} {parent_rot[2]:.6f}"
+    
+    # Child frame
+    child_frame = ET.SubElement(frames, "PhysicalOffsetFrame", name=f"{name}_child_offset")
+    child_geom = ET.SubElement(child_frame, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(child_geom, "socket_frame").text = ".."
+    child_scale = ET.SubElement(child_geom, "scale_factors")
+    child_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    ET.SubElement(child_frame, "socket_parent").text = f"/bodyset/{child_body}"
+    ET.SubElement(child_frame, "translation").text = f"{child_pos[0]:.6f} {child_pos[1]:.6f} {child_pos[2]:.6f}"
+    ET.SubElement(child_frame, "orientation").text = f"{child_rot[0]:.6f} {child_rot[1]:.6f} {child_rot[2]:.6f}"
+    
+    # SpatialTransform (using example structure)
+    spatial_transform = ET.SubElement(joint, "SpatialTransform")
+    
+    # Rotational axes
+    for i, (axis_name, axis_coord, axis_vec) in enumerate([
+        ("rotation1", f"{name}_coord_rot_x", "1 0 0"),
+        ("rotation2", f"{name}_coord_rot_z", "0 0 1"), 
+        ("rotation3", f"{name}_coord_rot_y", "0 1 0")
+    ]):
+        transform_axis = ET.SubElement(spatial_transform, "TransformAxis", name=axis_name)
+        ET.SubElement(transform_axis, "coordinates").text = axis_coord
+        ET.SubElement(transform_axis, "axis").text = axis_vec
+        linear_func = ET.SubElement(transform_axis, "LinearFunction", name="function")
+        ET.SubElement(linear_func, "coefficients").text = " 1 0"
+    
+    # Translational axes (locked)
+    for i, axis_vec in enumerate(["1 0 0", "0 1 0", "0 0 1"]):
+        transform_axis = ET.SubElement(spatial_transform, "TransformAxis", name=f"translation{i+1}")
+        ET.SubElement(transform_axis, "coordinates").text = ""
+        ET.SubElement(transform_axis, "axis").text = axis_vec
+        constant_func = ET.SubElement(transform_axis, "Constant", name="function")
+        ET.SubElement(constant_func, "value").text = "0"
+    
+    return joint
+
+def export_armature_to_opensim(armature_name, bone_to_hik_map, output_file, model_name="ExportedModel"):
+    """
+    Export armature T-pose as OpenSim model
+    Args:
+        armature_name: Name of the armature object
+        bone_to_hik_map: Dictionary {blender_bone_name: opensim_body_name} 
+        output_file: Output .osim file path
+        model_name: Name for the OpenSim model
+    """
+    # Get armature object
+    if armature_name not in bpy.data.objects:
+        raise ValueError(f"Armature '{armature_name}' not found")
+    
+    armature_obj = bpy.data.objects[armature_name]
+    
+    if armature_obj.type != 'ARMATURE':
+        raise ValueError(f"Object '{armature_name}' is not an armature")
+    
+    pose_bones = armature_obj.pose.bones
+    
+    # Find root bone (same logic as existing exports)
+    root_bone = None
+    for bone_name, opensim_name in bone_to_hik_map.items():
+        if bone_name in pose_bones and opensim_name is not None:
+            pose_bone = pose_bones[bone_name]
+            parent_in_map = pose_bone.parent and pose_bone.parent.name in bone_to_hik_map
+            parent_has_name = parent_in_map and bone_to_hik_map[pose_bone.parent.name] is not None
+            
+            if not parent_has_name:
+                root_bone = pose_bone
+                break
+    
+    if not root_bone:
+        raise ValueError("No root bone found in bone mapping")
+    
+    # Create OpenSim document structure
+    doc = ET.Element("OpenSimDocument", Version="40600")
+    model = ET.SubElement(doc, "Model", name=model_name)
+    
+    # Ground
+    ground = ET.SubElement(model, "Ground", name="ground")
+    ground_geom = ET.SubElement(ground, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(ground_geom, "socket_frame").text = ".."
+    ground_scale = ET.SubElement(ground_geom, "scale_factors")
+    ground_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    
+    # BodySet
+    bodyset = ET.SubElement(model, "BodySet", name="bodyset")
+    bodyset_objects = ET.SubElement(bodyset, "objects")
+    ET.SubElement(bodyset, "groups")
+    
+    # JointSet  
+    jointset = ET.SubElement(model, "JointSet", name="jointset")
+    jointset_objects = ET.SubElement(jointset, "objects")
+    ET.SubElement(jointset, "groups")
+    
+    # Process bones
+    processed_bones = set()
+    
+    def process_bone_recursive(pose_bone, parent_opensim_name="ground"):
+        """Recursively process bone and its children"""
+        bone_name = pose_bone.name
+        
+        if bone_name not in bone_to_hik_map or bone_name in processed_bones:
+            return
+        
+        opensim_name = bone_to_hik_map[bone_name]
+        
+        # If opensim_name is None, skip this bone but process children
+        if opensim_name is None:
+            for child in pose_bone.children:
+                if child.name in bone_to_hik_map:
+                    process_bone_recursive(child, parent_opensim_name)
+            return
+        
+        processed_bones.add(bone_name)
+        
+        # Get bone transform and length
+        opensim_pos, opensim_rot, bone_length = get_bone_opensim_transform(pose_bone, bone_to_hik_map)
+        
+        # Create body
+        body = create_opensim_body(opensim_name, bone_length)
+        bodyset_objects.append(body)
+        
+        # Create joint
+        if parent_opensim_name == "ground":
+            # Root bone gets FreeJoint
+            joint = create_opensim_free_joint(f"joint_{opensim_name}", "ground", opensim_name,                 
+                opensim_pos,  # Parent frame position (bone head in parent coordinates)
+                opensim_rot,  # Parent frame orientation
+                [0, 0, 0],    # Child frame position (at child body origin)
+                [0, 0, 0]     # Child frame orientation (aligned with child body))
+            )
+        else:
+            # Child bones get CustomJoint
+            # For joint frames, we need positions relative to parent and child bodies
+            joint = create_opensim_custom_joint(
+                f"joint_{opensim_name}",
+                parent_opensim_name, 
+                opensim_name,
+                opensim_pos,  # Parent frame position (bone head in parent coordinates)
+                opensim_rot,  # Parent frame orientation
+                [0, 0, 0],    # Child frame position (at child body origin)
+                [0, 0, 0]     # Child frame orientation (aligned with child body)
+            )
+        
+        jointset_objects.append(joint)
+        
+        # Process children
+        for child in pose_bone.children:
+            if child.name in bone_to_hik_map:
+                process_bone_recursive(child, opensim_name)
+    
+    # Start processing from root bone
+    process_bone_recursive(root_bone)
+    
+    # Add other required sections (empty for now)
+    controller_set = ET.SubElement(model, "ControllerSet", name="controllerset")
+    ET.SubElement(controller_set, "objects")
+    ET.SubElement(controller_set, "groups")
+    
+    force_set = ET.SubElement(model, "ForceSet", name="forceset")
+    ET.SubElement(force_set, "objects")
+    ET.SubElement(force_set, "groups")
+    
+    marker_set = ET.SubElement(model, "MarkerSet", name="markers")
+    ET.SubElement(marker_set, "objects")
+    ET.SubElement(marker_set, "groups")
+    
+    # Write XML file
+    tree = ET.ElementTree(doc)
+    ET.indent(tree, space="  ", level=0)
+    
+    with open(output_file, 'wb') as f:
+        tree.write(f, encoding='utf-8', xml_declaration=True)
+    
+    print(f"Exported OpenSim model to: {output_file}")
+    print(f"Total bodies: {len(processed_bones)}")
+    print(f"Model name: {model_name}")
+
 # Example bone mapping with None for bones to skip
 bone_to_hik_map = {
     'spine': 'Hips',
@@ -359,7 +740,7 @@ bone_to_hik_map = {
 
 
 
-armature_name = "rig-copy"  # Replace with your armature name
+armature_name = "metarig"  # Replace with your armature name
 use_local = False
 # Export T-pose (current pose as skeleton definition)
 export_armature_tpose_to_yaml(
@@ -377,4 +758,38 @@ export_armature_animation_to_yaml(
     frame_start=0,
     frame_end=700,
     use_local_coords=use_local
+)
+
+# Example OpenSim export - uncomment to use
+# Create OpenSim body names mapping (can be same as HIK or different)
+opensim_bone_map = {
+    'spine': 'pelvis',
+    'spine.001': 'spine1',
+    'spine.002': 'spine2',
+    'spine.003': 'spine3',
+    'spine.004': 'neck',  
+    'spine.005': 'neck1',
+    'spine.006': 'head',
+    'shoulder.R': 'r_shoulder',
+    'upper_arm.R': 'r_upperarm',
+    'forearm.R': 'r_forearm',
+    'hand.R': 'r_hand',
+    'shoulder.L': 'l_shoulder',
+    'upper_arm.L': 'l_upperarm',
+    'forearm.L': 'l_forearm',
+    'hand.L': 'l_hand',
+    'thigh.R': 'r_thigh',
+    'shin.R': 'r_shin',
+    'foot.R': 'r_foot',
+    'thigh.L': 'l_thigh',
+    'shin.L': 'l_shin',
+    'foot.L': 'l_foot',
+}
+
+# Export to OpenSim (uncomment to use)
+export_armature_to_opensim(
+    armature_name,
+    opensim_bone_map,
+    "c:\\temp\\exported_model.osim",
+    model_name="BlenderExportedModel"
 )
