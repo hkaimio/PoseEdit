@@ -570,14 +570,176 @@ def create_opensim_custom_joint(name, parent_body, child_body, parent_pos, paren
     
     return joint
 
-def export_armature_to_opensim(armature_name, bone_to_hik_map, output_file, model_name="ExportedModel"):
+def format_marker_name(marker_bone_name, marker_name_overrides=None):
     """
-    Export armature T-pose as OpenSim model
+    Format marker name according to OpenSim conventions
+    Args:
+        marker_bone_name: Original Blender bone name
+        marker_name_overrides: Dictionary of {bone_name: override_name}
+    Returns:
+        Formatted marker name
+    """
+    # Check for override first
+    if marker_name_overrides and marker_bone_name in marker_name_overrides:
+        return marker_name_overrides[marker_bone_name]
+    
+    name = marker_bone_name
+    
+    # Remove "MRK-" prefix if present
+    if name.startswith("MRK-"):
+        name = name[4:]
+    
+    # Handle .L/.R postfix -> L/R prefix conversion
+    if name.endswith(".L"):
+        name = "L" + name[:-2]
+    elif name.endswith(".R"):
+        name = "R" + name[:-2]
+    
+    # Capitalize first letter
+    if name:
+        name = name[0].upper() + name[1:]
+    
+    return name
+
+def get_marker_local_position(marker_bone, parent_body_bone):
+    """
+    Get marker position in parent body's local coordinate system
+    Args:
+        marker_bone: The marker bone
+        parent_body_bone: The parent body bone
+    Returns:
+        [x, y, z] position in OpenSim coordinates
+    """
+    if parent_body_bone is None:
+        # No parent body, use global position
+        global_pos = marker_bone.matrix.translation
+    else:
+        # Calculate position relative to parent body
+        parent_matrix_inv = parent_body_bone.matrix.inverted()
+        local_matrix = parent_matrix_inv @ marker_bone.matrix
+        global_pos = local_matrix.translation
+    
+    # Convert to OpenSim coordinate system
+    return blender_to_opensim_position([global_pos.x, global_pos.y, global_pos.z])
+
+def find_marker_parent_body(marker_bone, bone_to_opensim_map):
+    """
+    Find the OpenSim body that should be the parent of this marker
+    Args:
+        marker_bone: The marker bone
+        bone_to_opensim_map: Dictionary mapping bone names to OpenSim body names
+    Returns:
+        (parent_bone, opensim_body_name) or (None, "ground") if no parent found
+    """
+    current = marker_bone.parent
+    while current:
+        if current.name in bone_to_opensim_map:
+            opensim_name = bone_to_opensim_map[current.name]
+            if opensim_name is not None:  # Skip bones with None mapping
+                return current, opensim_name
+        current = current.parent
+    
+    # No mapped parent found, attach to ground
+    return None, "ground"
+
+def create_opensim_marker(marker_name, parent_body_name, local_position):
+    """Create OpenSim Marker XML element"""
+    marker = ET.Element("Marker", name=marker_name)
+    
+    # Set parent frame
+    if parent_body_name == "ground":
+        parent_frame_path = "/ground"
+    else:
+        parent_frame_path = f"/bodyset/{parent_body_name}"
+    
+    ET.SubElement(marker, "socket_parent_frame").text = parent_frame_path
+    
+    # Set location (in meters)
+    location_str = f"{local_position[0]:.6f} {local_position[1]:.6f} {local_position[2]:.6f}"
+    ET.SubElement(marker, "location").text = location_str
+    
+    # Set as fixed marker
+    ET.SubElement(marker, "fixed").text = "true"
+    
+    return marker
+
+def process_markers_from_collection(armature_obj, collection_name, bone_to_opensim_map, marker_name_overrides=None):
+    """
+    Process all bones in a specific bone collection to create markers
+    Args:
+        armature_obj: Blender armature object
+        collection_name: Name of the bone collection containing markers
+        bone_to_opensim_map: Dictionary mapping bone names to OpenSim body names
+        marker_name_overrides: Optional dictionary of marker name overrides
+    Returns:
+        List of marker XML elements
+    """
+    markers = []
+    
+    # Store current mode and switch to object mode to access bone collections
+    current_mode = bpy.context.mode
+    current_object = bpy.context.active_object
+    
+    # Set the armature as active object
+    bpy.context.view_layer.objects.active = armature_obj
+    
+    if current_mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    
+    try:
+        # Check if the collection exists
+        if collection_name not in armature_obj.data.collections:
+            print(f"Warning: Bone collection '{collection_name}' not found")
+            return markers
+        
+        collection = armature_obj.data.collections[collection_name]
+        
+        # Process each bone in the collection
+        for bone in collection.bones:
+            if bone.name not in armature_obj.pose.bones:
+                continue
+                
+            marker_bone = armature_obj.pose.bones[bone.name]
+            
+            # Find parent body for this marker
+            parent_bone, parent_body_name = find_marker_parent_body(marker_bone, bone_to_opensim_map)
+            
+            # Get marker position in parent body's local coordinates
+            local_position = get_marker_local_position(marker_bone, parent_bone)
+            
+            # Format marker name
+            marker_name = format_marker_name(bone.name, marker_name_overrides)
+            
+            # Create marker XML element
+            marker_xml = create_opensim_marker(marker_name, parent_body_name, local_position)
+            markers.append(marker_xml)
+            
+            print(f"Created marker '{marker_name}' on body '{parent_body_name}' at {local_position}")
+    
+    finally:
+        # Restore original active object and mode
+        if current_object:
+            bpy.context.view_layer.objects.active = current_object
+        
+        if current_mode == 'EDIT_ARMATURE':
+            bpy.ops.object.mode_set(mode='EDIT')
+        elif current_mode == 'POSE':
+            bpy.ops.object.mode_set(mode='POSE')
+    
+    return markers
+
+def export_armature_to_opensim(armature_name, bone_to_opensim_map, output_file, 
+                               model_name="ExportedModel", marker_collection_name="Markers",
+                               marker_name_overrides=None):
+    """
+    Export armature T-pose as OpenSim model with markers
     Args:
         armature_name: Name of the armature object
-        bone_to_hik_map: Dictionary {blender_bone_name: opensim_body_name} 
+        bone_to_opensim_map: Dictionary {blender_bone_name: opensim_body_name}
         output_file: Output .osim file path
         model_name: Name for the OpenSim model
+        marker_collection_name: Name of bone collection containing markers
+        marker_name_overrides: Optional dictionary for marker name overrides
     """
     # Get armature object
     if armature_name not in bpy.data.objects:
@@ -592,11 +754,11 @@ def export_armature_to_opensim(armature_name, bone_to_hik_map, output_file, mode
     
     # Find root bone (same logic as existing exports)
     root_bone = None
-    for bone_name, opensim_name in bone_to_hik_map.items():
+    for bone_name, opensim_name in bone_to_opensim_map.items():
         if bone_name in pose_bones and opensim_name is not None:
             pose_bone = pose_bones[bone_name]
-            parent_in_map = pose_bone.parent and pose_bone.parent.name in bone_to_hik_map
-            parent_has_name = parent_in_map and bone_to_hik_map[pose_bone.parent.name] is not None
+            parent_in_map = pose_bone.parent and pose_bone.parent.name in bone_to_opensim_map
+            parent_has_name = parent_in_map and bone_to_opensim_map[pose_bone.parent.name] is not None
             
             if not parent_has_name:
                 root_bone = pose_bone
@@ -633,22 +795,22 @@ def export_armature_to_opensim(armature_name, bone_to_hik_map, output_file, mode
         """Recursively process bone and its children"""
         bone_name = pose_bone.name
         
-        if bone_name not in bone_to_hik_map or bone_name in processed_bones:
+        if bone_name not in bone_to_opensim_map or bone_name in processed_bones:
             return
         
-        opensim_name = bone_to_hik_map[bone_name]
+        opensim_name = bone_to_opensim_map[bone_name]
         
         # If opensim_name is None, skip this bone but process children
         if opensim_name is None:
             for child in pose_bone.children:
-                if child.name in bone_to_hik_map:
+                if child.name in bone_to_opensim_map:
                     process_bone_recursive(child, parent_opensim_name)
             return
         
         processed_bones.add(bone_name)
         
         # Get bone transform and length
-        opensim_pos, opensim_rot, bone_length = get_bone_opensim_transform(pose_bone, bone_to_hik_map)
+        opensim_pos, opensim_rot, bone_length = get_bone_opensim_transform(pose_bone, bone_to_opensim_map)
         
         # Create body
         body = create_opensim_body(opensim_name, bone_length)
@@ -680,7 +842,7 @@ def export_armature_to_opensim(armature_name, bone_to_hik_map, output_file, mode
         
         # Process children
         for child in pose_bone.children:
-            if child.name in bone_to_hik_map:
+            if child.name in bone_to_opensim_map:
                 process_bone_recursive(child, opensim_name)
     
     # Start processing from root bone
@@ -696,8 +858,20 @@ def export_armature_to_opensim(armature_name, bone_to_hik_map, output_file, mode
     ET.SubElement(force_set, "groups")
     
     marker_set = ET.SubElement(model, "MarkerSet", name="markers")
-    ET.SubElement(marker_set, "objects")
+    marker_objects = ET.SubElement(marker_set, "objects")
     ET.SubElement(marker_set, "groups")
+    
+    # Process markers from bone collection
+    markers = process_markers_from_collection(
+        armature_obj,
+        marker_collection_name,
+        bone_to_opensim_map,
+        marker_name_overrides
+    )
+    
+    # Add markers to marker set
+    for marker in markers:
+        marker_objects.append(marker)
     
     # Write XML file
     tree = ET.ElementTree(doc)
