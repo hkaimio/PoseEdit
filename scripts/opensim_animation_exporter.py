@@ -12,11 +12,15 @@ Requirements:
 - PyYAML
 
 Usage:
-    python opensim_animation_exporter.py model.osim motion.mot output.yaml
+    # Export animation with skeleton
+    python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml
     
     # With optional parameters:
-    python opensim_animation_exporter.py model.osim motion.mot output.yaml \\
+    python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml \\
         --start-frame 0 --end-frame 100 --framerate 30.0
+        
+    # Export skeleton rest pose only
+    python opensim_animation_exporter.py --skeleton --model model.osim -o skeleton.yaml
 """
 
 import argparse
@@ -25,26 +29,76 @@ import sys
 import traceback
 from pathlib import Path
 
+# Defer imports to allow help to work without dependencies
+opensim_available = True
+numpy_available = True
+yaml_available = True
+
 try:
     import opensim as osim
-except ImportError as e:
-    print(f"Error: OpenSim Python API not found: {e}")
-    print("Please install OpenSim with Python bindings.")
-    sys.exit(1)
+except ImportError:
+    opensim_available = False
 
 try:
     import numpy as np
-except ImportError as e:
-    print(f"Error: numpy not found: {e}")
-    print("Please install numpy: pip install numpy")
-    sys.exit(1)
+except ImportError:
+    numpy_available = False
 
 try:
     import yaml
-except ImportError as e:
-    print(f"Error: PyYAML not found: {e}")
-    print("Please install PyYAML: pip install pyyaml")
-    sys.exit(1)
+except ImportError:
+    yaml_available = False
+
+
+def check_dependencies():
+    """Check that all required dependencies are available."""
+    missing = []
+    if not opensim_available:
+        missing.append("opensim (OpenSim Python API)")
+    if not numpy_available:
+        missing.append("numpy")
+    if not yaml_available:
+        missing.append("PyYAML")
+    
+    if missing:
+        print("Error: Missing required dependencies:")
+        for dep in missing:
+            print(f"  - {dep}")
+        print("\nPlease install the missing packages:")
+        if not opensim_available:
+            print("  - Install OpenSim with Python bindings")
+        if not numpy_available:
+            print("  - pip install numpy")
+        if not yaml_available:
+            print("  - pip install pyyaml")
+        return False
+    return True
+
+
+def check_file_overwrite(file_path: str, force: bool = False) -> bool:
+    """
+    Check if file exists and get user permission to overwrite.
+    
+    Args:
+        file_path: Path to the file to check
+        force: If True, skip user confirmation
+        
+    Returns:
+        bool: True if safe to write, False otherwise
+    """
+    if not Path(file_path).exists():
+        return True
+    
+    if force:
+        print(f"Warning: Overwriting existing file: {file_path}")
+        return True
+    
+    try:
+        response = input(f"File '{file_path}' already exists. Overwrite? (y/N): ").strip().lower()
+        return response in ['y', 'yes']
+    except (KeyboardInterrupt, EOFError):
+        print("\nOperation cancelled by user.")
+        return False
 
 
 def rotation_matrix_to_euler_zxy(R):
@@ -110,7 +164,8 @@ def yup_to_zup_rotation_matrix(rot_matrix_yup):
 def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
                                    output_file: str, frame_start: int = 0,
                                    frame_end: int | None = None,
-                                   target_framerate: float = 60.0) -> bool:
+                                   target_framerate: float = 60.0,
+                                   force_overwrite: bool = False) -> bool:
     """
     Export OpenSim animation to YAML format similar to armature_export.py
     Uses similar logic as motion.py from lines 132 onward to extract body transforms
@@ -122,11 +177,16 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
         frame_start: Starting frame (default 0)
         frame_end: Ending frame (None for all frames)
         target_framerate: Target framerate for export (default 60.0)
+        force_overwrite: If True, overwrite without asking (default False)
 
     Returns:
         bool: True if successful, False otherwise
     """
     try:
+        # Check for file overwrite permission
+        if not check_file_overwrite(output_file, force_overwrite):
+            print("Export cancelled.")
+            return False
         print(f"Loading OpenSim model: {osim_file_path}")
         print(f"Loading motion data: {mot_file_path}")
 
@@ -251,16 +311,59 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
             'frames': frames
         }
 
+        # Generate skeleton structure for rest pose
+        print("Generating skeleton rest pose...")
+        
+        # Create rest pose state (default coordinate values)
+        rest_state = model.initSystem()
+        coord_set = model.getCoordinateSet()
+        for i in range(coord_set.getSize()):
+            coord = coord_set.get(i)
+            coord.setValue(rest_state, coord.getDefaultValue(), enforceContraints=False)
+        model.realizePosition(rest_state)
+        
+        # Build body hierarchy
+        parent_to_children, child_to_parent = get_body_hierarchy(model)
+        
+        # Find root body
+        root_body = find_root_body(model, child_to_parent)
+        if not root_body:
+            print("Warning: Could not find root body, skeleton export will be skipped")
+            skeleton = None
+        else:
+            # Build skeleton hierarchy starting from root
+            root_node = build_skeleton_node(root_body, model, rest_state, parent_to_children)
+            
+            skeleton = {
+                'name': 'opensim_skeleton',
+                'up': 'y',           # Y-up coordinate system (OpenSim native)
+                'forward': 'z',      # Z-forward (OpenSim convention)
+                'handiness': 'right', # Right-handed coordinate system
+                'transform': 'global', # Global coordinates
+                'units': 'cm',       # Centimeters
+                'root': root_node
+            }
 
+        # Combine skeleton and animation in single output
+        output_data = {
+            'animation': animation
+        }
+        
+        if skeleton:
+            output_data['skeleton'] = skeleton
 
         # Write to YAML (similar to armature_export.py)
         with open(output_file, 'w') as f:
-            yaml.dump(animation, f, default_flow_style=False,
+            yaml.dump(output_data, f, default_flow_style=False,
                      sort_keys=False, allow_unicode=True)
 
-        print(f"Successfully exported animation to: {output_file}")
+        print(f"Successfully exported animation and skeleton to: {output_file}")
         print(f"Exported {len(frames)} frames with {len(changes)} bodies each")
         print(f"Duration: {frames[-1]['time']:.3f} seconds" if frames else "No frames exported")
+        if skeleton:
+            print(f"Skeleton exported with root: {root_body} -> {bone_to_hik_map.get(root_body, root_body)}")
+        else:
+            print("Warning: Skeleton export was skipped due to missing root body")
 
         return True
 
@@ -365,7 +468,8 @@ def build_skeleton_node(body_name, model, state, parent_to_children):
 
 
 def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
-                                   skeleton_name: str = "opensim_skeleton") -> bool:
+                                   skeleton_name: str = "opensim_skeleton",
+                                   force_overwrite: bool = False) -> bool:
     """
     Export OpenSim model rest pose as skeleton hierarchy YAML.
     
@@ -373,11 +477,17 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
         osim_file_path: Path to OpenSim model file (.osim)
         output_file: Output YAML file path
         skeleton_name: Name for the skeleton (default: "opensim_skeleton")
+        force_overwrite: If True, overwrite without asking (default False)
         
     Returns:
         bool: True if successful, False otherwise
     """
     try:
+        # Check for file overwrite permission
+        if not check_file_overwrite(output_file, force_overwrite):
+            print("Export cancelled.")
+            return False
+            
         print(f"Loading OpenSim model: {osim_file_path}")
         
         # Load OpenSim model
@@ -410,8 +520,8 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
         # Build skeleton hierarchy starting from root
         root_node = build_skeleton_node(root_body, model, state, parent_to_children)
         
-        # Create skeleton structure
-        skeleton = {
+        # Create skeleton structure in unified format
+        output_data = {
             'skeleton': {
                 'name': skeleton_name,
                 'up': 'y',           # Y-up coordinate system (OpenSim native)
@@ -425,7 +535,7 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
         
         # Write to YAML
         with open(output_file, 'w') as f:
-            yaml.dump(skeleton, f, default_flow_style=False,
+            yaml.dump(output_data, f, default_flow_style=False,
                      sort_keys=False, allow_unicode=True)
         
         print(f"Successfully exported skeleton to: {output_file}")
@@ -442,27 +552,30 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
 def main():
     """Main function to handle command line arguments and run the export."""
     parser = argparse.ArgumentParser(
-        description="Export OpenSim model animation to YAML format",
+        description="Export OpenSim model animation and/or skeleton to unified YAML format",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Export animation
-  python opensim_animation_exporter.py model.osim motion.mot output.yaml
-  python opensim_animation_exporter.py model.osim motion.mot output.yaml --start-frame 10 --end-frame 100
-  python opensim_animation_exporter.py model.osim motion.mot output.yaml --framerate 30.0
+  # Export animation with skeleton
+  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml
+  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml --start-frame 10 --end-frame 100
+  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml --framerate 30.0
   
-  # Export skeleton rest pose
-  python opensim_animation_exporter.py --skeleton model.osim skeleton.yaml
+  # Export skeleton rest pose only
+  python opensim_animation_exporter.py --skeleton --model model.osim -o skeleton.yaml
+  
+  # Force overwrite existing files
+  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml --force
         """)
 
+    parser.add_argument('--model', '-m', type=str, required=True,
+                        help='Path to OpenSim model file (.osim)')
+    parser.add_argument('--motion', type=str,
+                        help='Path to motion file (.mot) - required for animation export')
+    parser.add_argument('-o', '--output', type=str, required=True,
+                        help='Output YAML file path')
     parser.add_argument('--skeleton', action='store_true',
                         help='Export skeleton rest pose instead of animation')
-    parser.add_argument('osim_file', type=str,
-                        help='Path to OpenSim model file (.osim)')
-    parser.add_argument('output_file', type=str,
-                        help='Output YAML file path')
-    parser.add_argument('mot_file', type=str, nargs='?',
-                        help='Path to motion file (.mot) - required for animation export')
     parser.add_argument('--start-frame', type=int, default=0,
                         help='Starting frame number (default: 0)')
     parser.add_argument('--end-frame', type=int, default=None,
@@ -471,18 +584,28 @@ Examples:
                         help='Target framerate for export (default: 60.0)')
     parser.add_argument('--skeleton-name', type=str, default='opensim_skeleton',
                         help='Name for skeleton export (default: opensim_skeleton)')
+    parser.add_argument('--force', '-f', action='store_true',
+                        help='Force overwrite existing files without asking')
 
     args = parser.parse_args()
 
+    # Check dependencies first
+    if not check_dependencies():
+        sys.exit(1)
+
     # Validate input files
-    osim_path = Path(args.osim_file)
+    osim_path = Path(args.model)
 
     if not osim_path.exists():
-        print(f"Error: OpenSim model file not found: {args.osim_file}")
+        print(f"Error: OpenSim model file not found: {args.model}")
+        sys.exit(1)
+
+    # Check for file overwrite
+    if not check_file_overwrite(args.output, args.force):
         sys.exit(1)
 
     # Create output directory if needed
-    output_path = Path(args.output_file)
+    output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if args.skeleton:
@@ -490,18 +613,19 @@ Examples:
         success = export_opensim_skeleton_to_yaml(
             str(osim_path),
             str(output_path),
-            args.skeleton_name
+            args.skeleton_name,
+            args.force
         )
     else:
         # Export animation - require motion file
-        if not args.mot_file:
+        if not args.motion:
             print("Error: Motion file required for animation export")
             parser.print_help()
             sys.exit(1)
             
-        mot_path = Path(args.mot_file)
+        mot_path = Path(args.motion)
         if not mot_path.exists():
-            print(f"Error: Motion file not found: {args.mot_file}")
+            print(f"Error: Motion file not found: {args.motion}")
             sys.exit(1)
 
         # Run the animation export
@@ -511,7 +635,8 @@ Examples:
             str(output_path),
             args.start_frame,
             args.end_frame,
-            args.framerate
+            args.framerate,
+            args.force
         )
 
     sys.exit(0 if success else 1)
