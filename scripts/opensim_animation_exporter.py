@@ -92,8 +92,6 @@ bone_to_hik_map = {
 }
 
 
-
-
 def yup_to_zup_rotation_matrix(rot_matrix_yup):
     # Rotation matrix for +90 degrees around X-axis
     angle_rad = np.pi / 2
@@ -272,6 +270,175 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
         return False
 
 
+def get_body_hierarchy(model):
+    """
+    Build a hierarchy map from the OpenSim model joints.
+    Returns: (parent_to_children, child_to_parent) dictionaries
+    """
+    parent_to_children = {}
+    child_to_parent = {}
+    
+    joint_set = model.getJointSet()
+    for i in range(joint_set.getSize()):
+        joint = joint_set.get(i)
+        parent_body = joint.getParentFrame().findBaseFrame().getName()
+        child_body = joint.getChildFrame().findBaseFrame().getName()
+        
+        # Skip ground connections for cleaner hierarchy
+        if parent_body == 'ground':
+            continue
+            
+        if parent_body not in parent_to_children:
+            parent_to_children[parent_body] = []
+        parent_to_children[parent_body].append(child_body)
+        child_to_parent[child_body] = parent_body
+    
+    return parent_to_children, child_to_parent
+
+
+def find_root_body(model, child_to_parent):
+    """
+    Find the root body (connected to ground) in the OpenSim model.
+    """
+    joint_set = model.getJointSet()
+    for i in range(joint_set.getSize()):
+        joint = joint_set.get(i)
+        parent_body = joint.getParentFrame().findBaseFrame().getName()
+        child_body = joint.getChildFrame().findBaseFrame().getName()
+        
+        if parent_body == 'ground':
+            return child_body
+    
+    return None
+
+
+def build_skeleton_node(body_name, model, state, parent_to_children):
+    """
+    Recursively build a skeleton node with its children.
+    """
+    # Get the HIK name from mapping
+    hik_name = bone_to_hik_map.get(body_name, body_name)
+    
+    # Get body transform in ground frame
+    body_set = model.getBodySet()
+    body = body_set.get(body_name)
+    
+    # Get transform in ground frame for rest pose
+    H_swig = body.getTransformInGround(state)
+    T = H_swig.T().to_numpy()
+    R_swig = H_swig.R()
+    R = np.array([[R_swig.get(0, 0), R_swig.get(0, 1), R_swig.get(0, 2)],
+                  [R_swig.get(1, 0), R_swig.get(1, 1), R_swig.get(1, 2)],
+                  [R_swig.get(2, 0), R_swig.get(2, 1), R_swig.get(2, 2)]])
+    
+    # Position in centimeters, Y-up coordinates (OpenSim native)
+    position = [
+        round(float(T[0]) * 100, 3),  # X in cm
+        round(float(T[1]) * 100, 3),  # Y in cm (up)
+        round(float(T[2]) * 100, 3)   # Z in cm
+    ]
+    
+    # Extract rotation as ZXY Euler angles and convert to degrees
+    zxy = rotation_matrix_to_euler_zxy(R)
+    rotation = [
+        round(math.degrees(zxy[0]), 3),  # Z rotation
+        round(math.degrees(zxy[1]), 3),  # X rotation
+        round(math.degrees(zxy[2]), 3)   # Y rotation
+    ]
+    
+    # Build the skeleton node
+    node = {
+        'name': hik_name,
+        'hikname': hik_name,
+        'position': position,
+        'rotation': rotation,
+        'children': []
+    }
+    
+    # Recursively add children
+    if body_name in parent_to_children:
+        for child_body in parent_to_children[body_name]:
+            child_node = build_skeleton_node(child_body, model, state, parent_to_children)
+            node['children'].append(child_node)
+    
+    return node
+
+
+def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
+                                   skeleton_name: str = "opensim_skeleton") -> bool:
+    """
+    Export OpenSim model rest pose as skeleton hierarchy YAML.
+    
+    Args:
+        osim_file_path: Path to OpenSim model file (.osim)
+        output_file: Output YAML file path
+        skeleton_name: Name for the skeleton (default: "opensim_skeleton")
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        print(f"Loading OpenSim model: {osim_file_path}")
+        
+        # Load OpenSim model
+        model = osim.Model(osim_file_path)
+        
+        # Initialize model state (rest pose - default coordinate values)
+        state = model.initSystem()
+        
+        # Set all coordinates to their default values for rest pose
+        coord_set = model.getCoordinateSet()
+        for i in range(coord_set.getSize()):
+            coord = coord_set.get(i)
+            coord.setValue(state, coord.getDefaultValue(), enforceContraints=False)
+        
+        # Realize position to get body transforms
+        model.realizePosition(state)
+        
+        # Build body hierarchy
+        parent_to_children, child_to_parent = get_body_hierarchy(model)
+        
+        # Find root body
+        root_body = find_root_body(model, child_to_parent)
+        if not root_body:
+            print("Error: Could not find root body in OpenSim model")
+            return False
+        
+        print(f"Root body: {root_body}")
+        print(f"Body hierarchy: {len(parent_to_children)} parent bodies")
+        
+        # Build skeleton hierarchy starting from root
+        root_node = build_skeleton_node(root_body, model, state, parent_to_children)
+        
+        # Create skeleton structure
+        skeleton = {
+            'skeleton': {
+                'name': skeleton_name,
+                'up': 'y',           # Y-up coordinate system (OpenSim native)
+                'forward': 'z',      # Z-forward (OpenSim convention)
+                'handiness': 'right', # Right-handed coordinate system
+                'transform': 'global', # Global coordinates
+                'units': 'cm',       # Centimeters
+                'root': root_node
+            }
+        }
+        
+        # Write to YAML
+        with open(output_file, 'w') as f:
+            yaml.dump(skeleton, f, default_flow_style=False,
+                     sort_keys=False, allow_unicode=True)
+        
+        print(f"Successfully exported skeleton to: {output_file}")
+        print(f"Root body: {root_body} -> {bone_to_hik_map.get(root_body, root_body)}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error exporting OpenSim skeleton: {e}")
+        traceback.print_exc()
+        return False
+
+
 def main():
     """Main function to handle command line arguments and run the export."""
     parser = argparse.ArgumentParser(
@@ -279,51 +446,73 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Export animation
   python opensim_animation_exporter.py model.osim motion.mot output.yaml
   python opensim_animation_exporter.py model.osim motion.mot output.yaml --start-frame 10 --end-frame 100
   python opensim_animation_exporter.py model.osim motion.mot output.yaml --framerate 30.0
+  
+  # Export skeleton rest pose
+  python opensim_animation_exporter.py --skeleton model.osim skeleton.yaml
         """)
 
+    parser.add_argument('--skeleton', action='store_true',
+                        help='Export skeleton rest pose instead of animation')
     parser.add_argument('osim_file', type=str,
                         help='Path to OpenSim model file (.osim)')
-    parser.add_argument('mot_file', type=str,
-                        help='Path to motion file (.mot)')
     parser.add_argument('output_file', type=str,
                         help='Output YAML file path')
+    parser.add_argument('mot_file', type=str, nargs='?',
+                        help='Path to motion file (.mot) - required for animation export')
     parser.add_argument('--start-frame', type=int, default=0,
                         help='Starting frame number (default: 0)')
     parser.add_argument('--end-frame', type=int, default=None,
                         help='Ending frame number (default: all frames)')
     parser.add_argument('--framerate', type=float, default=60.0,
                         help='Target framerate for export (default: 60.0)')
+    parser.add_argument('--skeleton-name', type=str, default='opensim_skeleton',
+                        help='Name for skeleton export (default: opensim_skeleton)')
 
     args = parser.parse_args()
 
     # Validate input files
     osim_path = Path(args.osim_file)
-    mot_path = Path(args.mot_file)
 
     if not osim_path.exists():
         print(f"Error: OpenSim model file not found: {args.osim_file}")
-        sys.exit(1)
-
-    if not mot_path.exists():
-        print(f"Error: Motion file not found: {args.mot_file}")
         sys.exit(1)
 
     # Create output directory if needed
     output_path = Path(args.output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Run the export
-    success = export_opensim_animation_to_yaml(
-        str(osim_path),
-        str(mot_path),
-        str(output_path),
-        args.start_frame,
-        args.end_frame,
-        args.framerate
-    )
+    if args.skeleton:
+        # Export skeleton rest pose
+        success = export_opensim_skeleton_to_yaml(
+            str(osim_path),
+            str(output_path),
+            args.skeleton_name
+        )
+    else:
+        # Export animation - require motion file
+        if not args.mot_file:
+            print("Error: Motion file required for animation export")
+            parser.print_help()
+            sys.exit(1)
+            
+        mot_path = Path(args.mot_file)
+        if not mot_path.exists():
+            print(f"Error: Motion file not found: {args.mot_file}")
+            sys.exit(1)
+
+        # Run the animation export
+        success = export_opensim_animation_to_yaml(
+            str(osim_path),
+            str(mot_path),
+            str(output_path),
+            args.start_frame,
+            args.end_frame,
+            args.framerate
+        )
 
     sys.exit(0 if success else 1)
 
