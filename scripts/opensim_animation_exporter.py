@@ -122,27 +122,30 @@ def rotation_matrix_to_euler_zxy(R):
 
 # Example bone mapping with None for bones to skip
 bone_to_hik_map = {
-    'pelvis' : 'spine',
-    'spine1' : 'spine.001',
-    'spine2' : 'spine.002',
-    'spine3' : 'spine.003',
-    'spine4' : 'spine.004',  
-    'spine5' : 'spine.005',
-    'spine6' : 'spine.006',
-    'r_shoulder' : 'shoulder.R',
-    'r_upperarm' : 'upper_arm.R',
-    'r_forearm' : 'forearm.R',
-    'r_hand' : 'hand.R',
-    'l_shoulder' : 'shoulder.L',
-    'l_upperarm' : 'upper_arm.L',
-    'l_forearm' : 'forearm.L',
-    'l_hand' : 'hand.L',
-    'r_thigh' : 'thigh.R',
-    'r_shin' : 'shin.R',
-    'r_foot' : 'foot.R',
-    'l_thigh' : 'thigh.L',
-    'l_shin' : 'shin.L',
-    'l_foot' : 'foot.L',
+    'pelvis' : 'Hips',
+    'spine1' : 'Spine',
+    'spine2' : 'Spine3',
+    'spine3' : 'Spine9',
+    'spine4' : 'Neck',  
+    'spine5' : 'Neck1',
+    'spine6' : 'Head',
+    'head' : 'Head',
+    'neck' : 'Neck',
+    'neck1' : 'Neck1',
+    'r_shoulder' : 'RightShoulder',
+    'r_upperarm' : 'RightArm',
+    'r_forearm' : 'RightForeArm',
+    'r_hand' : 'RightHand',
+    'l_shoulder' : 'LeftShoulder',
+    'l_upperarm' : 'LeftArm',
+    'l_forearm' : 'LeftForeArm',
+    'l_hand' : 'LeftHand',
+    'r_thigh' : 'RightUpLeg',
+    'r_shin' : 'RightLeg',
+    'r_foot' : 'RightFoot',
+    'l_thigh' : 'LeftUpLeg',
+    'l_shin' : 'LeftLeg',
+    'l_foot' : 'LeftFoot',
 }
 
 
@@ -280,7 +283,6 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
                 position = [float(H[0, 3])*100, float(H[1, 3])*100, float(H[2, 3])*100]
 
                 # Extract rotation as Euler angles 
-                R_mat = H[0:3, 0:3]
                 zxy = rotation_matrix_to_euler_zxy(R)
 
                 # Convert to degrees
@@ -344,13 +346,12 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
                 'root': root_node
             }
 
-        # Combine skeleton and animation in single output
-        output_data = {
-            'animation': animation
-        }
-        
+        output_data = {}
+
         if skeleton:
             output_data['skeleton'] = skeleton
+
+        output_data["frames"] = animation['frames']
 
         # Write to YAML (similar to armature_export.py)
         with open(output_file, 'w') as f:
