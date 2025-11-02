@@ -374,15 +374,15 @@ def get_bone_length(pose_bone):
     bone_vector = pose_bone.bone.tail_local - pose_bone.bone.head_local
     return bone_vector.length
 
-def get_bone_opensim_transform(pose_bone, bone_to_hik_map=None):
+def get_bone_opensim_transform(pose_bone, bone_collection=None):
     """
     Get bone transform in OpenSim coordinate system
     Returns: (position, rotation, length)
     """
     # Get local transform relative to exported parent
     bone_matrix = pose_bone.matrix
-    if bone_to_hik_map:
-        exported_parent = find_exported_parent(pose_bone, bone_to_hik_map)
+    if bone_collection:
+        exported_parent = find_exported_parent_in_collection(pose_bone, bone_collection)
         if exported_parent:
             parent_matrix = exported_parent.matrix
         else:
@@ -420,9 +420,31 @@ def get_bone_opensim_transform(pose_bone, bone_to_hik_map=None):
 
     return position, euler, bone_length
 
+def get_bone_radius(bone_name):
+    """
+    Calculate bone radius based on bone name
+    Args:
+        bone_name: Name of the bone
+    Returns:
+        Radius for the bone cylinder visualization
+    """
+    bone_name_lower = bone_name.lower()
+    
+    # Small radius for finger bones, thumb bones, and palm bones
+    if (bone_name_lower.startswith("f_") or 
+        bone_name_lower.startswith("thumb") or 
+        bone_name_lower.startswith("palm")):
+        return 0.005
+    
+    # Default radius for other bones
+    return 0.02
+
 def create_opensim_body(name, bone_length):
     """Create OpenSim Body XML element"""
     body = ET.Element("Body", name=name)
+
+    # Calculate radius based on bone name
+    radius = get_bone_radius(name)
 
     # Add components section with PhysicalOffsetFrame for visualization
     components = ET.SubElement(body, "components")
@@ -441,7 +463,7 @@ def create_opensim_body(name, bone_length):
     attached_geom = ET.SubElement(cyl_frame, "attached_geometry")
     cylinder = ET.SubElement(attached_geom, "Cylinder", name=f"{cyl_frame_name}_geom_1")
     ET.SubElement(cylinder, "socket_frame").text = ".."
-    ET.SubElement(cylinder, "radius").text = "0.02"
+    ET.SubElement(cylinder, "radius").text = f"{radius:.6f}"
     # Use half the bone length for half_height
     ET.SubElement(cylinder, "half_height").text = f"{bone_length/2:.6f}"
 
@@ -742,13 +764,64 @@ def create_opensim_marker(marker_name, parent_body_name, local_position):
 
     return marker
 
-def process_markers_from_collection(armature_obj, collection_name, bone_to_opensim_map, marker_name_overrides=None):
+def get_bones_from_collection(armature_obj, collection_name):
+    """
+    Get all bone names from a specified bone collection
+    Args:
+        armature_obj: Blender armature object
+        collection_name: Name of the bone collection
+    Returns:
+        Set of bone names in the collection
+    """
+    if collection_name not in armature_obj.data.collections:
+        print(f"Warning: Bone collection '{collection_name}' not found")
+        return set()
+
+    collection = armature_obj.data.collections[collection_name]
+    return {bone.name for bone in collection.bones}
+
+def find_exported_parent_in_collection(pose_bone, bone_collection):
+    """
+    Find the closest ancestor bone that is in the bone collection
+    Args:
+        pose_bone: The bone to find the exported parent for
+        bone_collection: Set of bone names that are exported
+    Returns:
+        The exported parent pose bone, or None if no exported parent exists
+    """
+    current = pose_bone.parent
+    while current:
+        if current.name in bone_collection:
+            return current
+        current = current.parent
+    return None
+
+def find_marker_parent_body_in_collection(marker_bone, bone_collection):
+    """
+    Find the OpenSim body that should be the parent of this marker
+    Args:
+        marker_bone: The marker bone
+        bone_collection: Set of bone names that are exported as OpenSim bodies
+    Returns:
+        (parent_bone, opensim_body_name) or (None, "ground") if no parent found
+    """
+    current = marker_bone.parent
+    while current:
+        if current.name in bone_collection:
+            # Use the bone name directly as the OpenSim body name
+            return current, current.name
+        current = current.parent
+
+    # No exported parent found, attach to ground
+    return None, "ground"
+
+def process_markers_from_collection(armature_obj, collection_name, bone_collection, marker_name_overrides=None):
     """
     Process all bones in a specific bone collection to create markers
     Args:
         armature_obj: Blender armature object
         collection_name: Name of the bone collection containing markers
-        bone_to_opensim_map: Dictionary mapping bone names to OpenSim body names
+        bone_collection: Set of bone names that are exported as OpenSim bodies
         marker_name_overrides: Optional dictionary of marker name overrides
     Returns:
         List of marker XML elements
@@ -781,7 +854,7 @@ def process_markers_from_collection(armature_obj, collection_name, bone_to_opens
             marker_bone = armature_obj.pose.bones[bone.name]
 
             # Find parent body for this marker
-            parent_bone, parent_body_name = find_marker_parent_body(marker_bone, bone_to_opensim_map)
+            parent_bone, parent_body_name = find_marker_parent_body_in_collection(marker_bone, bone_collection)
 
             # Get marker position in parent body's local coordinates
             local_position = get_marker_local_position(marker_bone, parent_bone)
@@ -807,15 +880,15 @@ def process_markers_from_collection(armature_obj, collection_name, bone_to_opens
 
     return markers
 
-def export_armature_to_opensim(armature_name, bone_to_opensim_map, output_file,
-                               model_name="ExportedModel", marker_collection_name="Markers",
-                               marker_name_overrides=None):
+def export_armature_to_opensim(armature_name, output_file,
+                               opensim_collection_name="opensim", model_name="ExportedModel",
+                               marker_collection_name="Markers", marker_name_overrides=None):
     """
     Export armature T-pose as OpenSim model with markers
     Args:
         armature_name: Name of the armature object
-        bone_to_opensim_map: Dictionary {blender_bone_name: opensim_body_name}
         output_file: Output .osim file path
+        opensim_collection_name: Name of bone collection containing bones to export
         model_name: Name for the OpenSim model
         marker_collection_name: Name of bone collection containing markers
         marker_name_overrides: Optional dictionary for marker name overrides
@@ -831,20 +904,26 @@ def export_armature_to_opensim(armature_name, bone_to_opensim_map, output_file,
 
     pose_bones = armature_obj.pose.bones
 
-    # Find root bone (same logic as existing exports)
-    root_bone = None
-    for bone_name, opensim_name in bone_to_opensim_map.items():
-        if bone_name in pose_bones and opensim_name is not None:
-            pose_bone = pose_bones[bone_name]
-            parent_in_map = pose_bone.parent and pose_bone.parent.name in bone_to_opensim_map
-            parent_has_name = parent_in_map and bone_to_opensim_map[pose_bone.parent.name] is not None
+    # Get bones from the specified collection
+    bone_collection = get_bones_from_collection(armature_obj, opensim_collection_name)
 
-            if not parent_has_name:
+    if not bone_collection:
+        raise ValueError(f"No bones found in collection '{opensim_collection_name}'")
+
+    # Find root bone (first bone in collection with no parent in collection)
+    root_bone = None
+    for bone_name in bone_collection:
+        if bone_name in pose_bones:
+            pose_bone = pose_bones[bone_name]
+            # Check if parent is not in collection
+            parent_in_collection = pose_bone.parent and pose_bone.parent.name in bone_collection
+
+            if not parent_in_collection:
                 root_bone = pose_bone
                 break
 
     if not root_bone:
-        raise ValueError("No root bone found in bone mapping")
+        raise ValueError(f"No root bone found in collection '{opensim_collection_name}' (bone with no parent in collection)")
 
     # Create OpenSim document structure
     doc = ET.Element("OpenSimDocument", Version="40600")
@@ -874,22 +953,16 @@ def export_armature_to_opensim(armature_name, bone_to_opensim_map, output_file,
         """Recursively process bone and its children"""
         bone_name = pose_bone.name
 
-        if bone_name not in bone_to_opensim_map or bone_name in processed_bones:
+        if bone_name not in bone_collection or bone_name in processed_bones:
             return
 
-        opensim_name = bone_to_opensim_map[bone_name]
-
-        # If opensim_name is None, skip this bone but process children
-        if opensim_name is None:
-            for child in pose_bone.children:
-                if child.name in bone_to_opensim_map:
-                    process_bone_recursive(child, parent_opensim_name)
-            return
+        # Use the bone name directly as the OpenSim body name
+        opensim_name = bone_name
 
         processed_bones.add(bone_name)
 
         # Get bone transform and length
-        opensim_pos, opensim_rot, bone_length = get_bone_opensim_transform(pose_bone, bone_to_opensim_map)
+        opensim_pos, opensim_rot, bone_length = get_bone_opensim_transform(pose_bone, bone_collection)
 
         # Create body
         body = create_opensim_body(opensim_name, bone_length)
@@ -922,7 +995,7 @@ def export_armature_to_opensim(armature_name, bone_to_opensim_map, output_file,
 
         # Process children
         for child in pose_bone.children:
-            if child.name in bone_to_opensim_map:
+            if child.name in bone_collection:
                 process_bone_recursive(child, opensim_name)
 
     # Start processing from root bone
@@ -945,7 +1018,7 @@ def export_armature_to_opensim(armature_name, bone_to_opensim_map, output_file,
     markers = process_markers_from_collection(
         armature_obj,
         marker_collection_name,
-        bone_to_opensim_map,
+        bone_collection,
         marker_name_overrides
     )
 
@@ -1015,35 +1088,10 @@ export_armature_animation_to_yaml(
 )
 
 # Example OpenSim export - uncomment to use
-# Create OpenSim body names mapping (can be same as HIK or different)
-opensim_bone_map = {
-    'spine': 'pelvis',
-    'spine.001': 'spine1',
-    'spine.002': 'spine2',
-    'spine.003': 'spine3',
-    'spine.004': 'neck',
-    'spine.005': 'neck1',
-    'spine.006': 'head',
-    'shoulder.R': 'r_shoulder',
-    'upper_arm.R': 'r_upperarm',
-    'forearm.R': 'r_forearm',
-    'hand.R': 'r_hand',
-    'shoulder.L': 'l_shoulder',
-    'upper_arm.L': 'l_upperarm',
-    'forearm.L': 'l_forearm',
-    'hand.L': 'l_hand',
-    'thigh.R': 'r_thigh',
-    'shin.R': 'r_shin',
-    'foot.R': 'r_foot',
-    'thigh.L': 'l_thigh',
-    'shin.L': 'l_shin',
-    'foot.L': 'l_foot',
-}
-
-# Export to OpenSim (uncomment to use)
+# Export to OpenSim using bone collection (uncomment to use)
 export_armature_to_opensim(
     armature_name,
-    opensim_bone_map,
     "c:\\temp\\exported_model.osim",
+    opensim_collection_name="opensim",  # Bone collection containing bones to export
     model_name="BlenderExportedModel"
 )
