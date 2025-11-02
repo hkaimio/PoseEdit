@@ -120,6 +120,42 @@ def rotation_matrix_to_euler_zxy(R):
     return (z, x, y)  # ZXY order
 
 
+def rotation_matrix_to_quaternion(R):
+    """
+    Convert a 3x3 rotation matrix to quaternion (w, x, y, z).
+    Uses Shepperd's method for numerical stability.
+    """
+    trace = R[0, 0] + R[1, 1] + R[2, 2]
+    
+    if trace > 0:
+        s = math.sqrt(trace + 1.0) * 2  # s = 4 * qw
+        w = 0.25 * s
+        x = (R[2, 1] - R[1, 2]) / s
+        y = (R[0, 2] - R[2, 0]) / s
+        z = (R[1, 0] - R[0, 1]) / s
+    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+        s = math.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2  # s = 4 * qx
+        w = (R[2, 1] - R[1, 2]) / s
+        x = 0.25 * s
+        y = (R[0, 1] + R[1, 0]) / s
+        z = (R[0, 2] + R[2, 0]) / s
+    elif R[1, 1] > R[2, 2]:
+        s = math.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2  # s = 4 * qy
+        w = (R[0, 2] - R[2, 0]) / s
+        x = (R[0, 1] + R[1, 0]) / s
+        y = 0.25 * s
+        z = (R[1, 2] + R[2, 1]) / s
+    else:
+        s = math.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2  # s = 4 * qz
+        w = (R[1, 0] - R[0, 1]) / s
+        x = (R[0, 2] + R[2, 0]) / s
+        y = (R[1, 2] + R[2, 1]) / s
+        z = 0.25 * s
+    
+    # Convert numpy scalars to Python floats to avoid YAML serialization issues
+    return (float(w), float(x), float(y), float(z))  # Quaternion as (w, x, y, z)
+
+
 # Example bone mapping with None for bones to skip
 bone_to_hik_map = {
     'pelvis' : 'Hips',
@@ -163,11 +199,61 @@ def yup_to_zup_rotation_matrix(rot_matrix_yup):
     return rot_matrix_zup
 
 
+def global_to_local_transform(global_transform, parent_global_transform):
+    """
+    Convert a global transform to local coordinates relative to parent.
+    
+    Args:
+        global_transform: 4x4 transformation matrix in global coordinates
+        parent_global_transform: 4x4 transformation matrix of parent in global coordinates
+        
+    Returns:
+        4x4 transformation matrix in parent's local coordinate system
+    """
+    # Local transform = parent_global^-1 * global_transform
+    parent_global_inv = np.linalg.inv(parent_global_transform)
+    local_transform = parent_global_inv @ global_transform
+    return local_transform
+
+
+def get_body_global_transforms(model, state, bodies):
+    """
+    Get global transforms for all bodies in the current state.
+    
+    Returns:
+        dict mapping body_name -> 4x4 global transformation matrix
+    """
+    global_transforms = {}
+    
+    for body in bodies:
+        body_name = body.getName()
+        if body_name.lower() == 'ground':
+            # Ground has identity transform
+            global_transforms[body_name] = np.eye(4)
+            continue
+            
+        # Get transform in ground frame
+        H_swig = body.getTransformInGround(state)
+        T = H_swig.T().to_numpy()
+        R_swig = H_swig.R()
+        
+        R = np.array([[R_swig.get(0, 0), R_swig.get(0, 1), R_swig.get(0, 2)],
+                      [R_swig.get(1, 0), R_swig.get(1, 1), R_swig.get(1, 2)],
+                      [R_swig.get(2, 0), R_swig.get(2, 1), R_swig.get(2, 2)]])
+        
+        # Build 4x4 transformation matrix
+        H = np.block([[R, T.reshape(3, 1)], [np.zeros(3), 1]])
+        global_transforms[body_name] = H
+    
+    return global_transforms
+
+
 
 def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
                                    output_file: str, frame_start: int = 0,
                                    frame_end: int | None = None,
                                    target_framerate: float = 60.0,
+                                   coordinates: str = 'local',
                                    force_overwrite: bool = False) -> bool:
     """
     Export OpenSim animation to YAML format similar to armature_export.py
@@ -180,6 +266,8 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
         frame_start: Starting frame (default 0)
         frame_end: Ending frame (None for all frames)
         target_framerate: Target framerate for export (default 60.0)
+        coordinates: Coordinate system - 'local' (parent-relative) or 'global' (ground-relative)
+        force_overwrite: Whether to overwrite existing files without asking
         force_overwrite: If True, overwrite without asking (default False)
 
     Returns:
@@ -234,6 +322,9 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
         # Initialize OpenSim model state
         state = model.initSystem()
 
+        # Build body hierarchy for local coordinate calculations
+        parent_to_children, child_to_parent = get_body_hierarchy(model)
+
         # Coordinate transformation matrix (Y-up to Y-up, identity since OpenSim is already Y-up)
         H_transform = np.eye(4)
 
@@ -262,40 +353,81 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
             # Extract body transforms for this frame
             changes = []
 
-            for body in bodies:
-                body_name = body.getName()
-                body_name = bone_to_hik_map.get(body_name, body_name)
-
-                # Skip ground body as it's typically not animated
-                if body_name.lower() == 'ground':
-                    continue
-
-                # Get transform in ground frame (similar to motion.py lines 143-153)
-                H_swig = body.getTransformInGround(state)
-                T = H_swig.T().to_numpy()
-                R_swig = H_swig.R()
-                R = np.array([[R_swig.get(0, 0), R_swig.get(0, 1), R_swig.get(0, 2)],
-                              [R_swig.get(1, 0), R_swig.get(1, 1), R_swig.get(1, 2)],
-                              [R_swig.get(2, 0), R_swig.get(2, 1), R_swig.get(2, 2)]])
+            if coordinates == 'local':
+                # Get all global transforms first
+                global_transforms = get_body_global_transforms(model, state, bodies)
                 
-                H = np.block([[R, T.reshape(3, 1)], [np.zeros(3), 1]])
+                # Convert to local coordinates
+                for body in bodies:
+                    body_name = body.getName()
+                    hik_name = bone_to_hik_map.get(body_name, body_name)
 
-                position = [float(H[0, 3])*100, float(H[1, 3])*100, float(H[2, 3])*100]
+                    # Skip ground body as it's typically not animated
+                    if body_name.lower() == 'ground':
+                        continue
 
-                # Extract rotation as Euler angles 
-                zxy = rotation_matrix_to_euler_zxy(R)
+                    # Get this body's global transform
+                    global_H = global_transforms[body_name]
+                    
+                    # Convert to local coordinates relative to parent
+                    if body_name in child_to_parent:
+                        parent_name = child_to_parent[body_name]
+                        parent_global_H = global_transforms[parent_name]
+                        local_H = global_to_local_transform(global_H, parent_global_H)
+                    else:
+                        # Root body uses global coordinates
+                        local_H = global_H
 
-                # Convert to degrees
-                rotation = [math.degrees(zxy[0]), math.degrees(zxy[1]), math.degrees(zxy[2])]
+                    # Extract position (convert to cm)
+                    position = [float(local_H[0, 3])*100, float(local_H[1, 3])*100, float(local_H[2, 3])*100]
 
-                # Create change entry (similar to armature_export.py format)
-                change = {
-                    'name': body_name,
-                    'position': [round(p, 6) for p in position],  # meters, 6 decimal precision
-                    'rotation': [round(r, 3) for r in rotation]   # degrees, 3 decimal precision
-                }
+                    # Extract rotation matrix and convert to quaternion
+                    R = local_H[0:3, 0:3]
+                    quat = rotation_matrix_to_quaternion(R)
 
-                changes.append(change)
+                    # Quaternion format
+                    rotation = [round(q, 6) for q in quat]
+
+                    # Create change entry
+                    change = {
+                        'name': hik_name,
+                        'position': [round(p, 6) for p in position],
+                        'rotation': [round(r, 3) for r in rotation]
+                    }
+                    changes.append(change)
+            
+            else:  # global coordinates (original behavior)
+                for body in bodies:
+                    body_name = body.getName()
+                    hik_name = bone_to_hik_map.get(body_name, body_name)
+
+                    # Skip ground body as it's typically not animated
+                    if body_name.lower() == 'ground':
+                        continue
+
+                    # Get transform in ground frame (similar to motion.py lines 143-153)
+                    H_swig = body.getTransformInGround(state)
+                    T = H_swig.T().to_numpy()
+                    R_swig = H_swig.R()
+                    R = np.array([[R_swig.get(0, 0), R_swig.get(0, 1), R_swig.get(0, 2)],
+                                  [R_swig.get(1, 0), R_swig.get(1, 1), R_swig.get(1, 2)],
+                                  [R_swig.get(2, 0), R_swig.get(2, 1), R_swig.get(2, 2)]])
+                    
+                    H = np.block([[R, T.reshape(3, 1)], [np.zeros(3), 1]])
+
+                    position = [float(H[0, 3])*100, float(H[1, 3])*100, float(H[2, 3])*100]
+
+                    # Extract rotation as quaternion
+                    quat = rotation_matrix_to_quaternion(R)
+
+                    # Create change entry (similar to armature_export.py format)
+                    change = {
+                        'name': hik_name,
+                        'position': [round(p, 6) for p in position],  # meters, 6 decimal precision
+                        'rotation': [round(q, 6) for q in quat]   # quaternion (w, x, y, z), 6 decimal precision
+                    }
+
+                    changes.append(change)
 
             # Create frame data (similar to armature_export.py format)
             frame_data = {
@@ -334,14 +466,15 @@ def export_opensim_animation_to_yaml(osim_file_path: str, mot_file_path: str,
             skeleton = None
         else:
             # Build skeleton hierarchy starting from root
-            root_node = build_skeleton_node(root_body, model, rest_state, parent_to_children)
+            root_node = build_skeleton_node(root_body, model, rest_state, parent_to_children, coordinates)
             
             skeleton = {
                 'name': 'opensim_skeleton',
                 'up': 'y',           # Y-up coordinate system (OpenSim native)
                 'forward': 'z',      # Z-forward (OpenSim convention)
                 'handiness': 'right', # Right-handed coordinate system
-                'transform': 'global', # Global coordinates
+                'transform': coordinates, # Coordinate system (local or global)
+                'rotation': 'quaternion', # Rotation format (quaternion w,x,y,z)
                 'units': 'cm',       # Centimeters
                 'root': root_node
             }
@@ -416,39 +549,81 @@ def find_root_body(model, child_to_parent):
     return None
 
 
-def build_skeleton_node(body_name, model, state, parent_to_children):
+def build_skeleton_node(body_name, model, state, parent_to_children, coordinates='local', 
+                       child_to_parent=None, global_transforms=None):
     """
     Recursively build a skeleton node with its children.
+    
+    Args:
+        body_name: Name of the body to build node for
+        model: OpenSim model
+        state: Model state for rest pose
+        parent_to_children: Dictionary mapping parent body names to child body lists
+        coordinates: 'local' for parent-relative or 'global' for ground-relative coordinates
+        child_to_parent: Dictionary mapping child body names to parent body names (for local coords)
+        global_transforms: Pre-computed global transforms (for local coords)
     """
     # Get the HIK name from mapping
     hik_name = bone_to_hik_map.get(body_name, body_name)
     
-    # Get body transform in ground frame
-    body_set = model.getBodySet()
-    body = body_set.get(body_name)
+    if coordinates == 'local':
+        # Use pre-computed global transforms and convert to local
+        if global_transforms is None:
+            # Compute global transforms if not provided
+            bodies = [model.getBodySet().get(i) for i in range(model.getBodySet().getSize())]
+            global_transforms = get_body_global_transforms(model, state, bodies)
+        
+        if child_to_parent is None:
+            # Get body hierarchy if not provided
+            _, child_to_parent = get_body_hierarchy(model)
+        
+        # Get this body's global transform
+        global_H = global_transforms[body_name]
+        
+        # Convert to local coordinates relative to parent
+        if body_name in child_to_parent:
+            parent_name = child_to_parent[body_name]
+            parent_global_H = global_transforms[parent_name]
+            local_H = global_to_local_transform(global_H, parent_global_H)
+        else:
+            # Root body uses global coordinates
+            local_H = global_H
+        
+        # Extract position (convert to cm)
+        position = [
+            round(float(local_H[0, 3]) * 100, 3),  # X in cm
+            round(float(local_H[1, 3]) * 100, 3),  # Y in cm (up)
+            round(float(local_H[2, 3]) * 100, 3)   # Z in cm
+        ]
+        
+        # Extract rotation matrix and convert to quaternion
+        R = local_H[0:3, 0:3]
+        quat = rotation_matrix_to_quaternion(R)
+        rotation = [round(q, 6) for q in quat]  # Quaternion (w, x, y, z)
     
-    # Get transform in ground frame for rest pose
-    H_swig = body.getTransformInGround(state)
-    T = H_swig.T().to_numpy()
-    R_swig = H_swig.R()
-    R = np.array([[R_swig.get(0, 0), R_swig.get(0, 1), R_swig.get(0, 2)],
-                  [R_swig.get(1, 0), R_swig.get(1, 1), R_swig.get(1, 2)],
-                  [R_swig.get(2, 0), R_swig.get(2, 1), R_swig.get(2, 2)]])
-    
-    # Position in centimeters, Y-up coordinates (OpenSim native)
-    position = [
-        round(float(T[0]) * 100, 3),  # X in cm
-        round(float(T[1]) * 100, 3),  # Y in cm (up)
-        round(float(T[2]) * 100, 3)   # Z in cm
-    ]
-    
-    # Extract rotation as ZXY Euler angles and convert to degrees
-    zxy = rotation_matrix_to_euler_zxy(R)
-    rotation = [
-        round(math.degrees(zxy[0]), 3),  # Z rotation
-        round(math.degrees(zxy[1]), 3),  # X rotation
-        round(math.degrees(zxy[2]), 3)   # Y rotation
-    ]
+    else:  # global coordinates (original behavior)
+        # Get body transform in ground frame
+        body_set = model.getBodySet()
+        body = body_set.get(body_name)
+        
+        # Get transform in ground frame for rest pose
+        H_swig = body.getTransformInGround(state)
+        T = H_swig.T().to_numpy()
+        R_swig = H_swig.R()
+        R = np.array([[R_swig.get(0, 0), R_swig.get(0, 1), R_swig.get(0, 2)],
+                      [R_swig.get(1, 0), R_swig.get(1, 1), R_swig.get(1, 2)],
+                      [R_swig.get(2, 0), R_swig.get(2, 1), R_swig.get(2, 2)]])
+        
+        # Position in centimeters, Y-up coordinates (OpenSim native)
+        position = [
+            round(float(T[0]) * 100, 3),  # X in cm
+            round(float(T[1]) * 100, 3),  # Y in cm (up)
+            round(float(T[2]) * 100, 3)   # Z in cm
+        ]
+        
+        # Extract rotation as quaternion
+        quat = rotation_matrix_to_quaternion(R)
+        rotation = [round(q, 6) for q in quat]  # Quaternion (w, x, y, z)
     
     # Build the skeleton node
     node = {
@@ -462,7 +637,8 @@ def build_skeleton_node(body_name, model, state, parent_to_children):
     # Recursively add children
     if body_name in parent_to_children:
         for child_body in parent_to_children[body_name]:
-            child_node = build_skeleton_node(child_body, model, state, parent_to_children)
+            child_node = build_skeleton_node(child_body, model, state, parent_to_children, 
+                                           coordinates, child_to_parent, global_transforms)
             node['children'].append(child_node)
     
     return node
@@ -470,6 +646,7 @@ def build_skeleton_node(body_name, model, state, parent_to_children):
 
 def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
                                    skeleton_name: str = "opensim_skeleton",
+                                   coordinates: str = 'local',
                                    force_overwrite: bool = False) -> bool:
     """
     Export OpenSim model rest pose as skeleton hierarchy YAML.
@@ -478,6 +655,7 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
         osim_file_path: Path to OpenSim model file (.osim)
         output_file: Output YAML file path
         skeleton_name: Name for the skeleton (default: "opensim_skeleton")
+        coordinates: Coordinate system - 'local' (parent-relative) or 'global' (ground-relative)
         force_overwrite: If True, overwrite without asking (default False)
         
     Returns:
@@ -519,7 +697,7 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
         print(f"Body hierarchy: {len(parent_to_children)} parent bodies")
         
         # Build skeleton hierarchy starting from root
-        root_node = build_skeleton_node(root_body, model, state, parent_to_children)
+        root_node = build_skeleton_node(root_body, model, state, parent_to_children, coordinates, child_to_parent)
         
         # Create skeleton structure in unified format
         output_data = {
@@ -528,7 +706,8 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
                 'up': 'y',           # Y-up coordinate system (OpenSim native)
                 'forward': 'z',      # Z-forward (OpenSim convention)
                 'handiness': 'right', # Right-handed coordinate system
-                'transform': 'global', # Global coordinates
+                'transform': coordinates, # Coordinate system (local or global)
+                'rotation': 'quaternion', # Rotation format (quaternion w,x,y,z)
                 'units': 'cm',       # Centimeters
                 'root': root_node
             }
@@ -557,13 +736,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Export animation with skeleton
+  # Export animation with skeleton (default: local coordinates)
   python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml
-  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml --start-frame 10 --end-frame 100
-  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml --framerate 30.0
+  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml \\
+      --start-frame 10 --end-frame 100
+  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml \\
+      --framerate 30.0
   
-  # Export skeleton rest pose only
+  # Export skeleton rest pose only (default: local coordinates)
   python opensim_animation_exporter.py --skeleton --model model.osim -o skeleton.yaml
+  
+  # Export using global coordinates instead of local
+  python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml \\
+      --coordinates global
   
   # Force overwrite existing files
   python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml --force
@@ -585,6 +770,9 @@ Examples:
                         help='Target framerate for export (default: 60.0)')
     parser.add_argument('--skeleton-name', type=str, default='opensim_skeleton',
                         help='Name for skeleton export (default: opensim_skeleton)')
+    parser.add_argument('--coordinates', type=str, choices=['local', 'global'], 
+                        default='local',
+                        help='Coordinate system: local (parent-relative) or global (ground-relative) (default: local)')
     parser.add_argument('--force', '-f', action='store_true',
                         help='Force overwrite existing files without asking')
 
@@ -615,6 +803,7 @@ Examples:
             str(osim_path),
             str(output_path),
             args.skeleton_name,
+            args.coordinates,
             args.force
         )
     else:
@@ -637,6 +826,7 @@ Examples:
             args.start_frame,
             args.end_frame,
             args.framerate,
+            args.coordinates,
             args.force
         )
 
