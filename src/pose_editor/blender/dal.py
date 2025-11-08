@@ -21,6 +21,11 @@ class BlenderObjRef:
     def _get_obj(self) -> bpy.types.Object:
         if self._obj is None:
             self._obj = bpy.data.objects.get(self._id)
+        else:
+            try:
+                _ = self._obj.name  # This will raise ReferenceError if object was deleted
+            except ReferenceError:
+                self._obj = bpy.data.objects.get(self._id)
         return self._obj
 
 
@@ -83,6 +88,13 @@ def get_custom_property(obj_ref: BlenderObjRef, prop: CustomProperty[T]) -> T | 
     obj = obj_ref._get_obj()
     if not obj:
         raise ValueError(f"Blender object with ID {obj_ref._id} not found.")
+
+    # Check if the object is still valid (not deleted)
+    try:
+        _ = obj.name  # This will raise ReferenceError if object was deleted
+    except ReferenceError:
+        return None
+
     return obj.get(prop._prop_name)
 
 
@@ -640,6 +652,78 @@ def assign_action_to_object(obj_ref: "BlenderObjRef", action: bpy.types.Action, 
     obj.animation_data.action_slot = action.slots[prefixed_name]
 
 
+def create_armature_action_from_marker_data(
+    action_name: str,
+    marker_action: bpy.types.Action,
+    armature_obj_ref: BlenderObjRef,
+    marker_role_to_bone_name: dict[str, str],
+) -> bpy.types.Action:
+    """Creates a new action for an armature by copying and remapping F-curves from MarkerData.
+
+    MarkerData creates actions with per-marker slots and data_path="location".
+    Armatures need ONE slot with data_path='pose.bones["BoneName"].location'.
+
+    Args:
+        action_name: Name for the new armature action.
+        marker_action: The source action from MarkerData with per-marker slots.
+        armature_obj_ref: The armature object reference.
+        marker_role_to_bone_name: Mapping from marker roles to bone names.
+
+    Returns:
+        The new action configured for bone animation.
+    """
+    # Create new action
+    new_action = bpy.data.actions.new(action_name)
+
+    # Create slot for the armature (using OBJECT id_type)
+    armature_slot = get_or_create_action_slot(new_action, armature_obj_ref.name)
+
+    # Get the channelbag for the armature slot
+    armature_channelbag = _get_or_create_channelbag(new_action, armature_slot)
+
+    # Copy F-curves from each marker slot, remapping data paths
+    for marker_role, bone_name in marker_role_to_bone_name.items():
+        # Get the source channelbag for this marker
+        try:
+            marker_slot = get_or_create_action_slot(marker_action, marker_role)
+            source_channelbag = _get_or_create_channelbag(marker_action, marker_slot)
+        except Exception:
+            # Marker might not have data yet
+            continue
+
+        # Copy location F-curves with remapped data paths
+        for axis_index in range(3):
+            source_fcurve = source_channelbag.fcurves.find("location", index=axis_index)
+            if source_fcurve:
+                # Create new F-curve with bone-specific data path
+                bone_data_path = f'pose.bones["{bone_name}"].location'
+                target_fcurve = armature_channelbag.fcurves.new(bone_data_path, index=axis_index)
+
+                # Copy keyframes
+                for kf in source_fcurve.keyframe_points:
+                    new_kf = target_fcurve.keyframe_points.insert(kf.co[0], kf.co[1])
+                    new_kf.interpolation = kf.interpolation
+
+                target_fcurve.update()
+
+        # Copy custom property F-curves (reprojection_error, etc.)
+        for fcurve in source_channelbag.fcurves:
+            if fcurve.data_path.startswith('["'):
+                # Custom property F-curve
+                # For bones, target pose bones: pose.bones["BoneName"]["property"]
+                bone_data_path = f'pose.bones["{bone_name}"]{fcurve.data_path}'
+                target_fcurve = armature_channelbag.fcurves.new(bone_data_path, index=fcurve.array_index)
+
+                # Copy keyframes
+                for kf in fcurve.keyframe_points:
+                    new_kf = target_fcurve.keyframe_points.insert(kf.co[0], kf.co[1])
+                    new_kf.interpolation = kf.interpolation
+
+                target_fcurve.update()
+
+    return new_action
+
+
 def get_children_of_object(obj_ref: "BlenderObjRef", recursive: bool = False) -> list["BlenderObjRef"]:
     """Gets all direct or recursive children of a given Blender object.
 
@@ -866,7 +950,7 @@ def add_bone_driver(
     Args:
         armature_obj_ref: The armature object.
         bone_name: The name of the bone.
-        data_path: The property to drive (e.g., 'hide').
+        data_path: The property to drive (e.g., 'location[0]', 'hide').
         expression: The driver expression.
         variables: A list of tuples, where each tuple defines a driver variable:
                    (var_name, var_type, target_id, data_path)
@@ -875,11 +959,18 @@ def add_bone_driver(
     if not armature_obj or armature_obj.type != "ARMATURE":
         raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
 
-    bone = armature_obj.data.bones.get(bone_name)
-    if not bone:
+    # Use pose bones instead of data bones for drivers
+    pose_bone = armature_obj.pose.bones.get(bone_name)
+    if not pose_bone:
         raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
 
-    driver = bone.driver_add(data_path).driver
+    # For array properties like location[0], split into property and index
+    if "[" in data_path and "]" in data_path:
+        prop_name = data_path.split("[")[0]
+        array_index = int(data_path.split("[")[1].rstrip("]"))
+        driver = pose_bone.driver_add(prop_name, array_index).driver
+    else:
+        driver = pose_bone.driver_add(data_path).driver
     driver.type = "SCRIPTED"
     driver.expression = expression
 
@@ -1420,3 +1511,83 @@ def set_bone_ik_properties(armature_obj_ref: BlenderObjRef, bone_name: str,
         bone.ik_min_z = math.radians(limit_z_min)
     if limit_z_max is not None:
         bone.ik_max_z = math.radians(limit_z_max)
+
+
+def set_bone_custom_property(
+    armature_obj_ref: BlenderObjRef, bone_name: str, prop: CustomProperty[T], value: T
+) -> None:
+    """Sets a custom property on a bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: The name of the bone.
+        prop: A CustomProperty object describing the property.
+        value: The value to set the property to.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.data.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    bone[prop._prop_name] = value
+
+
+def get_bone_custom_property(
+    armature_obj_ref: BlenderObjRef, bone_name: str, prop: CustomProperty[T]
+) -> T | None:
+    """Gets a custom property from a bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: The name of the bone.
+        prop: A CustomProperty object describing the property.
+
+    Returns:
+        The value of the custom property, or None if the property does not exist.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.data.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    return bone.get(prop._prop_name)
+
+
+def assign_action_to_bone(
+    armature_obj_ref: BlenderObjRef, bone_name: str, action: bpy.types.Action, slot_name: str
+) -> None:
+    """Assigns a shared Action and a specific ActionSlot to a bone.
+
+    This function ensures the bone's animation data is set up to be driven
+    by a specific slot within a larger Action.
+
+    Args:
+        armature_obj_ref: The armature object containing the bone.
+        bone_name: The name of the bone to assign the action to.
+        action: The Action containing the animation data.
+        slot_name: The user-facing name of the slot that should drive the bone.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    pose_bone = armature_obj.pose.bones.get(bone_name)
+    if not pose_bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    # Create animation data if it doesn't exist
+    if not pose_bone.id_data.animation_data:
+        pose_bone.id_data.animation_data_create()
+
+    pose_bone.id_data.animation_data.action = action
+
+    # Ensure the slot is created before assigning
+    get_or_create_action_slot(action, slot_name)
+    prefixed_name = _get_prefixed_slot_name(slot_name)
+    pose_bone.id_data.animation_data.action_slot = action.slots[prefixed_name]
