@@ -99,7 +99,7 @@ class CameraView:
         view = cls()
         view._obj = obj_ref
         return view
-    
+
     @classmethod
     def get_by_id(cls, view_id: str) -> CameraView | None:
         """Finds a CameraView by its unique ID."""
@@ -129,10 +129,10 @@ class CameraView:
             if cam_view and cam_view._obj and cam_view._obj._id == self._obj._id:
                 if pdv.get_person() is None:
                     raw_views.append(pdv)
-        
+
         # Sort by person index from the name, e.g., "cam1_person0", "cam1_person1"
         raw_views.sort(key=lambda v: int(re.findall(r'person(\d+)', v.view_name)[0]) if re.findall(r'person(\d+)', v.view_name) else -1)
-        
+
         return raw_views
 
     def get_transform_scale(self) -> tuple[float, float, float]:
@@ -196,7 +196,7 @@ class CameraView:
         x_offset = dal.get_custom_property(self._obj, CAMERA_X_OFFSET) or 0.0
         y_offset = dal.get_custom_property(self._obj, CAMERA_Y_OFFSET) or 0.0
         return (x_offset, y_offset, 0.0)
-    
+
     @property
     def scale(self) -> tuple[float, float, float]:
         """Returns the scale for this camera view."""
@@ -285,6 +285,8 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
     camera_obj.rotation_euler = (0, 0, 0)
 
     movie_clip = dal.load_movie_clip(str(video_file))
+    movie_clip.frame_start = 0
+
     video_width, video_height = movie_clip.size
 
     if video_width > video_height:
@@ -337,6 +339,8 @@ def create_camera_view(name: str, video_file: Path, pose_data_dir: Path, skeleto
                     pose_data_by_person[person_idx][frame_num] = person_data["pose_keypoints_2d"]
                 else:
                     pose_data_by_person[person_idx][frame_num] = []
+
+    dal.update_scene_end_frame(max_frame)
 
     if not pose_data_by_person:
         return camera_view

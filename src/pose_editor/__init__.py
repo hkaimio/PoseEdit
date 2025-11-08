@@ -4,6 +4,7 @@
 
 import bpy
 
+from . import operators
 from .blender.drivers import register_drivers, unregister_drivers
 from .blender.operators import (
     PE_OT_AddPersonInstance,
@@ -72,6 +73,9 @@ def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
 
+    # Register operators
+    operators.register()
+
     # Register driver functions
     register_drivers()
 
@@ -103,6 +107,9 @@ def unregister():
 
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)
+
+    # Unregister operators
+    operators.unregister()
 
     # Unregister driver functions
     unregister_drivers()

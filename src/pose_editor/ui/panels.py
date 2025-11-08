@@ -134,3 +134,9 @@ class PE_PT_3DPipelinePanel(bpy.types.Panel):
 
         # Operator to triangulate selected persons
         layout.operator("pose_editor.triangulate_person", text="Triangulate Selected Persons")
+        
+        # Separator
+        layout.separator()
+        
+        # Operator to apply rigging to armature
+        layout.operator("pose_editor.apply_rigging", text="Apply Motion Capture Rigging")

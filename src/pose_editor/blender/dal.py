@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import math
 from typing import Generic, Optional, TypeVar
 
 import bpy
@@ -577,7 +578,7 @@ def _get_or_create_channelbag(action: bpy.types.Action, slot: bpy.types.ActionSl
         strip = layer.strips[0]
 
     return strip.channelbag(slot, ensure=True)
-        
+
 
 def get_or_create_fcurve(action: bpy.types.Action, slot_name: str, data_path: str, index: int = -1) -> bpy.types.FCurve:
     """Gets or creates an F-Curve within the correct channelbag for a slot.
@@ -739,6 +740,16 @@ def get_scene_frame_range() -> tuple[int, int]:
         A tuple containing the start and end frame numbers.
     """
     return bpy.context.scene.frame_start, bpy.context.scene.frame_end
+
+def update_scene_end_frame(new_end_frame: int) -> None:
+    """Updates the end frame of the current scene.
+
+    Args:
+        new_end_frame: The new end frame number to set.
+    """
+    _, current_end_frame = get_scene_frame_range()
+    if new_end_frame > current_end_frame:
+        bpy.context.scene.frame_end = new_end_frame
 
 
 def add_bones_in_bulk(
@@ -1138,3 +1149,274 @@ def shift_action(action: bpy.types.Action, frame_delta: int) -> None:
             for kp in fcurve.keyframe_points:
                 kp.co[0] += frame_delta
             fcurve.update()
+
+
+# Rigging-specific DAL functions
+
+def create_bone_collection(armature_obj_ref: BlenderObjRef, collection_name: str) -> None:
+    """Creates a bone collection in an armature.
+
+    Args:
+        armature_obj_ref: The armature object.
+        collection_name: Name of the bone collection to create.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    # Check if collection already exists
+    if collection_name in armature_obj.data.collections:
+        return
+
+    # Create new bone collection
+    bone_collection = armature_obj.data.collections.new(collection_name)
+    return bone_collection
+
+
+def move_bone_to_collection(armature_obj_ref: BlenderObjRef, bone_name: str, collection_name: str) -> None:
+    """Moves a bone to a specific bone collection.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: Name of the bone to move.
+        collection_name: Name of the target bone collection.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.data.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    collection = armature_obj.data.collections.get(collection_name)
+    if not collection:
+        raise ValueError(f"Bone collection {collection_name} not found in armature {armature_obj.name}.")
+
+    # Remove from current collections
+    for coll in bone.collections:
+        coll.unassign(bone)
+
+    # Add to target collection
+    collection.assign(bone)
+
+
+def set_bone_deform(armature_obj_ref: BlenderObjRef, bone_name: str, use_deform: bool) -> None:
+    """Sets whether a bone is used for deformation.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: Name of the bone.
+        use_deform: Whether the bone should be used for deformation.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.data.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    bone.use_deform = use_deform
+
+
+def set_bone_display_type(armature_obj_ref: BlenderObjRef, bone_name: str, display_type: str) -> None:
+    """Sets the display type for a bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: Name of the bone.
+        display_type: Display type ('WIRE', 'STICK', 'BBONE', 'ENVELOPE', 'OCTAHEDRAL').
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.data.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    # Set display type on the bone's custom object or use global setting
+    bone.display_type = display_type
+
+
+def parent_bone_to_bone(armature_obj_ref: BlenderObjRef, child_bone: str, parent_bone: str,
+                       use_connect: bool = False) -> None:
+    """Parents one bone to another.
+
+    Args:
+        armature_obj_ref: The armature object.
+        child_bone: Name of the child bone.
+        parent_bone: Name of the parent bone.
+        use_connect: Whether to connect the bones.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    # Need to be in edit mode to modify bone hierarchy
+    bpy.context.view_layer.objects.active = armature_obj
+    bpy.ops.object.mode_set(mode="EDIT")
+
+    child_edit_bone = armature_obj.data.edit_bones.get(child_bone)
+    parent_edit_bone = armature_obj.data.edit_bones.get(parent_bone)
+
+    if not child_edit_bone:
+        bpy.ops.object.mode_set(mode="OBJECT")
+        raise ValueError(f"Child bone {child_bone} not found in armature {armature_obj.name}.")
+
+    if not parent_edit_bone:
+        bpy.ops.object.mode_set(mode="OBJECT")
+        raise ValueError(f"Parent bone {parent_bone} not found in armature {armature_obj.name}.")
+
+    child_edit_bone.parent = parent_edit_bone
+    child_edit_bone.use_connect = use_connect
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def get_bone_position(armature_obj_ref: BlenderObjRef, bone_name: str, position: str) -> tuple[float, float, float]:
+    """Gets the head or tail position of a bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: Name of the bone.
+        position: Either 'head' or 'tail'.
+
+    Returns:
+        Tuple of (x, y, z) coordinates.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.data.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    if position == "head":
+        return tuple(bone.head_local)
+    elif position == "tail":
+        return tuple(bone.tail_local)
+    else:
+        raise ValueError(f"Position must be 'head' or 'tail', got '{position}'.")
+
+
+def set_bone_length(armature_obj_ref: BlenderObjRef, bone_name: str, length: float) -> None:
+    """Sets the length of a bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: Name of the bone.
+        length: New length for the bone.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    # Need to be in edit mode to modify bone length
+    bpy.context.view_layer.objects.active = armature_obj
+    bpy.ops.object.mode_set(mode="EDIT")
+
+    edit_bone = armature_obj.data.edit_bones.get(bone_name)
+    if not edit_bone:
+        bpy.ops.object.mode_set(mode="OBJECT")
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    # Calculate direction vector and set new tail position
+    direction = (edit_bone.tail - edit_bone.head).normalized()
+    edit_bone.tail = edit_bone.head + direction * length
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def add_bone_constraint_with_options(armature_obj_ref: BlenderObjRef, bone_name: str,
+                                    constraint_type: str, target_obj_ref: BlenderObjRef = None,
+                                    subtarget_name: str = None, **options) -> None:
+    """Adds a constraint to a bone with additional options.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: The name of the bone to add the constraint to.
+        constraint_type: The type of constraint to add.
+        target_obj_ref: The target object for the constraint (optional).
+        subtarget_name: The name of the subtarget (optional).
+        **options: Additional constraint options as keyword arguments.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.pose.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    constraint = bone.constraints.new(type=constraint_type)
+
+    if target_obj_ref:
+        constraint.target = target_obj_ref._get_obj()
+
+    if subtarget_name:
+        constraint.subtarget = subtarget_name
+
+    # Apply additional options
+    for option_name, option_value in options.items():
+        if hasattr(constraint, option_name):
+            setattr(constraint, option_name, option_value)
+        else:
+            print(f"Warning: Constraint {constraint_type} does not have option '{option_name}'")
+
+
+def set_bone_ik_properties(armature_obj_ref: BlenderObjRef, bone_name: str,
+                          lock_ik_x: bool = None, lock_ik_y: bool = None, lock_ik_z: bool = None,
+                          limit_x_min: float = None, limit_x_max: float = None,
+                          limit_y_min: float = None, limit_y_max: float = None,
+                          limit_z_min: float = None, limit_z_max: float = None,
+                          use_ik_limit_x: bool = None, use_ik_limit_y: bool = None,
+                          use_ik_limit_z: bool = None) -> None:
+    """Sets IK properties for a bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: Name of the bone.
+        lock_ik_x, lock_ik_y, lock_ik_z: Whether to lock IK on each axis.
+        limit_x_min, limit_x_max, etc.: IK rotation limits in radians.
+        use_ik_limit_x, use_ik_limit_y, use_ik_limit_z: Whether to use limits on each axis.
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    bone = armature_obj.pose.bones.get(bone_name)
+    if not bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    # Set lock properties
+    if lock_ik_x is not None:
+        bone.lock_ik_x = lock_ik_x
+    if lock_ik_y is not None:
+        bone.lock_ik_y = lock_ik_y
+    if lock_ik_z is not None:
+        bone.lock_ik_z = lock_ik_z
+
+    # Set limit properties
+    if use_ik_limit_x is not None:
+        bone.use_ik_limit_x = use_ik_limit_x
+    if use_ik_limit_y is not None:
+        bone.use_ik_limit_y = use_ik_limit_y
+    if use_ik_limit_z is not None:
+        bone.use_ik_limit_z = use_ik_limit_z
+
+    # Set limit values (convert degrees to radians)
+    if limit_x_min is not None:
+        bone.ik_min_x = math.radians(limit_x_min)
+    if limit_x_max is not None:
+        bone.ik_max_x = math.radians(limit_x_max)
+    if limit_y_min is not None:
+        bone.ik_min_y = math.radians(limit_y_min)
+    if limit_y_max is not None:
+        bone.ik_max_y = math.radians(limit_y_max)
+    if limit_z_min is not None:
+        bone.ik_min_z = math.radians(limit_z_min)
+    if limit_z_max is not None:
+        bone.ik_max_z = math.radians(limit_z_max)
