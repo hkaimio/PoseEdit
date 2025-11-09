@@ -971,6 +971,7 @@ def add_bone_driver(
         driver = pose_bone.driver_add(prop_name, array_index).driver
     else:
         driver = pose_bone.driver_add(data_path).driver
+
     driver.type = "SCRIPTED"
     driver.expression = expression
 
@@ -1591,3 +1592,84 @@ def assign_action_to_bone(
     get_or_create_action_slot(action, slot_name)
     prefixed_name = _get_prefixed_slot_name(slot_name)
     pose_bone.id_data.animation_data.action_slot = action.slots[prefixed_name]
+
+
+def load_widget_from_blend(widget_blend_path: str, widget_name: str) -> bpy.types.Object | None:
+    """Loads a widget mesh object from a .blend file.
+
+    Args:
+        widget_blend_path: Absolute path to the widgets.blend file.
+        widget_name: Name of the widget object to load (e.g., 'WGT-sphere').
+
+    Returns:
+        The loaded widget object, or None if not found.
+    """
+    import os
+    if not os.path.exists(widget_blend_path):
+        print(f"Warning: Widget file not found: {widget_blend_path}")
+        return None
+
+    # Check if widget already exists in current file
+    if widget_name in bpy.data.objects:
+        return bpy.data.objects[widget_name]
+
+    # Append the widget from the .blend file
+    with bpy.data.libraries.load(widget_blend_path, link=False) as (data_from, data_to):
+        if widget_name in data_from.objects:
+            data_to.objects = [widget_name]
+        else:
+            print(f"Warning: Widget '{widget_name}' not found in {widget_blend_path}")
+            return None
+
+    if data_to.objects:
+        widget_obj = data_to.objects[0]
+        # Link to a collection (required before we can hide it)
+        # Use a dedicated "Widgets" collection to keep them organized
+        widgets_collection = bpy.data.collections.get("Widgets")
+        if not widgets_collection:
+            widgets_collection = bpy.data.collections.new("Widgets")
+            bpy.context.scene.collection.children.link(widgets_collection)
+
+        if widget_obj.name not in widgets_collection.objects:
+            widgets_collection.objects.link(widget_obj)
+
+        # Hide the widget object from viewport and render
+        widget_obj.hide_set(True)
+        widget_obj.hide_render = True
+        return widget_obj
+
+    return None
+
+
+def set_bone_custom_shape(
+    armature_obj_ref: BlenderObjRef,
+    bone_name: str,
+    custom_shape_obj: bpy.types.Object,
+    scale: float = 1.0,
+    wireframe: bool = False,
+    wire_width: float = 1.0,
+) -> None:
+    """Sets a custom shape for a pose bone.
+
+    Args:
+        armature_obj_ref: The armature object.
+        bone_name: The name of the bone.
+        custom_shape_obj: The mesh object to use as custom shape.
+        scale: Scale factor for the custom shape.
+        wireframe: Whether to display as wireframe.
+        wire_width: Line width for wireframe display (only applies if wireframe=True).
+    """
+    armature_obj = armature_obj_ref._get_obj()
+    if not armature_obj or armature_obj.type != "ARMATURE":
+        raise ValueError(f"Object {armature_obj_ref.name} is not an armature.")
+
+    pose_bone = armature_obj.pose.bones.get(bone_name)
+    if not pose_bone:
+        raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
+
+    pose_bone.custom_shape = custom_shape_obj
+    pose_bone.use_custom_shape_bone_size = False
+    pose_bone.custom_shape_scale_xyz = (scale, scale, scale)
+
+    if wireframe:
+        pose_bone.custom_shape_wire_width = wire_width

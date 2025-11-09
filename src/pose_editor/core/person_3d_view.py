@@ -302,6 +302,8 @@ class Person3DView:
 
     def _create_armature_with_bones(self, body_part_collections: dict[str, "dal.CollectionRef"]):
         """Creates an armature with marker bones and connecting bones."""
+        import os
+
         armature_name = f"{self.view_root_object.name}_Armature"
         armature_object = dal.get_or_create_object(
             name=armature_name,
@@ -312,6 +314,12 @@ class Person3DView:
         armature_object._get_obj().color = self.color
         dal.set_armature_display_stick(armature_object)
         self.armature_ref = armature_object
+
+        # Load custom shape widgets
+        extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        widgets_path = os.path.join(extension_dir, "assets", "widgets.blend")
+        sphere_widget = dal.load_widget_from_blend(widgets_path, "WGT-sphere")
+        line_widget = dal.load_widget_from_blend(widgets_path, "WGT-line")
 
         # Create bone collections
         dal.create_bone_collection(armature_object, "Markers")
@@ -362,6 +370,12 @@ class Person3DView:
             # Move to Markers collection
             dal.move_bone_to_collection(armature_object, marker_name, "Markers")
 
+            # Set custom shape for marker bone
+            if sphere_widget:
+                dal.set_bone_custom_shape(
+                    armature_object, marker_name, sphere_widget, scale=0.02, wireframe=True, wire_width=3.0
+                )
+
         # Add constraints to connecting bones and assign to body part collections
         for node in PreOrderIter(self.skeleton._skeleton):
             if node.parent:
@@ -384,6 +398,12 @@ class Person3DView:
                     # Move to body part collection
                     body_part = self.skeleton.body_part(child_marker_role)
                     dal.move_bone_to_collection(armature_object, bone_name, body_part)
+
+                    # Set custom shape for connecting bone
+                    if line_widget:
+                        dal.set_bone_custom_shape(
+                            armature_object, bone_name, line_widget, scale=1.0, wireframe=True, wire_width=3.0
+                        )
 
     def _create_drivers(self):
         """Creates drivers for the virtual marker bones based on hardcoded rules."""
