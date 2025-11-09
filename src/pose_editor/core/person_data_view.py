@@ -421,13 +421,20 @@ class PersonDataView:
     def connect_to_series(self, marker_data: MarkerData):
         """Connects this view to a MarkerData series.
 
-        This applies the animation data from the series to the marker objects
-        in this view.
+        This creates an armature action from the marker data by copying and remapping
+        F-curves from per-marker slots to the armature's single slot.
 
         Args:
             marker_data: The MarkerData series to connect to.
         """
-        marker_data.apply_to_view(self)
+        if not self.armature_ref:
+            print(f"Warning: Cannot connect {self.view_name} - no armature found.")
+            return
+
+        # Create armature action from marker data
+        dal.create_armature_action_from_marker_data(self.armature_ref, marker_data)
+
+        # Store reference to marker data
         dal.set_custom_property(
             self.view_root_object,
             dal.MARKER_DATA_ID,
