@@ -117,7 +117,15 @@ class PersonDataView:
 
         # Create the collection hierarchy
         person_views_col = dal.get_or_create_collection("PersonViews")
-        camera_col = dal.get_or_create_collection(f"CameraView_{camera_view._obj.name}", parent_collection=person_views_col)
+        
+        # Handle optional camera_view
+        if camera_view and camera_view._obj:
+            camera_col = dal.get_or_create_collection(f"CameraView_{camera_view._obj.name}", parent_collection=person_views_col)
+            parent_obj = camera_view._obj
+        else:
+            camera_col = person_views_col
+            parent_obj = None
+            
         pv_col = dal.get_or_create_collection(view_name, parent_collection=camera_col)
 
         # Create body part sub-collections
@@ -127,7 +135,7 @@ class PersonDataView:
 
         # The main PV object goes into the camera-level collection
         obj = dal.get_or_create_object(
-            name=view_name, obj_type="EMPTY", collection_name=camera_col.name, parent=camera_view._obj
+            name=view_name, obj_type="EMPTY", collection_name=camera_col.name, parent=parent_obj
         )
         # Set custom properties
         dal.set_custom_property(obj, dal.SERIES_NAME, view_name)
@@ -143,8 +151,10 @@ class PersonDataView:
         instance._create_armature_with_bones(body_part_collections)
         instance._init_from_blender_ref(obj)
 
-        obj._get_obj().location = camera_view.translation
-        obj._get_obj().scale = camera_view.scale
+        # Set location and scale from camera view if available
+        if camera_view:
+            obj._get_obj().location = camera_view.translation
+            obj._get_obj().scale = camera_view.scale
 
         if marker_data:
             instance.connect_to_series(marker_data)

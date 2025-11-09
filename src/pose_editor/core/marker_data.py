@@ -87,7 +87,7 @@ class MarkerData:
         dal.set_custom_property(data_series_object, PERSON_DEFINITION_REF, person_id)
 
         action = dal.get_or_create_action(f"AC.{series_name}")
-        
+
         instance = cls(data_series_object, series_name, skeleton_name, action=action, data_series_object=data_series_object)
 
         # If it's a real person, initialize the new animated properties using slot-aware functions.
@@ -223,24 +223,30 @@ class MarkerData:
     def apply_to_view(self, person_data_view: "PersonDataView"):
         """Applies this data series' Action to a Person View hierarchy.
 
-        This method iterates through all marker objects in the PersonDataView.
-        For each marker, it assigns the shared Action and sets the marker-specific
-        Action Slot to activate the correct animation.
+        Supports both object-based views (legacy) and bone-based views (new).
 
         Args:
-            person_data_view: The PersonDataView object containing the marker objects.
+            person_data_view: The PersonDataView object containing the marker objects or bones.
         """
         if self.action is None:
             # In a real application, might want to log a warning here
             return
 
-        for marker_role, marker_obj_ref in person_data_view.get_marker_objects().items():
-            if dal.action_has_slot(self.action, marker_role):
-                dal.assign_action_to_object(marker_obj_ref, self.action, marker_role)
+        # Check if this is a bone-based view
+        if hasattr(person_data_view, 'armature_ref') and person_data_view.armature_ref:
+            # Bone-based view: use armature action creation
+            dal.create_armature_action_from_marker_data(
+                person_data_view.armature_ref, self
+            )
+        else:
+            # Object-based view: legacy behavior
+            for marker_role, marker_obj_ref in person_data_view.get_marker_objects().items():
+                if dal.action_has_slot(self.action, marker_role):
+                    dal.assign_action_to_object(marker_obj_ref, self.action, marker_role)
 
     def shift(self, frame_delta: int):
         """Shifts the MarkerData timeline data in its action by frame_delta frames.
-        
+
         Args:
             frame_delta: The number of frames to shift the animation data. Positive values
                          shift forward in time, negative values shift backward.
