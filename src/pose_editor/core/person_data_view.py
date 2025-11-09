@@ -150,10 +150,10 @@ class PersonDataView:
         instance.view_root_object = obj
         instance.skeleton = skeleton
         instance._marker_bones_by_role = {}
-        
+
         # Create armature with both marker and connecting bones
         instance._create_armature_with_bones(body_part_collections)
-        
+
         # Now initialize from Blender to find and populate the armature reference
         instance._init_from_blender_ref(obj)
 
@@ -310,8 +310,7 @@ class PersonDataView:
         sphere_widget = dal.load_widget_from_blend(widgets_path, "WGT-sphere")
         line_widget = dal.load_widget_from_blend(widgets_path, "WGT-line")
 
-        # Create bone collections
-        dal.create_bone_collection(armature_object, "Markers")
+        # Create bone collections for body parts
         for body_part_name in self.skeleton.body_parts():
             dal.create_bone_collection(armature_object, body_part_name)
 
@@ -354,14 +353,14 @@ class PersonDataView:
             if pose_bone:
                 pose_bone["quality"] = 0.0
 
-            # Move to Markers collection
-            dal.move_bone_to_collection(armature_object, marker_name, "Markers")
+            # Move to body part collection
+            dal.move_bone_to_collection(armature_object, marker_name, body_part)
 
             # Set custom shape
             if sphere_widget:
                 dal.set_bone_custom_shape(
                     armature_object, marker_name, sphere_widget,
-                    scale=0.02, wireframe=True, wire_width=3.0
+                    scale=2.0, wireframe=True, wire_width=3.0
                 )
 
         # Add constraints to connecting bones
@@ -618,34 +617,46 @@ class PersonDataView:
                     armature_action = armature_obj.animation_data.action
                     # Update armature action from the updated MarkerData
                     for joint_name, prop, index in columns_to_process:
-                        if prop == "location" and joint_name in self._marker_bones_by_role:
-                            bone_name = self._marker_bones_by_role[joint_name]
+                        if joint_name not in self._marker_bones_by_role:
+                            continue
+
+                        bone_name = self._marker_bones_by_role[joint_name]
+
+                        # Determine the bone data path based on property type
+                        if prop == "location":
                             bone_data_path = f'pose.bones["{bone_name}"].location'
+                            source_data_path = "location"
+                        elif prop == '["quality"]':
+                            bone_data_path = f'pose.bones["{bone_name}"]["quality"]'
+                            source_data_path = '["quality"]'
+                        else:
+                            # Skip unknown properties
+                            continue
 
-                            # Get source F-curve from MarkerData action
-                            source_slot = dal.get_or_create_action_slot(marker_data.action, joint_name)
-                            source_channelbag = dal._get_or_create_channelbag(marker_data.action, source_slot)
-                            source_fcurve = source_channelbag.fcurves.find("location", index=index)
+                        # Get source F-curve from MarkerData action
+                        source_slot = dal.get_or_create_action_slot(marker_data.action, joint_name)
+                        source_channelbag = dal._get_or_create_channelbag(marker_data.action, source_slot)
+                        source_fcurve = source_channelbag.fcurves.find(source_data_path, index=index)
 
-                            if source_fcurve:
-                                # Get or create target F-curve in armature action
-                                armature_slot = dal.get_or_create_action_slot(armature_action, self.armature_ref.name)
-                                armature_channelbag = dal._get_or_create_channelbag(armature_action, armature_slot)
-                                target_fcurve = armature_channelbag.fcurves.find(bone_data_path, index=index)
+                        if source_fcurve:
+                            # Get or create target F-curve in armature action
+                            armature_slot = dal.get_or_create_action_slot(armature_action, self.armature_ref.name)
+                            armature_channelbag = dal._get_or_create_channelbag(armature_action, armature_slot)
+                            target_fcurve = armature_channelbag.fcurves.find(bone_data_path, index=index)
 
-                                if not target_fcurve:
-                                    target_fcurve = armature_channelbag.fcurves.new(bone_data_path, index=index)
+                            if not target_fcurve:
+                                target_fcurve = armature_channelbag.fcurves.new(bone_data_path, index=index)
 
-                                # Copy the keyframe value
-                                value = source_fcurve.evaluate(frame)
-                                # Remove existing keyframe at this frame if any
-                                for kf in target_fcurve.keyframe_points:
-                                    if kf.co[0] == frame:
-                                        target_fcurve.keyframe_points.remove(kf)
-                                        break
-                                # Insert new keyframe
-                                target_fcurve.keyframe_points.insert(frame, value)
-                                target_fcurve.update()
+                            # Copy the keyframe value
+                            value = source_fcurve.evaluate(frame)
+                            # Remove existing keyframe at this frame if any
+                            for kf in target_fcurve.keyframe_points:
+                                if kf.co[0] == frame:
+                                    target_fcurve.keyframe_points.remove(kf)
+                                    break
+                            # Insert new keyframe
+                            target_fcurve.keyframe_points.insert(frame, value)
+                            target_fcurve.update()
 
         # 4. Update Applied ID
         if app_fcurve:

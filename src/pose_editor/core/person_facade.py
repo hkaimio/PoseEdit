@@ -73,10 +73,10 @@ class RealPersonInstanceFacade:
         """
         if not obj_ref or not obj_ref._get_obj():
             return None
-        
+
         if obj_ref._id in _all_person_instances_cache:
             return _all_person_instances_cache[obj_ref._id]
-        
+
         obj_type = dal.get_custom_property(obj_ref, POSE_EDITOR_OBJECT_TYPE)
         if obj_type != "Person":
             return None
@@ -188,7 +188,7 @@ class RealPersonInstanceFacade:
         for frame in range(scene_start, scene_end + 1):
             for pdv in person_pdvs:
                 pdv.update_frame_if_needed(frame)
-        
+
         print(f"Finished baking stitching data for {self.name}.")
 
     def _get_dataseries_for_view(self, view_name: str) -> dal.BlenderObjRef | None:
@@ -329,17 +329,42 @@ class RealPersonInstanceFacade:
                     if not calib_cam_name:
                         continue
 
-                    marker_data_2d = pdv.get_data_series()
-                    if not marker_data_2d or not marker_data_2d.action:
-                        continue
+                    # For bone-based views, read from armature action instead of MarkerData action
+                    # This ensures we get the data after user edits in Blender
+                    if hasattr(pdv, 'armature_ref') and pdv.armature_ref and pdv.armature_ref._get_obj():
+                        armature_obj = pdv.armature_ref._get_obj()
+                        if not armature_obj.animation_data or not armature_obj.animation_data.action:
+                            continue
 
-                    try:
-                        fcurve_x = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0)
-                        fcurve_y = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 1)
-                        fcurve_quality = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, '["quality"]', -1)
-                    except Exception:
-                        print(f"Warning: Could not get f-curves for marker {marker_name} in view {cam_view.name}")
-                        continue
+                        armature_action = armature_obj.animation_data.action
+                        bone_name = pdv._marker_bones_by_role.get(marker_name)
+                        if not bone_name:
+                            continue
+
+                        try:
+                            # Read from armature action with bone-specific data paths
+                            bone_data_path_x = f'pose.bones["{bone_name}"].location'
+                            bone_data_path_quality = f'pose.bones["{bone_name}"]["quality"]'
+
+                            fcurve_x = dal.get_fcurve_from_action(armature_action, armature_obj.name, bone_data_path_x, 0)
+                            fcurve_y = dal.get_fcurve_from_action(armature_action, armature_obj.name, bone_data_path_x, 1)
+                            fcurve_quality = dal.get_fcurve_from_action(armature_action, armature_obj.name, bone_data_path_quality, -1)
+                        except Exception as e:
+                            print(f"Warning: Could not get f-curves for bone {bone_name} in armature {armature_obj.name}: {e}")
+                            continue
+                    else:
+                        # Legacy object-based view: read from MarkerData action
+                        marker_data_2d = pdv.get_data_series()
+                        if not marker_data_2d or not marker_data_2d.action:
+                            continue
+
+                        try:
+                            fcurve_x = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0)
+                            fcurve_y = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 1)
+                            fcurve_quality = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, '["quality"]', -1)
+                        except Exception:
+                            print(f"Warning: Could not get f-curves for marker {marker_name} in view {cam_view.name}")
+                            continue
 
                     if fcurve_x and fcurve_y and fcurve_quality:
                         x = fcurve_x.evaluate(frame)

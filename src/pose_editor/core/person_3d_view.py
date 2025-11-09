@@ -23,7 +23,7 @@ class Person3DView:
     """A facade for a person's 3D data view.
 
     Manages a 'Person 3D View' root Empty and an armature with marker bones
-    (in 'Markers' bone collection) and connecting bones with constraints.
+    (organized into body part bone collections) and connecting bones with constraints.
     """
 
     def __init__(self, view_root_obj_ref: dal.BlenderObjRef):
@@ -321,8 +321,7 @@ class Person3DView:
         sphere_widget = dal.load_widget_from_blend(widgets_path, "WGT-sphere")
         line_widget = dal.load_widget_from_blend(widgets_path, "WGT-line")
 
-        # Create bone collections
-        dal.create_bone_collection(armature_object, "Markers")
+        # Create bone collections for body parts
         for body_part_name in self.skeleton.body_parts():
             dal.create_bone_collection(armature_object, body_part_name)
 
@@ -367,8 +366,8 @@ class Person3DView:
                 for cam_name in all_camera_names:
                     bone[f"contrib_{cam_name}"] = False
 
-            # Move to Markers collection
-            dal.move_bone_to_collection(armature_object, marker_name, "Markers")
+            # Move to body part collection
+            dal.move_bone_to_collection(armature_object, marker_name, body_part)
 
             # Set custom shape for marker bone
             if sphere_widget:
