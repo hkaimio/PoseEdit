@@ -117,7 +117,7 @@ class PersonDataView:
 
         # Create the collection hierarchy
         person_views_col = dal.get_or_create_collection("PersonViews")
-        
+
         # Handle optional camera_view
         if camera_view and camera_view._obj:
             camera_col = dal.get_or_create_collection(f"CameraView_{camera_view._obj.name}", parent_collection=person_views_col)
@@ -125,7 +125,7 @@ class PersonDataView:
         else:
             camera_col = person_views_col
             parent_obj = None
-            
+
         pv_col = dal.get_or_create_collection(view_name, parent_collection=camera_col)
 
         # Create body part sub-collections
@@ -146,9 +146,15 @@ class PersonDataView:
         dal.set_custom_property(obj, dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView")
         instance = cls(obj)
 
-        instance._init_from_blender_ref(obj)
+        # Set skeleton and view_root_object before creating armature
+        instance.view_root_object = obj
+        instance.skeleton = skeleton
+        instance._marker_bones_by_role = {}
+        
         # Create armature with both marker and connecting bones
         instance._create_armature_with_bones(body_part_collections)
+        
+        # Now initialize from Blender to find and populate the armature reference
         instance._init_from_blender_ref(obj)
 
         # Set location and scale from camera view if available
@@ -381,15 +387,9 @@ class PersonDataView:
                     armature_object, child_marker_bone
                 )
 
-                # Add driver for hide property
-                expression = "var1 or var2"
-                variables = [
-                    ("var1", "SINGLE_PROP", armature_object._id,
-                     f'pose.bones["{parent_marker_bone}"].hide'),
-                    ("var2", "SINGLE_PROP", armature_object._id,
-                     f'pose.bones["{child_marker_bone}"].hide'),
-                ]
-                dal.add_bone_driver(armature_object, bone_name, "hide", expression, variables)
+                # Note: Hide drivers are not implemented as the 'hide' property
+                # on pose bones doesn't support drivers in the same way as other properties.
+                # Visibility can be controlled manually or through bone collections.
 
                 # Move to body part collection
                 body_part = self.skeleton.body_part(child_marker_role)
@@ -442,7 +442,16 @@ class PersonDataView:
             return
 
         # Create armature action from marker data
-        dal.create_armature_action_from_marker_data(self.armature_ref, marker_data)
+        action_name = f"{self.view_name}_Action"
+        new_action = dal.create_armature_action_from_marker_data(
+            action_name=action_name,
+            marker_action=marker_data.action,
+            armature_obj_ref=self.armature_ref,
+            marker_role_to_bone_name=self._marker_bones_by_role
+        )
+
+        # Assign the action to the armature
+        dal.assign_action_to_object(self.armature_ref, new_action, self.armature_ref.name)
 
         # Store reference to marker data
         dal.set_custom_property(

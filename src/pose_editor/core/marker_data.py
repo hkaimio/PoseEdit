@@ -235,8 +235,18 @@ class MarkerData:
         # Check if this is a bone-based view
         if hasattr(person_data_view, 'armature_ref') and person_data_view.armature_ref:
             # Bone-based view: use armature action creation
-            dal.create_armature_action_from_marker_data(
-                person_data_view.armature_ref, self
+            action_name = f"{person_data_view.view_name}_Action"
+            new_action = dal.create_armature_action_from_marker_data(
+                action_name=action_name,
+                marker_action=self.action,
+                armature_obj_ref=person_data_view.armature_ref,
+                marker_role_to_bone_name=person_data_view.get_marker_bones()
+            )
+            # Assign the action to the armature
+            dal.assign_action_to_object(
+                person_data_view.armature_ref,
+                new_action,
+                person_data_view.armature_ref.name
             )
         else:
             # Object-based view: legacy behavior
