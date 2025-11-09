@@ -79,13 +79,9 @@ class PersonDataView:
         """
         self.view_root_object = view_root_obj_ref
 
-        # Populate marker objects and find armature from existing Blender objects
-        self._marker_objects_by_role = {}
-        self._populate_marker_objects_by_role()
-        armature_name = f"{self.view_name}_Armature"
-        self._armature_object = dal.get_object_by_name(armature_name)
-        if not self._armature_object:
-            print(f"Warning: Armature {armature_name} not found for existing PersonDataView {self.view_name}")
+        # Populate marker bones and find armature from existing Blender objects
+        self._marker_bones_by_role: dict[str, str] = {}
+        self._find_armature_and_populate_marker_bones()
 
         skeleton_name = dal.get_custom_property(view_root_obj_ref, SKELETON_NAME)
         if skeleton_name:
@@ -143,10 +139,8 @@ class PersonDataView:
         instance = cls(obj)
 
         instance._init_from_blender_ref(obj)
-        # Pass the body part collections to _create_marker_objects
-        instance._create_marker_objects(body_part_collections)
-        instance._populate_marker_objects_by_role()
-        instance._create_armature()
+        # Create armature with both marker and connecting bones
+        instance._create_armature_with_bones(body_part_collections)
         instance._init_from_blender_ref(obj)
 
         obj._get_obj().location = camera_view.translation
@@ -278,6 +272,26 @@ class PersonDataView:
                 ret.append(pdv)
         return ret
 
+    def _create_armature_with_bones(self, body_part_collections: dict[str, "dal.CollectionRef"]):
+        """Creates an armature with marker bones and connecting bones.
+
+        This method will be fully implemented in Phase 2.
+        For now, it calls the old methods to maintain functionality.
+        """
+        # TEMPORARY: Phase 1 stub - call old methods
+        # This will be replaced in Phase 2 with the new implementation
+        self._create_marker_objects(body_part_collections)
+        self._populate_marker_objects_by_role_legacy()
+        self._create_armature()
+
+    def _populate_marker_objects_by_role_legacy(self):
+        """Legacy method to populate marker objects - temporary for Phase 1."""
+        self._marker_objects_by_role = {}
+        for marker_obj_ref in dal.get_children_of_object(self.view_root_object):
+            marker_role = dal.get_custom_property(marker_obj_ref, dal.MARKER_ROLE)
+            if marker_role:
+                self._marker_objects_by_role[marker_role] = marker_obj_ref
+
     def _create_marker_objects(self, collections: dict[str,"bpy.types.Collection"]):
         """Creates a marker object for each joint in the skeleton."""
         if self.skeleton is None or self.skeleton._skeleton is None:
@@ -350,13 +364,31 @@ class PersonDataView:
                     ]
                     dal.add_bone_driver(self._armature_object, bone_name, "hide", expression, variables)
 
-    def _populate_marker_objects_by_role(self):
-        """Populates the _marker_objects_by_role dictionary by reading custom properties."""
-        self._marker_objects_by_role = {}
-        for marker_obj_ref in dal.get_children_of_object(self.view_root_object):
-            marker_role = dal.get_custom_property(marker_obj_ref, dal.MARKER_ROLE)
-            if marker_role:
-                self._marker_objects_by_role[marker_role] = marker_obj_ref
+    def _find_armature_and_populate_marker_bones(self):
+        """Finds the armature and populates the marker bones dictionary."""
+        self._marker_bones_by_role = {}
+        self.armature_ref: dal.BlenderObjRef | None = None
+
+        # Find armature child
+        children = dal.get_children_of_object(self.view_root_object, recursive=False)
+        for child_ref in children:
+            child_obj = child_ref._get_obj()
+            if child_obj and child_obj.type == "ARMATURE":
+                self.armature_ref = child_ref
+                # Get all bones with MARKER_ROLE custom property
+                armature_obj = child_obj
+                for bone in armature_obj.data.bones:
+                    role = bone.get(dal.MARKER_ROLE._prop_name)
+                    if role:
+                        self._marker_bones_by_role[role] = bone.name
+                break
+
+        if not self.armature_ref:
+            # Legacy: Try finding armature by name
+            armature_name = f"{self.view_name}_Armature"
+            self.armature_ref = dal.get_object_by_name(armature_name)
+            if not self.armature_ref:
+                print(f"Warning: Armature {armature_name} not found for PersonDataView {self.view_name}")
 
     def connect_to_series(self, marker_data: MarkerData):
         """Connects this view to a MarkerData series.
@@ -385,8 +417,24 @@ class PersonDataView:
         return MarkerData.from_blender_object(md_obj)
 
     def get_marker_objects(self) -> dict[str, dal.BlenderObjRef]:
-        """Returns a dictionary of marker objects in this view, keyed by their role."""
-        return self._marker_objects_by_role
+        """Returns a dictionary of marker objects in this view, keyed by their role.
+
+        LEGACY METHOD: This method is kept for backward compatibility.
+        For bone-based views, this will return an empty dict.
+        Use get_marker_bones() for the new bone-based architecture.
+        """
+        # Return marker objects if they exist (legacy object-based views)
+        if hasattr(self, '_marker_objects_by_role'):
+            return self._marker_objects_by_role
+        return {}
+
+    def get_marker_bones(self) -> dict[str, str]:
+        """Returns a dictionary of marker bone names in this view, keyed by their role.
+
+        NEW METHOD: Use this for bone-based PersonDataView architecture.
+        Returns bone names (str) instead of BlenderObjRef.
+        """
+        return self._marker_bones_by_role
 
     def shift(self, delta_frames: int):
         """Shifts all marker data by the given number of frames.
