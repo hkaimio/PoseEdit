@@ -47,7 +47,276 @@ This document outlines the design and implementation plan for refactoring `Perso
 
 ## Proposed Architecture (2D Views - New)
 
-### Goals
+### Critical Realization: Broader Scope Than Initially Expected
+
+**IMPORTANT**: After deeper analysis, this refactoring requires changes to **MarkerData's storage architecture** itself, not just PersonDataView. The scope is significantly larger than initially documented.
+
+### Why MarkerData Needs to Change
+
+**Current MarkerData Architecture**:
+- Creates Actions with **per-marker slots** (one slot per marker name)
+- Each slot has F-curves with simple data paths: `"location"`, `'["quality"]'`
+- Works for Empty objects because each object gets its own slot
+
+**Problem for Bone-Based Views**:
+- Armatures need **single slot** with all bones animated via one channelbag
+- F-curves must have bone-specific data paths: `'pose.bones["MarkerName"].location'`
+- Cannot reuse per-marker slot architecture designed for objects
+
+**Current Workaround (Person3DView)**:
+- `dal.create_armature_action_from_marker_data()` **copies** F-curves from MarkerData slots → new armature slot
+- **Doubles storage**: Data exists in both MarkerData (per-marker slots) and armature (single slot)
+- Only works because 3D data is write-once (triangulation output)
+
+**Why Workaround Fails for 2D Views**:
+- 2D data is **read AND written** continuously:
+  - Stitching: `update_frame_if_needed()` writes single-frame data from raw tracks → stitched views
+  - Operators: Copy stitching keyframes between views
+  - Shifts: `shift()` method moves entire timeline
+- If MarkerData stores per-marker slots BUT views use armature slots, updates to one don't reflect in the other
+- Must keep both in sync or pick one as source of truth
+
+### Affected Files & Systems - Complete Analysis
+
+#### Core Files Requiring Major Changes
+
+1. **`marker_data.py`** (MAJOR REFACTORING NEEDED)
+   - Current: `set_animation_data()` creates per-marker slots
+   - Current: `apply_to_view()` assigns action+slot to each Empty object
+   - Current: `shift()` operates on per-marker slots
+   - New: Must store data in **armature-compatible format** (single slot, bone data paths)
+   - New: `apply_to_view()` must handle both objects (legacy) and bones (new)
+   - Impact: **Changes internal storage format**
+
+2. **`person_data_view.py`** (MAJOR REFACTORING - AS PLANNED)
+   - Change `_marker_objects_by_role` → `_marker_bones_by_role`
+   - Merge `_create_marker_objects()` + `_create_armature()` → `_create_armature_with_bones()`
+   - Update `connect_to_series()` to connect armature to MarkerData
+   - Update `update_frame_if_needed()` to write to armature bones
+   - Update `set_requested_source_id()` - likely needs refactoring for bone data
+
+3. **`person_3d_view.py`** (MINOR - already bone-based, may need sync)
+   - Currently uses workaround: copies data from MarkerData → armature
+   - If MarkerData changes to armature format, may simplify
+   - `connect_to_series()` might no longer need `create_armature_action_from_marker_data()`
+
+#### Files Reading MarkerData Animation (MODERATE IMPACT)
+
+4. **`person_facade.py`** - **Triangulation & Stitching**
+   - `triangulate()`: Reads 2D marker data to compute 3D positions
+     - Line 337-348: `dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0/1)`
+     - Currently expects per-marker slots with `"location"` data path
+     - **NEW**: Must read from armature slot with `'pose.bones["MarkerName"].location'` data path
+
+   - `copy_stitching_from_view()`: Copies `requested_source_id` F-curves
+     - Line 145: `dal.get_fcurve_on_object(source_md.data_series_object, '["requested_source_id"]')`
+     - **QUESTION**: Where should `requested_source_id`/`applied_source_id` live in bone-based system?
+     - Options:
+       a) Keep on MarkerData Empty object (separate from armature action)
+       b) Move to armature as custom property with F-curve
+       c) Create separate "metadata" action slot
+
+   - `bake_stitching_data()`: Calls `update_frame_if_needed()` for all frames
+     - Line 190: `pdv.update_frame_if_needed(frame)`
+     - Depends on PersonDataView changes
+
+5. **`camera_view.py`** - **Import from JSON**
+   - `import_data_from_json()`: Creates raw track PersonDataViews
+   - Line ~315: Calls `MarkerData.set_animation_data()` with numpy arrays
+   - **Impact**: If MarkerData changes storage format, import logic must adapt
+   - **NEW**: Must pass data in armature-compatible column format
+
+#### DAL Functions (MODERATE CHANGES)
+
+6. **`dal.py`**
+   - `get_fcurve_from_action()`: Gets F-curve from specific slot
+     - Currently: `get_fcurve_from_action(action, slot_name, "location", 0)`
+     - **NEW**: Must handle bone data paths: `'pose.bones["Name"].location'`
+     - May need new function: `get_bone_fcurve_from_action()`
+
+   - `replace_fcurve_segment_from_numpy()`: Writes data to F-curves
+     - Line 1122: Used by `update_frame_if_needed()` for stitching
+     - **Impact**: Column format must include bone data paths
+
+   - `create_armature_action_from_marker_data()`: Copies MarkerData → armature
+     - Line 655: Currently needed for Person3DView workaround
+     - **FUTURE**: May become obsolete if MarkerData natively stores armature format
+     - **OR**: May become conversion utility for legacy files
+
+#### Operators (MINOR CHANGES)
+
+7. **`operators.py`**
+   - `POSE_EDITOR_OT_create_real_person`: Creates stitched PersonDataViews
+     - Line 237-239: `MarkerData.create_new()` → `PersonDataView.create_new(marker_data=...)`
+     - Should work if MarkerData/PersonDataView handle armature internally
+
+   - `POSE_EDITOR_OT_assign_source_at_frame`: Sets stitching keyframes
+     - Line 319-323: `pdv.set_requested_source_id()` + `update_frame_if_needed()`
+     - Depends on PersonDataView changes
+
+   - `POSE_EDITOR_OT_copy_stitching`: Copies stitching between views
+     - Line 419: Calls `person_facade.copy_stitching_from_view()`
+     - Depends on where `requested_source_id` lives
+
+#### Tests (UPDATES NEEDED)
+
+8. **Test Files** (Many)
+   - `test_marker_data.py`: Tests MarkerData creation, animation application
+   - `test_person_data_view.py`: Tests stitching, `update_frame_if_needed()`
+   - `test_camera_view.py`: Tests import from JSON
+   - **Impact**: All tests assuming per-marker slots must be updated
+
+### Design Decision Required: MarkerData Storage Format
+
+We need to decide on **ONE** of these approaches:
+
+#### Option A: MarkerData Stores Armature Format (RECOMMENDED)
+**MarkerData creates Actions with armature-compatible structure**:
+- Single slot per person (e.g., slot name = armature name)
+- F-curves use bone data paths: `'pose.bones["MarkerName"].location'`, `'pose.bones["MarkerName"]["quality"]'`
+- Metadata (`requested_source_id`, `applied_source_id`) stored on armature as custom properties with F-curves
+
+**Pros**:
+- Single source of truth - no data duplication
+- PersonDataView armature directly uses MarkerData action
+- Stitching writes directly to final destination
+- No sync issues between MarkerData and view
+
+**Cons**:
+- Breaking change to MarkerData API
+- Must handle legacy files with per-marker slots
+- camera_view.import_from_json() must construct bone data paths
+
+**Migration**:
+- Detect old format (per-marker slots) vs new format (armature slot) in `from_blender_object()`
+- Provide conversion utility for existing files
+
+#### Option B: Dual Format Support (COMPLEX)
+**MarkerData maintains BOTH formats**:
+- Stores data in per-marker slots (backward compat)
+- When `apply_to_view()` detects bone-based view, creates armature slot dynamically
+- Keeps both in sync on writes
+
+**Pros**:
+- Backward compatible
+- Gradual migration possible
+
+**Cons**:
+- Complex sync logic - error-prone
+- Still doubles storage
+- Performance overhead keeping formats in sync
+- Stitching workflow becomes complicated (which format to update?)
+
+**Verdict**: Avoid this approach - too complex
+
+#### Option C: Separate Storage for Object vs Bone Views (NOT RECOMMENDED)
+**Create two MarkerData subclasses**:
+- `ObjectMarkerData`: Per-marker slots (legacy)
+- `ArmatureMarkerData`: Armature slot (new)
+
+**Pros**:
+- Clean separation of concerns
+- No sync issues
+
+**Cons**:
+- Code duplication
+- Difficult to migrate existing data
+- Operators must handle both types
+- Violates DRY principle
+
+### Recommended Approach: Option A with Phased Migration
+
+#### Phase 0: Design & Documentation (BEFORE CODE CHANGES)
+1. Define new MarkerData storage schema:
+   - Slot naming: Use armature object name (e.g., `"PV.cam1_Alice_Armature"`)
+   - Data path format: `'pose.bones["MarkerName"].location'`, `'pose.bones["MarkerName"]["quality"]'`
+   - Metadata storage: Armature custom properties with F-curves
+
+2. Design backward compatibility:
+   - Detection: Check if action has per-marker slots or armature slot
+   - Conversion: Utility to remap per-marker slots → armature slot
+
+3. Update ALL affected functions' signatures and contracts
+4. Create detailed test plan covering migration scenarios
+
+#### Phase 1: MarkerData Core Refactoring
+1. Update `MarkerData.__init__()` and `create_new()`:
+   - Accept `armature_ref` parameter (optional for backward compat)
+   - If armature provided, create single slot with armature name
+   - Set `self._is_armature_based = True/False`
+
+2. Update `set_animation_data()` and `set_animation_data_from_numpy()`:
+   - Check `_is_armature_based` flag
+   - If armature-based: construct bone data paths from column tuples
+   - Column format: `(marker_name, property, index)` → `'pose.bones["{marker_name}"].{property}'` or `'pose.bones["{marker_name}"]["{property}"]'`
+
+3. Update `apply_to_view()`:
+   - Detect if view is object-based or bone-based (check `hasattr(view, 'armature_ref')`)
+   - Object-based: Use existing per-marker slot assignment
+   - Bone-based: Assign single armature slot to armature object
+
+4. Add conversion methods:
+   - `convert_to_armature_format(armature_ref)`: Migrates per-marker slots → armature slot
+   - `_remap_data_path()`: Helper to convert `"location"` → `'pose.bones["Name"].location'`
+
+5. Update `shift()`:
+   - Must work on both formats
+   - Use `dal.shift_action()` which operates on all F-curves regardless of format
+
+#### Phase 2: PersonDataView Refactoring (AS ORIGINALLY PLANNED)
+- See original phases 1-3 in document above
+- Key addition: Pass armature_ref to MarkerData.create_new()
+
+#### Phase 3: Update Data Readers
+1. **person_facade.triangulate()**:
+   - Change F-curve lookups to use armature-aware helper
+   - New helper: `get_marker_fcurve(marker_data, marker_name, property, index)`:
+     - Detects format
+     - Returns correct F-curve from either per-marker slot or armature slot
+
+2. **Stitching system**:
+   - Move `requested_source_id`/`applied_source_id` to armature custom properties
+   - Update `update_frame_if_needed()` to read/write armature bone F-curves
+   - Update `set_requested_source_id()` to work with armature
+
+3. **camera_view.import_from_json()**:
+   - When creating MarkerData, pass armature_ref from PersonDataView
+   - Construct column tuples with marker names (helper converts to bone paths)
+
+#### Phase 4: DAL Updates
+1. Add `get_bone_fcurve_from_armature_action()`:
+   - Helper to get F-curve with bone data path
+   - `get_bone_fcurve_from_armature_action(action, armature_slot_name, bone_name, property, index)`
+
+2. Consider deprecating `create_armature_action_from_marker_data()`:
+   - Still useful for conversion/migration
+   - May not be needed for new workflow
+
+#### Phase 5: Testing & Migration
+1. Unit tests for MarkerData dual-format support
+2. Integration test: Import JSON → create bone-based view → verify animation
+3. Integration test: Stitching workflow with bone-based views
+4. Integration test: Triangulation from bone-based 2D views → bone-based 3D view
+5. Migration script for existing .blend files
+6. Performance benchmarking (bone-based should be faster - fewer objects)
+
+### Bone Collection Organization (UPDATED PER USER REQUEST)
+
+**Body Part Collections for Both Marker and Connecting Bones**:
+- Create collections: `Head`, `Torso`, `Arms`, `Legs` (matching skeleton body parts)
+- **Marker Bones**: Assign to body part collection based on `skeleton.body_part(marker_name)`
+- **Connecting Bones**: Assign to **parent marker's body part collection**
+  - Example: Bone connecting `LShoulder` (Arms) → `LElbow` (Arms) goes to `Arms`
+  - Example: Bone connecting `Neck` (Torso) → `Nose` (Head) goes to `Torso` (parent's collection)
+- **Remove "Markers" collection** - all bones in body part collections for consistency
+
+**Rationale**:
+- Consistent with Person3DView architecture
+- Better organization for animation workflow
+- Easier to show/hide groups by body part
+- Parent's collection makes sense: bone originates from parent marker
+
+### Goals (UPDATED)
 1. **Consistency**: Match Person3DView architecture for maintainability
 2. **Performance**: Reduce object count (remove ~133 Empties per person view)
 3. **Cleaner Hierarchy**: Single armature instead of armature + marker Empties
@@ -79,7 +348,7 @@ armature_ref: BlenderObjRef                         # Single armature
 ### Animation Flow (New)
 1. `MarkerData` stores animation in per-marker slots (unchanged)
 2. `PersonDataView.connect_to_series()` calls:
-   - `dal.create_armature_action_from_marker_data(armature_ref, marker_data)` 
+   - `dal.create_armature_action_from_marker_data(armature_ref, marker_data)`
    - Copies F-curves from MarkerData slots → armature slot
    - Remaps: `"location"` → `'pose.bones["MarkerName"].location'`
    - Remaps: `'["quality"]'` → `'pose.bones["MarkerName"]["quality"]'`
@@ -98,7 +367,7 @@ armature_ref: BlenderObjRef                         # Single armature
    self._marker_objects_by_role: dict[str, BlenderObjRef]
    # To
    self._marker_bones_by_role: dict[str, str]
-   
+
    # Change
    self._armature_object: BlenderObjRef
    # To
@@ -125,7 +394,7 @@ Merges functionality of `_create_marker_objects()` and `_create_armature()`.
 def _create_armature_with_bones(self, body_part_collections: dict[str, CollectionRef]):
     """Creates an armature with marker bones and connecting bones."""
     import os
-    
+
     armature_name = f"{self.view_name}_Armature"
     armature_object = dal.get_or_create_object(
         name=armature_name,
@@ -150,7 +419,7 @@ def _create_armature_with_bones(self, body_part_collections: dict[str, Collectio
 
     # Prepare all bones (markers + connecting)
     bones_to_add = []
-    
+
     # Add marker bones
     for node in PreOrderIter(self.skeleton._skeleton):
         if not (hasattr(node, "id") and node.id is not None):
@@ -193,7 +462,7 @@ def _create_armature_with_bones(self, body_part_collections: dict[str, Collectio
         # Set custom shape
         if sphere_widget:
             dal.set_bone_custom_shape(
-                armature_object, marker_name, sphere_widget, 
+                armature_object, marker_name, sphere_widget,
                 scale=0.02, wireframe=True, wire_width=3.0
             )
 
@@ -201,7 +470,7 @@ def _create_armature_with_bones(self, body_part_collections: dict[str, Collectio
     for node in self.skeleton._skeleton.descendants:
         if not (node.parent and hasattr(node, "id") and node.id is not None):
             continue
-            
+
         parent_marker_role = node.parent.name
         child_marker_role = node.name
         parent_marker_bone = self._marker_bones_by_role.get(parent_marker_role)
@@ -209,23 +478,23 @@ def _create_armature_with_bones(self, body_part_collections: dict[str, Collectio
 
         if parent_marker_bone and child_marker_bone:
             bone_name = f"{parent_marker_role}-{child_marker_role}"
-            
+
             # Add constraints (target is armature, subtarget is bone name)
             dal.add_bone_constraint(
-                armature_object, bone_name, "COPY_LOCATION", 
+                armature_object, bone_name, "COPY_LOCATION",
                 armature_object, parent_marker_bone
             )
             dal.add_bone_constraint(
-                armature_object, bone_name, "STRETCH_TO", 
+                armature_object, bone_name, "STRETCH_TO",
                 armature_object, child_marker_bone
             )
 
             # Add driver for hide property
             expression = "var1 or var2"
             variables = [
-                ("var1", "SINGLE_PROP", armature_object._id, 
+                ("var1", "SINGLE_PROP", armature_object._id,
                  f'pose.bones["{parent_marker_bone}"].hide'),
-                ("var2", "SINGLE_PROP", armature_object._id, 
+                ("var2", "SINGLE_PROP", armature_object._id,
                  f'pose.bones["{child_marker_bone}"].hide'),
             ]
             dal.add_bone_driver(armature_object, bone_name, "hide", expression, variables)
@@ -262,11 +531,11 @@ def _populate_marker_bones_by_role(self):
     self._marker_bones_by_role = {}
     if not self.armature_ref:
         return
-    
+
     armature_obj = self.armature_ref._get_obj()
     if not armature_obj or armature_obj.type != "ARMATURE":
         return
-    
+
     for bone in armature_obj.data.bones:
         marker_role = dal.get_bone_custom_property(self.armature_ref, bone.name, dal.MARKER_ROLE)
         if marker_role:
@@ -280,20 +549,20 @@ def _populate_marker_bones_by_role(self):
 ```python
 def connect_to_series(self, marker_data: MarkerData):
     """Connects this view to a MarkerData series.
-    
+
     This creates an armature action from the marker data by copying and remapping
     F-curves from per-marker slots to the armature's single slot.
-    
+
     Args:
         marker_data: The MarkerData series to connect to.
     """
     if not self.armature_ref:
         print(f"Warning: Cannot connect {self.view_name} - no armature found.")
         return
-    
+
     # Create armature action from marker data
     dal.create_armature_action_from_marker_data(self.armature_ref, marker_data)
-    
+
     # Store reference to marker data
     dal.set_custom_property(
         self.view_root_object,
@@ -329,9 +598,9 @@ This method is currently called by `PersonDataView.connect_to_series()`. After r
 ```python
 def apply_to_view(self, person_data_view: "PersonDataView"):
     """Applies this data series' Action to a Person View hierarchy.
-    
+
     Supports both object-based views (legacy) and bone-based views (new).
-    
+
     Args:
         person_data_view: The PersonDataView object.
     """
@@ -484,20 +753,20 @@ Create operator to convert existing object-based views to bone-based:
   - [ ] Change `_armature_object` → `armature_ref`
   - [ ] Update `_init_from_blender_ref()`
   - [ ] Update `create_new()`
-  
+
 - [ ] Phase 2: Armature creation
   - [ ] Implement `_create_armature_with_bones()`
   - [ ] Delete `_create_marker_objects()`
   - [ ] Delete `_create_armature()`
   - [ ] Rename `_populate_marker_objects_by_role()` → `_populate_marker_bones_by_role()`
-  
+
 - [ ] Phase 3: Animation connection
   - [ ] Update `connect_to_series()`
   - [ ] Rename `get_marker_objects()` → `get_marker_bones()`
-  
+
 - [ ] Phase 4: MarkerData integration
   - [ ] Update or deprecate `apply_to_view()`
-  
+
 - [ ] Phase 5: Testing
   - [ ] Test 2D view creation
   - [ ] Test animation playback
