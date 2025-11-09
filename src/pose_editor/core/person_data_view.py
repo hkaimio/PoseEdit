@@ -46,7 +46,7 @@ class PersonDataView:
     def __init__(self, view_root_obj_ref: dal.BlenderObjRef):
         """Initializes the PersonDataView as a wrapper around an existing Blender object.
 
-        Do not call this constructor directly; use the factory methods create_new() 
+        Do not call this constructor directly; use the factory methods create_new()
         or from_blender_object() instead.
 
         Args:
@@ -273,96 +273,124 @@ class PersonDataView:
         return ret
 
     def _create_armature_with_bones(self, body_part_collections: dict[str, "dal.CollectionRef"]):
-        """Creates an armature with marker bones and connecting bones.
-
-        This method will be fully implemented in Phase 2.
-        For now, it calls the old methods to maintain functionality.
-        """
-        # TEMPORARY: Phase 1 stub - call old methods
-        # This will be replaced in Phase 2 with the new implementation
-        self._create_marker_objects(body_part_collections)
-        self._populate_marker_objects_by_role_legacy()
-        self._create_armature()
-
-    def _populate_marker_objects_by_role_legacy(self):
-        """Legacy method to populate marker objects - temporary for Phase 1."""
-        self._marker_objects_by_role = {}
-        for marker_obj_ref in dal.get_children_of_object(self.view_root_object):
-            marker_role = dal.get_custom_property(marker_obj_ref, dal.MARKER_ROLE)
-            if marker_role:
-                self._marker_objects_by_role[marker_role] = marker_obj_ref
-
-    def _create_marker_objects(self, collections: dict[str,"bpy.types.Collection"]):
-        """Creates a marker object for each joint in the skeleton."""
-        if self.skeleton is None or self.skeleton._skeleton is None:
-            return
-
+        """Creates an armature with marker bones and connecting bones."""
+        import os
         from anytree import PreOrderIter
 
+        armature_name = f"{self.view_name}_Armature"
+        armature_object = dal.get_or_create_object(
+            name=armature_name,
+            obj_type="ARMATURE",
+            collection_name="PersonViews",
+            parent=self.view_root_object,
+        )
+        armature_object._get_obj().color = self.color
+        dal.set_armature_display_stick(armature_object)
+        self.armature_ref = armature_object
+
+        # Load custom shape widgets
+        extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        widgets_path = os.path.join(extension_dir, "assets", "widgets.blend")
+        sphere_widget = dal.load_widget_from_blend(widgets_path, "WGT-sphere")
+        line_widget = dal.load_widget_from_blend(widgets_path, "WGT-line")
+
+        # Create bone collections
+        dal.create_bone_collection(armature_object, "Markers")
+        for body_part_name in self.skeleton.body_parts():
+            dal.create_bone_collection(armature_object, body_part_name)
+
+        # Prepare all bones (markers + connecting)
+        bones_to_add = []
+
+        # Add marker bones
         for node in PreOrderIter(self.skeleton._skeleton):
             if not (hasattr(node, "id") and node.id is not None):
                 continue
-
             marker_name = node.name
-            dal.create_marker(parent=self.view_root_object, name=marker_name, color=self.color, collection=collections.get(self.skeleton.body_part(node.name), None))
+            bones_to_add.append((marker_name, (0, 0, 0), (0, 0.01, 0)))
+            self._marker_bones_by_role[marker_name] = marker_name
 
-    def _create_armature(self):
-        """Creates an armature with bones connecting the markers."""
-        armature_name = f"{self.view_name}_Armature"
-        self._armature_object = dal.get_or_create_object(
-            name=armature_name, obj_type="ARMATURE", collection_name="PersonViews", parent=self.view_root_object
-        )
-        self._armature_object._get_obj().color = self.color
-
-        dal.set_armature_display_stick(self._armature_object)
-
-        bones_to_add = []
+        # Add connecting bones
         for node in self.skeleton._skeleton.descendants:
-            if (
-                node.parent
-                and hasattr(node, "id")
-                and node.id is not None
-                and hasattr(node.parent, "id")
-                and node.parent.id is not None
-            ):
+            if node.parent and hasattr(node, "id") and node.id is not None:
                 parent_marker_role = node.parent.name
                 child_marker_role = node.name
+                bone_name = f"{parent_marker_role}-{child_marker_role}"
+                bones_to_add.append((bone_name, (0, 0, 0), (0, 1, 0)))
 
-                parent_marker = self._marker_objects_by_role.get(parent_marker_role)
-                child_marker = self._marker_objects_by_role.get(child_marker_role)
+        # Create all bones in one edit mode session
+        dal.add_bones_in_bulk(armature_object, bones_to_add)
 
-                if parent_marker and child_marker:
-                    bone_name = f"{parent_marker_role}-{child_marker_role}"
-                    bones_to_add.append((bone_name, (0, 0, 0), (0, 1, 0)))
+        # Set custom properties and collections for marker bones
+        for node in PreOrderIter(self.skeleton._skeleton):
+            if not (hasattr(node, "id") and node.id is not None):
+                continue
+            marker_name = node.name
+            body_part = self.skeleton.body_part(marker_name)
 
-        if bones_to_add:
-            dal.add_bones_in_bulk(self._armature_object, bones_to_add)
+            # Set custom properties on bone
+            dal.set_bone_custom_property(armature_object, marker_name, dal.MARKER_ROLE, marker_name)
+            dal.set_bone_custom_property(armature_object, marker_name, dal.BODY_PART, body_part)
 
+            # Initialize quality custom property (will be animated by F-curves)
+            armature_obj = armature_object._get_obj()
+            pose_bone = armature_obj.pose.bones.get(marker_name)
+            if pose_bone:
+                pose_bone["quality"] = 0.0
+
+            # Move to Markers collection
+            dal.move_bone_to_collection(armature_object, marker_name, "Markers")
+
+            # Set custom shape
+            if sphere_widget:
+                dal.set_bone_custom_shape(
+                    armature_object, marker_name, sphere_widget,
+                    scale=0.02, wireframe=True, wire_width=3.0
+                )
+
+        # Add constraints to connecting bones
         for node in self.skeleton._skeleton.descendants:
-            if (
-                node.parent
-                and hasattr(node, "id")
-                and node.id is not None
-                and hasattr(node.parent, "id")
-                and node.parent.id is not None
-            ):
-                parent_marker_role = node.parent.name
-                child_marker_role = node.name
+            if not (node.parent and hasattr(node, "id") and node.id is not None):
+                continue
 
-                parent_marker = self._marker_objects_by_role.get(parent_marker_role)
-                child_marker = self._marker_objects_by_role.get(child_marker_role)
+            parent_marker_role = node.parent.name
+            child_marker_role = node.name
+            parent_marker_bone = self._marker_bones_by_role.get(parent_marker_role)
+            child_marker_bone = self._marker_bones_by_role.get(child_marker_role)
 
-                if parent_marker and child_marker:
-                    bone_name = f"{parent_marker_role}-{child_marker_role}"
-                    dal.add_bone_constraint(self._armature_object, bone_name, "COPY_LOCATION", parent_marker)
-                    dal.add_bone_constraint(self._armature_object, bone_name, "STRETCH_TO", child_marker)
+            if parent_marker_bone and child_marker_bone:
+                bone_name = f"{parent_marker_role}-{child_marker_role}"
 
-                    expression = "var1 or var2"
-                    variables = [
-                        ("var1", "SINGLE_PROP", parent_marker.name, "hide_viewport"),
-                        ("var2", "SINGLE_PROP", child_marker.name, "hide_viewport"),
-                    ]
-                    dal.add_bone_driver(self._armature_object, bone_name, "hide", expression, variables)
+                # Add constraints (target is armature, subtarget is bone name)
+                dal.add_bone_constraint(
+                    armature_object, bone_name, "COPY_LOCATION",
+                    armature_object, parent_marker_bone
+                )
+                dal.add_bone_constraint(
+                    armature_object, bone_name, "STRETCH_TO",
+                    armature_object, child_marker_bone
+                )
+
+                # Add driver for hide property
+                expression = "var1 or var2"
+                variables = [
+                    ("var1", "SINGLE_PROP", armature_object._id,
+                     f'pose.bones["{parent_marker_bone}"].hide'),
+                    ("var2", "SINGLE_PROP", armature_object._id,
+                     f'pose.bones["{child_marker_bone}"].hide'),
+                ]
+                dal.add_bone_driver(armature_object, bone_name, "hide", expression, variables)
+
+                # Move to body part collection
+                body_part = self.skeleton.body_part(child_marker_role)
+                dal.move_bone_to_collection(armature_object, bone_name, body_part)
+
+                # Set custom shape
+                if line_widget:
+                    dal.set_bone_custom_shape(
+                        armature_object, bone_name, line_widget,
+                        scale=1.0, wireframe=True, wire_width=3.0
+                    )
 
     def _find_armature_and_populate_marker_bones(self):
         """Finds the armature and populates the marker bones dictionary."""
@@ -454,7 +482,7 @@ class PersonDataView:
 
     def _check_and_update_frame(self, scene, depsgraph=None):
         """Callback for the frame change handler.
-        
+
         Checks and updates the current frame, and pre-emptively updates the
         next and previous frames to improve responsiveness during scrubbing.
         """
