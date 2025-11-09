@@ -611,6 +611,42 @@ class PersonDataView:
                 marker_data.action, columns_to_process, frame, frame, data_to_write
             )
 
+            # For bone-based views, also update the armature action
+            if self.armature_ref and self.armature_ref._get_obj():
+                armature_obj = self.armature_ref._get_obj()
+                if armature_obj.animation_data and armature_obj.animation_data.action:
+                    armature_action = armature_obj.animation_data.action
+                    # Update armature action from the updated MarkerData
+                    for joint_name, prop, index in columns_to_process:
+                        if prop == "location" and joint_name in self._marker_bones_by_role:
+                            bone_name = self._marker_bones_by_role[joint_name]
+                            bone_data_path = f'pose.bones["{bone_name}"].location'
+
+                            # Get source F-curve from MarkerData action
+                            source_slot = dal.get_or_create_action_slot(marker_data.action, joint_name)
+                            source_channelbag = dal._get_or_create_channelbag(marker_data.action, source_slot)
+                            source_fcurve = source_channelbag.fcurves.find("location", index=index)
+
+                            if source_fcurve:
+                                # Get or create target F-curve in armature action
+                                armature_slot = dal.get_or_create_action_slot(armature_action, self.armature_ref.name)
+                                armature_channelbag = dal._get_or_create_channelbag(armature_action, armature_slot)
+                                target_fcurve = armature_channelbag.fcurves.find(bone_data_path, index=index)
+
+                                if not target_fcurve:
+                                    target_fcurve = armature_channelbag.fcurves.new(bone_data_path, index=index)
+
+                                # Copy the keyframe value
+                                value = source_fcurve.evaluate(frame)
+                                # Remove existing keyframe at this frame if any
+                                for kf in target_fcurve.keyframe_points:
+                                    if kf.co[0] == frame:
+                                        target_fcurve.keyframe_points.remove(kf)
+                                        break
+                                # Insert new keyframe
+                                target_fcurve.keyframe_points.insert(frame, value)
+                                target_fcurve.update()
+
         # 4. Update Applied ID
         if app_fcurve:
             app_fcurve.keyframe_points.insert(frame, requested_id)
