@@ -134,9 +134,49 @@ class PE_PT_3DPipelinePanel(bpy.types.Panel):
 
         # Operator to triangulate selected persons
         layout.operator("pose_editor.triangulate_person", text="Triangulate Selected Persons")
-        
+
         # Separator
         layout.separator()
-        
+
+        # Export section
+        box = layout.box()
+        box.label(text="Export:", icon='EXPORT')
+
+        # Person selector for export
+        box.prop(context.scene.pose_editor_props, "selected_person", text="Person")
+
+        # Export TRC button
+        row = box.row()
+        row.operator("pose_editor.export_trc", text="Export TRC", icon='FILE')
+        row.enabled = bool(context.scene.pose_editor_props.selected_person)
+
+        # Separator
+        layout.separator()
+
+        # Rig Scaling section
+        box = layout.box()
+        box.label(text="Rig Scaling:", icon='ARMATURE_DATA')
+
+        # Person selector for scaling
+        box.prop(context.scene.pose_editor_props, "selected_person", text="Person")
+
+        # Scale rig button
+        row = box.row()
+        row.operator("pose_editor.scale_rig_from_person", text="Create Scaled Rig", icon='MOD_ARMATURE')
+        row.enabled = bool(context.scene.pose_editor_props.selected_person)
+
+        # OpenSim export section
+        box.label(text="", icon='BLANK1')
+        box.label(text="Export Rig:", icon='EXPORT')
+
+        # Export to OpenSim button (requires active armature)
+        row = box.row()
+        row.operator("pose_editor.export_rig_to_opensim", text="Export to OpenSim", icon='FILE')
+        row.enabled = (context.active_object is not None and
+                      context.active_object.type == 'ARMATURE')
+
+        # Separator
+        layout.separator()
+
         # Operator to apply rigging to armature
         layout.operator("pose_editor.apply_rigging", text="Apply Motion Capture Rigging")

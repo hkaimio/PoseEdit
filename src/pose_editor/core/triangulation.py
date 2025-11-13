@@ -9,12 +9,18 @@ from typing import Dict, List, NamedTuple, Optional
 
 import numpy as np
 
+class ReprojectionResult(NamedTuple):
+    """The result of a reprojection operation."""
+    x: float
+    y: float
+    cam_used: bool
 
 class TriangulationOutput(NamedTuple):
     """The result of triangulating a single point in a single frame."""
     point_3d: np.ndarray  # Shape (3,) for (x, y, z)
     contributing_cameras: List[str]  # Names of cameras used
     reprojection_error: float
+    reprojected_points: Dict[str, np.ndarray]  # Camera name to (x, y) reprojected point
 
 
 def rodrigues(rotation_vector) -> np.ndarray:
@@ -80,19 +86,19 @@ def triangulate_point(
     min_quality: float = 0.5,
 ) -> Optional[TriangulationOutput]:
     """Triangulates a single 3D point from multiple 2D observations."""
-    
+
     camera_names = list(calibration_by_camera.keys())
     x_all, y_all, likelihood_all, projection_matrices = [], [], [], []
-    
+
     for name in camera_names:
         point_2d = points_2d_by_camera.get(name)
         calib = calibration_by_camera.get(name)
-        
+
         if calib and point_2d is not None and point_2d[2] >= min_quality:
             x_all.append(point_2d[0])
             y_all.append(point_2d[1])
             likelihood_all.append(point_2d[2])
-            
+
             K = np.array(calib["matrix"])
             R = rodrigues(np.array(calib["rotation"]))
             t = np.array(calib["translation"]).reshape(3, 1)
@@ -141,10 +147,10 @@ def triangulate_point(
                 continue
 
             x_calc, y_calc = reprojection(P_current, Q)
-            
+
             q_file = list(zip(x_current, y_current))
             q_calc = list(zip(x_calc, y_calc))
-            
+
             errors = [euclidean_distance(q_f, q_c) for q_f, q_c in zip(q_file, q_calc)]
             mean_error = np.mean(errors)
 
@@ -173,8 +179,15 @@ def triangulate_point(
 
     contributing_cams = [valid_camera_names[i] for i in best_cam_indices]
 
+    reprojected_points = {}
+    for camera_name, P_cam in zip(valid_camera_names, proj_matrices):
+        x_calc, y_calc = reprojection([P_cam], Q_best)
+        used = camera_name in contributing_cams
+        reprojected_points[camera_name] = ReprojectionResult(x_calc[0], y_calc[0], used)
+
     return TriangulationOutput(
         point_3d=Q_best[:3],
         contributing_cameras=contributing_cams,
         reprojection_error=error_min,
+        reprojected_points=reprojected_points
     )

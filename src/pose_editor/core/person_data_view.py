@@ -662,3 +662,91 @@ class PersonDataView:
         if app_fcurve:
             app_fcurve.keyframe_points.insert(frame, requested_id)
         # dal.add_keyframe(md_obj, frame, {'["applied_source_id"]': [requested_id]})
+
+    def ensure_reprojected_bones(self, marker_names: list[str]) -> dict[str, str]:
+        """Ensures that reprojected bones exist in the armature for the given markers.
+
+        Creates bones named 'PROJ-{marker_name}' in a 'Reprojected' bone collection
+        if they don't already exist. Uses WGT-sphere custom shape with scale 1.0.
+
+        Args:
+            marker_names: List of marker names to create reprojected bones for.
+
+        Returns:
+            Dictionary mapping marker_name to reprojected bone name.
+        """
+        import os
+
+        if not self.armature_ref:
+            print(f"Warning: Cannot create reprojected bones - no armature found for {self.view_name}")
+            return {}
+
+        armature_obj = self.armature_ref._get_obj()
+        if not armature_obj or armature_obj.type != "ARMATURE":
+            return {}
+
+        # Load sphere widget
+        extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        widgets_path = os.path.join(extension_dir, "assets", "widgets.blend")
+        sphere_widget = dal.load_widget_from_blend(widgets_path, "WGT-sphere")
+
+        # Create Reprojected bone collection if it doesn't exist
+        dal.create_bone_collection(self.armature_ref, "Reprojected")
+
+        # Check which bones need to be created
+        existing_bones = {bone.name for bone in armature_obj.data.bones}
+        bones_to_create = []
+        reproj_bone_map = {}
+
+        for marker_name in marker_names:
+            reproj_bone_name = f"PROJ-{marker_name}"
+            reproj_bone_map[marker_name] = reproj_bone_name
+
+            if reproj_bone_name not in existing_bones:
+                bones_to_create.append((reproj_bone_name, (0, 0, 0), (0, 0.01, 0)))
+
+        # Create missing bones in bulk
+        if bones_to_create:
+            dal.add_bones_in_bulk(self.armature_ref, bones_to_create)
+
+        # Configure all reprojected bones (new and existing)
+        for marker_name in marker_names:
+            reproj_bone_name = reproj_bone_map[marker_name]
+
+            # Set custom properties
+            dal.set_bone_custom_property(self.armature_ref, reproj_bone_name, dal.MARKER_ROLE, f"PROJ-{marker_name}")
+
+            # Initialize cam_used property
+            pose_bone = armature_obj.pose.bones.get(reproj_bone_name)
+            if pose_bone and "cam_used" not in pose_bone:
+                pose_bone["cam_used"] = False
+
+            # Set initial bone color theme to Custom
+            # In Blender 4.2+, bones can have custom colors
+            # We'll set color palette to CUSTOM and then set colors based on cam_used
+            if pose_bone:
+                # Set bone to use custom color
+                pose_bone.color.palette = 'CUSTOM'
+                # Set default color (red for not used)
+                pose_bone.color.custom.normal = (1.0, 0.0, 0.0)  # Red
+                pose_bone.color.custom.select = (1.0, 0.5, 0.5)  # Light red
+                pose_bone.color.custom.active = (1.0, 0.2, 0.2)  # Bright red
+
+            # Set bone color (green for used, red for not used)
+            # Bones in Blender can have a color property, we'll set it based on cam_used
+            # For now, just set a default color. The color will be dynamically controlled
+            # by the cam_used property when triangulation writes the data.
+            # We could use drivers to automatically change color based on cam_used,
+            # but for simplicity we'll just document that cam_used indicates the color.
+
+            # Move to Reprojected collection
+            dal.move_bone_to_collection(self.armature_ref, reproj_bone_name, "Reprojected")
+
+            # Set custom shape
+            if sphere_widget:
+                dal.set_bone_custom_shape(
+                    self.armature_ref, reproj_bone_name, sphere_widget,
+                    scale=1.0, wireframe=True, wire_width=3.0
+                )
+
+        return reproj_bone_map

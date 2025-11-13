@@ -10,7 +10,7 @@ def get_column_index(col_map, marker_name, meas_name):
         return col_map[(marker_name, meas_name)]
     except KeyError:
         raise ValueError(f"Column ({marker_name}, {meas_name}) not found")
-    
+
 def update_midpoint(data, col_map, marker1, marker2, midpoint_marker):
     for meas in ['x', 'y', 'z']:
         col1 = get_column_index(col_map, marker1, meas)
@@ -27,27 +27,134 @@ def marker_data(data, col_map, marker: str, meas: list[str]):
     return data[:, cols]
 
 def marker_distance(data: np.ndarray, col_map: dict[tuple[str,str], int], marker1:str, marker2:str):
+    """Calculate distances between two markers, computing midpoints if needed."""
+    # Check if markers exist, if not try to compute them as midpoints
+    marker1 = _ensure_marker_exists(data, col_map, marker1)
+    marker2 = _ensure_marker_exists(data, col_map, marker2)
+
     coords1 = marker_data(data, col_map, marker1, ['x', 'y', 'z'])
     coords2 = marker_data(data, col_map, marker2, ['x', 'y', 'z'])
     distances = np.linalg.norm(coords1 - coords2, axis=1)
     return distances
 
+def _ensure_marker_exists(data: np.ndarray, col_map: dict[tuple[str,str], int], marker_name: str) -> str:
+    """Ensure marker exists in col_map with valid data, computing midpoint if needed.
+
+    Returns the marker name to use (either original or computed).
+    """
+    # Check if marker exists AND has valid data
+    has_valid_data = False
+    if (marker_name, 'x') in col_map:
+        # Check if the marker has any valid (non-NaN) data
+        x_col = get_column_index(col_map, marker_name, 'x')
+        y_col = get_column_index(col_map, marker_name, 'y')
+        z_col = get_column_index(col_map, marker_name, 'z')
+
+        # Check if there's at least some valid data
+        has_valid_data = (
+            np.any(np.isfinite(data[:, x_col])) and
+            np.any(np.isfinite(data[:, y_col])) and
+            np.any(np.isfinite(data[:, z_col]))
+        )
+
+        if has_valid_data:
+            return marker_name
+        else:
+            print(f"Marker '{marker_name}' exists but has no valid data (all NaN)")
+
+    # Define midpoint computations for missing markers
+    midpoint_definitions = {
+        'Hip': ('RHip', 'LHip'),
+        'Neck': ('RShoulder', 'LShoulder'),
+        'Head': ('LEar', 'REar'),
+    }
+
+    if marker_name in midpoint_definitions:
+        marker1, marker2 = midpoint_definitions[marker_name]
+
+        # Check if source markers exist
+        if (marker1, 'x') in col_map and (marker2, 'x') in col_map:
+            # Compute midpoint and add to data (or replace existing NaN data)
+            for meas in ['x', 'y', 'z']:
+                col1 = get_column_index(col_map, marker1, meas)
+                col2 = get_column_index(col_map, marker2, meas)
+                midpoint_values = (data[:, col1] + data[:, col2]) / 2
+
+                # Check if marker column already exists
+                if (marker_name, meas) in col_map:
+                    # Replace existing NaN data
+                    col_idx = get_column_index(col_map, marker_name, meas)
+                    data[:, col_idx] = midpoint_values
+                else:
+                    # Add new column to data
+                    new_col_idx = data.shape[1]
+                    data_with_midpoint = np.column_stack([data, midpoint_values])
+                    # Update data in-place (this is a bit hacky but works for our use case)
+                    data.resize(data_with_midpoint.shape, refcheck=False)
+                    data[:] = data_with_midpoint
+
+                    # Add to col_map
+                    col_map[(marker_name, meas)] = new_col_idx
+
+            # Add interpolated column (both source markers must be valid)
+            try:
+                marker1_interp = data[:, get_column_index(col_map, marker1, 'interpolated')]
+                marker2_interp = data[:, get_column_index(col_map, marker2, 'interpolated')]
+                midpoint_interp = np.logical_and(marker1_interp, marker2_interp)
+
+                if (marker_name, 'interpolated') in col_map:
+                    # Replace existing interpolated data
+                    col_idx = get_column_index(col_map, marker_name, 'interpolated')
+                    data[:, col_idx] = midpoint_interp
+                else:
+                    # Add new column
+                    new_col_idx = data.shape[1]
+                    data_with_interp = np.column_stack([data, midpoint_interp])
+                    data.resize(data_with_interp.shape, refcheck=False)
+                    data[:] = data_with_interp
+                    col_map[(marker_name, 'interpolated')] = new_col_idx
+            except (KeyError, ValueError):
+                # Interpolated column doesn't exist, skip it
+                pass
+
+            print(f"Computed midpoint marker '{marker_name}' from '{marker1}' and '{marker2}'")
+            return marker_name
+
+    # Marker doesn't exist and can't be computed
+    raise ValueError(f"Marker '{marker_name}' not found and cannot be computed as midpoint")
+
 def estimate_marker_distance(data, col_map, marker1, marker2, min_percentile = 0.2, max_percentile = 0.8):
     distances = marker_distance(data, col_map, marker1, marker2)
-    filtered_distances = distances[(distances >= np.percentile(distances, min_percentile * 100)) & (distances <= np.percentile(distances, max_percentile * 100))]
+
+    # Filter out NaN and infinite values
+    valid_distances = distances[np.isfinite(distances)]
+
+    if len(valid_distances) == 0:
+        # No valid distances found
+        return np.nan, np.nan
+
+    # Filter by percentile range
+    min_val = np.percentile(valid_distances, min_percentile * 100)
+    max_val = np.percentile(valid_distances, max_percentile * 100)
+    filtered_distances = valid_distances[(valid_distances >= min_val) & (valid_distances <= max_val)]
+
+    if len(filtered_distances) == 0:
+        # Fallback to all valid distances if filtering removed everything
+        filtered_distances = valid_distances
+
     mean_distance = np.mean(filtered_distances)
     std_distance = np.std(filtered_distances)
     return mean_distance, std_distance
 
 def preprocess_marker_data(data: np.ndarray, col_map: dict[tuple[str,str], int]):
     fake_markers = [("Hip", "RHip", "LHip"), ("Neck", "RShoulder", "LShoulder"), ("Head", "LEar", "REar")]
-    
+
     for midpoint, m1, m2 in fake_markers:
         update_midpoint(data, col_map, m1, m2, midpoint)
 
 def scale_armature_subset(armature: bpy.types.Object, bone_name: str, scale: float):
     """Scale a bone and its descendants in Edit Mode, using the 3D cursor as pivot.
-    
+
     Args:
         armature: bpy.types.Object. The armature object.
         bone_name: str. The name of the root bone of the sub-hierarchy to scale.
@@ -101,19 +208,36 @@ def scale_armature_subset(armature: bpy.types.Object, bone_name: str, scale: flo
 
 def create_and_scale_armature(measurements: np.ndarray, col_map: dict[tuple[str,str], int], name:str):
     """
-    Create a Blender human armature, scale and adjust it based on marker measurements.
-    - measurements: dict of measured bone lengths (e.g. {'thigh.L': 0.45, ...})
-    - model_lengths: dict of original model bone lengths (e.g. {'thigh.L': 0.42, ...})
-    - save_path: path to save the .blend file
+    Load and scale a custom Blender armature based on marker measurements.
+    - measurements: numpy array of marker measurements
+    - col_map: dict mapping (marker_name, measurement) to column index
+    - name: name for the imported armature
     """
 
-    # Add the fake markers to the data
-    # preprocess_marker_data(measurements, col_map)
+    # Load the custom rig from the blend file
+    import os
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    assets_dir = os.path.join(os.path.dirname(os.path.dirname(script_dir)), 'assets')
+    blend_file = os.path.join(assets_dir, 'opensim-export-armature-wholebody.blend')
 
-    # Create basic human armature
-    bpy.ops.object.armature_human_metarig_add()
-    armature = bpy.context.active_object
+    # Import the armature from the blend file
+    with bpy.data.libraries.load(blend_file, link=False) as (data_from, data_to):
+        data_to.objects = [obj for obj in data_from.objects if obj == 'metarig']
+
+    # Link the imported object to the current scene
+    armature = None
+    for obj in data_to.objects:
+        if obj is not None:
+            bpy.context.collection.objects.link(obj)
+            armature = obj
+            break
+
+    if armature is None:
+        raise ValueError(f"Could not find 'metarig' armature in {blend_file}")
+
+    # Rename and set as active
     armature.name = name
+    bpy.context.view_layer.objects.active = armature
 
     bpy.context.scene.tool_settings.transform_pivot_point = 'ACTIVE_ELEMENT'
 
@@ -133,7 +257,7 @@ def create_and_scale_armature(measurements: np.ndarray, col_map: dict[tuple[str,
 
     bpy.ops.pose.armature_apply(selected=False)
 
-    
+
     bpy.ops.object.mode_set(mode='EDIT')
 
     # Set pivot point to 3D cursor
@@ -144,15 +268,26 @@ def create_and_scale_armature(measurements: np.ndarray, col_map: dict[tuple[str,
     bones = armature.data.edit_bones
     model_hip_shoulder = bones['upper_arm.R'].head.z - bones['thigh.R'].head.z
     meas_hip_shoulder = estimate_marker_distance(measurements, col_map, 'Hip', 'Neck')[0]
+
+    if np.isnan(meas_hip_shoulder):
+        raise ValueError("Cannot estimate Hip-to-Neck distance. Make sure markers 'Hip' and 'Neck' have valid data.")
+
     global_scale = meas_hip_shoulder / model_hip_shoulder
     print(f"Global scale: {global_scale:.3f} model_hip_shoulder: {model_hip_shoulder:.3f} meas_hip_shoulder: {meas_hip_shoulder:.3f}")
     scale_armature_subset(armature, "spine", global_scale)
 
     # Adjust legs
     bpy.ops.object.mode_set(mode='EDIT')
+    bones = armature.data.edit_bones  # Refresh bone references
     model_thigh_length = bones['thigh.R'].length
     meas_thigh_length = estimate_marker_distance(measurements, col_map, 'RHip', 'RKnee')[0]
     meas_shin_length = estimate_marker_distance(measurements, col_map, 'RKnee', 'RAnkle')[0]
+
+    if np.isnan(meas_thigh_length):
+        raise ValueError("Cannot estimate thigh length. Make sure markers 'RHip' and 'RKnee' have valid data.")
+    if np.isnan(meas_shin_length):
+        raise ValueError("Cannot estimate shin length. Make sure markers 'RKnee' and 'RAnkle' have valid data.")
+
     for side in ['L', 'R']:
         thigh_name = f"thigh.{side}"
         shin_name = f"shin.{side}"
@@ -161,6 +296,7 @@ def create_and_scale_armature(measurements: np.ndarray, col_map: dict[tuple[str,
         scale_armature_subset(armature, thigh_name, meas_thigh_length / model_thigh_length)
         # Scale shin
         bpy.ops.object.mode_set(mode='EDIT')
+        bones = armature.data.edit_bones  # Refresh bone references after scaling
         model_shin_length = bones[shin_name].length
         print(f"Scaling {shin_name}: model {model_shin_length:.3f} -> meas {meas_shin_length:.3f}, scale {meas_shin_length / model_shin_length:.3f}")
         scale_armature_subset(armature, shin_name, meas_shin_length / model_shin_length)
@@ -169,27 +305,43 @@ def create_and_scale_armature(measurements: np.ndarray, col_map: dict[tuple[str,
         # move_armature_subset(armature, thigh_name, move_delta)
 
     # Adjust arms
+    bpy.ops.object.mode_set(mode='EDIT')
+    bones = armature.data.edit_bones  # Refresh bone references
     meas_upper_arm_length = estimate_marker_distance(measurements, col_map, 'RShoulder', 'RElbow')[0]
     meas_forearm_length = estimate_marker_distance(measurements, col_map, 'RElbow', 'RWrist')[0]
+
+    if np.isnan(meas_upper_arm_length):
+        raise ValueError("Cannot estimate upper arm length. Make sure markers 'RShoulder' and 'RElbow' have valid data.")
+    if np.isnan(meas_forearm_length):
+        raise ValueError("Cannot estimate forearm length. Make sure markers 'RElbow' and 'RWrist' have valid data.")
+
     for side in ['L', 'R']:
         upper_arm_name = f"upper_arm.{side}"
         forearm_name = f"forearm.{side}"
 
         bpy.ops.object.mode_set(mode='EDIT')
+        bones = armature.data.edit_bones  # Refresh bone references
         model_upper_arm_length = bones[upper_arm_name].length
         print(f"Scaling {upper_arm_name}: model {model_upper_arm_length:.3f} -> meas {meas_upper_arm_length:.3f}, scale {meas_upper_arm_length / model_upper_arm_length:.3f}")
         scale_armature_subset(armature, upper_arm_name, meas_upper_arm_length / model_upper_arm_length)
         bpy.ops.object.mode_set(mode='EDIT')
+        bones = armature.data.edit_bones  # Refresh bone references after scaling
         model_forearm_length = bones[forearm_name].length
         print(f"Scaling {forearm_name}: model {model_forearm_length:.3f} -> meas {meas_forearm_length:.3f}, scale {meas_forearm_length / model_forearm_length:.3f}")
         scale_armature_subset(armature, forearm_name, meas_forearm_length / model_forearm_length)
 
     # Adjust head
     bpy.ops.object.mode_set(mode='EDIT')
+    bones = armature.data.edit_bones  # Refresh bone references
     neck_to_head_model = bones['face'].tail.z - bones['spine.003'].tail.z
     neck_to_head_meas = estimate_marker_distance(measurements, col_map, 'Neck', 'Head')[0]
-    print(f"Scaling head: model {neck_to_head_model:.3f} -> meas {neck_to_head_meas:.3f}, scale {neck_to_head_meas / neck_to_head_model:.3f}")
-    scale_armature_subset(armature, 'spine.004', neck_to_head_meas / neck_to_head_model)
+
+    # Head scaling is optional - skip if no valid data
+    if not np.isnan(neck_to_head_meas):
+        print(f"Scaling head: model {neck_to_head_model:.3f} -> meas {neck_to_head_meas:.3f}, scale {neck_to_head_meas / neck_to_head_model:.3f}")
+        scale_armature_subset(armature, 'spine.004', neck_to_head_meas / neck_to_head_model)
+    else:
+        print("Skipping head scaling: 'Neck' or 'Head' markers have no valid data")
 
 
 
@@ -199,7 +351,7 @@ def best_coords_for_measurements(Q_coords, keypoints_names, fastest_frames_to_re
     - 20% fastest frames (may be outliers)
     - frames when speed is close to zero (person is out of frame): 0.2 m/frame, or 50 px/frame
     - frames when hip and knee angle below 45° (imprecise coordinates when person is crouching)
-    
+
     INPUTS:
     - Q_coords: pd.DataFrame. The XYZ coordinates of each marker
     - keypoints_names: list. The list of marker names
@@ -234,8 +386,8 @@ def best_coords_for_measurements(Q_coords, keypoints_names, fastest_frames_to_re
     else:
         min_speed_indices = sum_speeds.abs().nsmallest(int(len(sum_speeds) * (1-fastest_frames_to_remove_percent))).index
         Q_coords_low_speeds = Q_coords.iloc[min_speed_indices].reset_index(drop=True)
-    
-    # Only keep frames with hip and knee flexion angles below 45% 
+
+    # Only keep frames with hip and knee flexion angles below 45%
     # (if more than 50 of them, else take 50 smallest values)
     try:
         ang_mean = mean_angles(Q_coords_low_speeds, ang_to_consider = ['right knee', 'left knee', 'right hip', 'left hip'])
@@ -249,7 +401,7 @@ def best_coords_for_measurements(Q_coords, keypoints_names, fastest_frames_to_re
     if Q_coords_low_speeds_low_angles.empty:
         logging.warning('The selected person might not move, or is crouching for the whole sequence, or is not well detected. Taking all available data instead of filtering them.')
         Q_coords_low_speeds_low_angles = Q_coords.copy()
-    
+
     if n_markers_init < n_markers:
         Q_coords_low_speeds_low_angles = Q_coords_low_speeds_low_angles.iloc[:,:-3]
 
@@ -267,13 +419,13 @@ def compute_height(Q_coords, keypoints_names, fastest_frames_to_remove_percent=0
     - close_to_zero_speed: float. Sum for all keypoints: about 50 px/frame or 0.2 m/frame
     - large_hip_knee_angles5: float. Hip and knee angles below this value are considered as imprecise
     - trimmed_extrema_percent: float. Proportion of the most extreme segment values to remove before calculating their mean)
-    
+
     OUTPUT:
     - height: float. The estimated height of the person
     '''
-    
+
     # Retrieve most reliable coordinates, adding MidShoulder and Hip columns if not present
-    Q_coords_low_speeds_low_angles = best_coords_for_measurements(Q_coords, keypoints_names, 
+    Q_coords_low_speeds_low_angles = best_coords_for_measurements(Q_coords, keypoints_names,
                                                                   fastest_frames_to_remove_percent=fastest_frames_to_remove_percent, close_to_zero_speed=close_to_zero_speed, large_hip_knee_angles=large_hip_knee_angles)
 
     # Automatically compute the height of the person
@@ -304,26 +456,10 @@ def compute_height(Q_coords, keypoints_names, fastest_frames_to_remove_percent=0
         head = [euclidean_distance(Q_coords_low_speeds_low_angles[pair[0]],Q_coords_low_speeds_low_angles[pair[1]]) for pair in head_pair][0]\
                 *1.33
         logging.warning('The Head marker is missing from your model. Considering Neck to Head size as 1.33 times Neck to MidShoulder size.')
-    
+
     heights = (rfoot + lfoot)/2 + (rshank + lshank)/2 + (rfemur + lfemur)/2 + (rback + lback)/2 + head
-    
+
     # Remove the 20% most extreme values
     height = trimmed_mean(heights, trimmed_extrema_percent=trimmed_extrema_percent)
 
     return height
-
-from pose_editor.blender.dal import BlenderObjRef
-a = BlenderObjRef("P3D.Harri")
-from pose_editor.core.person_3d_view import Person3DView
-pvd = Person3DView.from_blender_object(a)
-
-markers, columns = pvd.get_animation_data_as_numpy()
-
-col_map = {}
-for column, col_desc in enumerate(columns):
-    marker = col_desc[0]
-    meas = col_desc[1]
-    col_map[(marker, meas)] = column
-
-
-create_and_scale_armature(markers, col_map, "Scaled_Armature")
