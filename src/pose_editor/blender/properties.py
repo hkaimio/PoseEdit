@@ -115,18 +115,32 @@ def get_camera_views_for_enum(scene, context):
     return items
 
 
+def get_persons_by_id_for_enum(scene, context):
+    """Returns a list of Real Persons for an EnumProperty, using their object IDs as identifiers."""
+    items = [("", "-- Select Person --", "Select a person to export")]
+    persons = RealPersonInstanceFacade.get_all()
+    for person in persons:
+        items.append((person.obj._id, person.name, f"Export {person.name}"))
+    return items
+
+
 class CopyStitchingProperties(bpy.types.PropertyGroup):
-    """Properties for the Copy Stitching operator."""
-    source_camera: bpy.props.EnumProperty(
-        name="Source Camera",
-        description="The camera view to copy the stitching data from",
-        items=get_camera_views_for_enum,
+    """Properties for copying stitching data between camera views."""
+
+    source_view: bpy.props.EnumProperty(
+        name="Source View",
+        description="Camera view to copy from",
+        items=get_camera_views_for_enum
     )
 
-    person_to_copy: bpy.props.EnumProperty(
+
+class PoseEditorProperties(bpy.types.PropertyGroup):
+    """Main properties for pose editor scene-level settings."""
+
+    selected_person: bpy.props.EnumProperty(
         name="Person",
-        description="The person whose stitching data will be copied",
-        items=get_persons_for_enum,
+        description="Selected person for export operations",
+        items=get_persons_by_id_for_enum
     )
 
 
@@ -135,18 +149,21 @@ classes = [
     StitchingUIItem,
     StitchingUIState,
     CopyStitchingProperties,
+    PoseEditorProperties,
 ]
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    
+
     bpy.types.Scene.camera_view_settings = bpy.props.PointerProperty(type=CameraViewSettings)
     bpy.types.Scene.pose_editor_stitching_ui = bpy.props.PointerProperty(type=StitchingUIState)
     bpy.types.Scene.pose_editor_copy_stitching = bpy.props.PointerProperty(type=CopyStitchingProperties)
+    bpy.types.Scene.pose_editor_props = bpy.props.PointerProperty(type=PoseEditorProperties)
 
 
 def unregister():
+    del bpy.types.Scene.pose_editor_props
     del bpy.types.Scene.pose_editor_copy_stitching
     del bpy.types.Scene.stitching_ui_state
     del bpy.types.Scene.camera_view_settings

@@ -6,6 +6,8 @@ import bpy
 
 from . import operators
 from .blender.drivers import register_drivers, unregister_drivers
+from .blender.export_operators import PE_OT_ExportTRC
+from .blender.scaling_operators import PE_OT_ScaleRigFromPerson, PE_OT_ExportRigToOpenSim
 from .blender.operators import (
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
@@ -20,6 +22,7 @@ from .blender.properties import (
     StitchingUIItem,
     StitchingUIState,
     CopyStitchingProperties,
+    PoseEditorProperties,
 )
 from .core.frame_handler import frame_handler
 from .ui.panels import (
@@ -50,6 +53,9 @@ _classes = [
     PE_OT_AssignTrack,
     PE_OT_TriangulatePerson,
     PE_OT_CopyStitching,
+    PE_OT_ExportTRC,
+    PE_OT_ScaleRigFromPerson,
+    PE_OT_ExportRigToOpenSim,
     PE_PT_ProjectPanel,
     PE_PT_ViewPanel,
     PE_PT_StitchingPanel,
@@ -58,6 +64,7 @@ _classes = [
     StitchingUIState,
     CameraViewSettings,
     CopyStitchingProperties,
+    PoseEditorProperties,
 ]
 
 
@@ -96,11 +103,15 @@ def register():
     bpy.types.Scene.pose_editor_copy_stitching = bpy.props.PointerProperty(
         type=CopyStitchingProperties
     )
+    bpy.types.Scene.pose_editor_props = bpy.props.PointerProperty(
+        type=PoseEditorProperties
+    )
 
 
 def unregister():
     """Unregister the add-on."""
     # Delete the scene properties
+    del bpy.types.Scene.pose_editor_props
     del bpy.types.Scene.pose_editor_stitching_ui
     del bpy.types.Scene.pose_editor_view_settings
     del bpy.types.Scene.pose_editor_copy_stitching
