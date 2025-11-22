@@ -1165,8 +1165,9 @@ def replace_fcurve_segment_from_numpy(
         replace_fcurve_keyframes_in_range(fcurve, start_frame, end_frame, new_keyframes_for_fcurve, interpolation)
 
     # Update all F-Curves.
-    for fcurve in action.fcurves: # Iterate through all fcurves in the action to ensure all are updated
-        fcurve.update()
+    for chb in action.layers[0].strips[0].channelbags:
+        for fcurve in chb.fcurves:
+            fcurve.update()
 
 
 def set_fcurves_from_numpy(
