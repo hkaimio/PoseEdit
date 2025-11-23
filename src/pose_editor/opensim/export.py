@@ -6,6 +6,7 @@ the configuration, hierarchy building, and XML generation to produce complete
 OpenSim .osim files.
 """
 
+import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -53,6 +54,9 @@ def blender_to_opensim_transform(matrix: Matrix) -> tuple[tuple[float, float, fl
     Blender uses Z-up, right-handed coordinates.
     OpenSim uses Y-up, right-handed coordinates.
 
+    The transformation is: apply a -90° rotation around X-axis.
+    This maps: Blender (X, Y, Z) -> OpenSim (X, Z, -Y)
+
     Args:
         matrix: Blender 4x4 transform matrix
 
@@ -61,17 +65,23 @@ def blender_to_opensim_transform(matrix: Matrix) -> tuple[tuple[float, float, fl
         - position: (x, y, z) in meters
         - rotation_euler: (rx, ry, rz) in radians (XYZ order)
     """
-    # Extract translation: swap Y and Z, negate new Z
-    # Blender (X, Y, Z) -> OpenSim (X, Z, -Y)
-    trans = matrix.translation
-    position = (trans.x, trans.z, -trans.y)
-
-    # Extract rotation: convert to Euler, then swap and adjust
-    # This is a simplified approach; for production, consider using a proper
-    # rotation matrix transformation
-    euler = matrix.to_euler('XYZ')
-    # Apply coordinate system rotation (simplified)
-    # TODO: Implement proper rotation transformation
+    # Coordinate system change: rotation of -90 degrees around X-axis
+    # R_change = [1  0   0]
+    #            [0  0   1]
+    #            [0 -1   0]
+    R_change = Matrix.Rotation(math.radians(-90), 4, 'X')
+    
+    # Apply coordinate change: T_opensim = R_change @ T_blender @ R_change^-1
+    # For position this simplifies to: R_change @ position
+    # For rotation: we transform the rotation matrix through the coordinate change
+    transformed_matrix = R_change @ matrix @ R_change.inverted()
+    
+    # Extract position (already in OpenSim coords after transformation)
+    position = transformed_matrix.translation
+    position = (position.x, position.y, position.z)
+    
+    # Extract rotation as Euler angles (XYZ order) from the transformed matrix
+    euler = transformed_matrix.to_euler('XYZ')
     rotation = (euler.x, euler.y, euler.z)
 
     return position, rotation

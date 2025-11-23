@@ -24,6 +24,7 @@ from .opensim_xml import (
     create_opensim_document,
     create_opensim_free_joint,
     create_opensim_marker,
+    create_opensim_weld_joint,
     write_opensim_file,
 )
 
@@ -45,6 +46,7 @@ __all__ = [
     "create_opensim_document",
     "create_opensim_body",
     "create_opensim_free_joint",
+    "create_opensim_weld_joint",
     "create_opensim_custom_joint_from_config",
     "create_joint_from_config",
     "create_opensim_marker",

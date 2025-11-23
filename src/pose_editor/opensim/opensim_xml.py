@@ -167,16 +167,10 @@ def create_opensim_free_joint(
     ET.SubElement(joint, "socket_parent_frame").text = f"{name}_parent_offset"
     ET.SubElement(joint, "socket_child_frame").text = f"{name}_child_offset"
 
-    # Coordinates (6 DOF for free joint)
+    # Coordinates (6 DOF for free joint) - minimal format like OpenSim default
     coordinates = ET.SubElement(joint, "coordinates")
     for i in range(6):
-        coord = ET.SubElement(coordinates, "Coordinate", name=f"{name}_coord_{i}")
-        ET.SubElement(coord, "default_value").text = "0"
-        ET.SubElement(coord, "default_speed_value").text = "0"
-        ET.SubElement(coord, "range").text = "-1.5707963267948966 1.5707963267948966"
-        ET.SubElement(coord, "clamped").text = "false"
-        ET.SubElement(coord, "locked").text = "false"
-        ET.SubElement(coord, "prescribed_function")
+        ET.SubElement(coordinates, "Coordinate", name=f"coord_{i}")
 
     # Physical offset frames
     frames = ET.SubElement(joint, "frames")
@@ -189,6 +183,62 @@ def create_opensim_free_joint(
     parent_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
     parent_socket = "/bodyset/" + parent_body if parent_body != "ground" else "/ground"
     ET.SubElement(parent_frame, "socket_parent").text = parent_socket
+    ET.SubElement(parent_frame, "translation").text = f"{parent_pos[0]:.6f} {parent_pos[1]:.6f} {parent_pos[2]:.6f}"
+    ET.SubElement(parent_frame, "orientation").text = f"{parent_rot[0]:.6f} {parent_rot[1]:.6f} {parent_rot[2]:.6f}"
+
+    # Child frame
+    child_frame = ET.SubElement(frames, "PhysicalOffsetFrame", name=f"{name}_child_offset")
+    child_geom = ET.SubElement(child_frame, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(child_geom, "socket_frame").text = ".."
+    child_scale = ET.SubElement(child_geom, "scale_factors")
+    child_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    ET.SubElement(child_frame, "socket_parent").text = f"/bodyset/{child_body}"
+    ET.SubElement(child_frame, "translation").text = f"{child_pos[0]:.6f} {child_pos[1]:.6f} {child_pos[2]:.6f}"
+    ET.SubElement(child_frame, "orientation").text = f"{child_rot[0]:.6f} {child_rot[1]:.6f} {child_rot[2]:.6f}"
+
+    return joint
+
+
+def create_opensim_weld_joint(
+    name: str,
+    parent_body: str,
+    child_body: str,
+    parent_pos: tuple[float, float, float],
+    parent_rot: tuple[float, float, float],
+    child_pos: tuple[float, float, float],
+    child_rot: tuple[float, float, float],
+) -> ET.Element:
+    """
+    Create OpenSim WeldJoint XML element for fully constrained (0-DOF) joints.
+
+    Args:
+        name: Joint name
+        parent_body: Parent body name
+        child_body: Child body name
+        parent_pos: Parent frame position (x, y, z)
+        parent_rot: Parent frame rotation (rx, ry, rz) in radians
+        child_pos: Child frame position (x, y, z)
+        child_rot: Child frame rotation (rx, ry, rz) in radians
+
+    Returns:
+        WeldJoint XML element
+    """
+    joint = ET.Element("WeldJoint", name=name)
+
+    # Socket connections
+    ET.SubElement(joint, "socket_parent_frame").text = f"{name}_parent_offset"
+    ET.SubElement(joint, "socket_child_frame").text = f"{name}_child_offset"
+
+    # Physical offset frames
+    frames = ET.SubElement(joint, "frames")
+
+    # Parent frame
+    parent_frame = ET.SubElement(frames, "PhysicalOffsetFrame", name=f"{name}_parent_offset")
+    parent_geom = ET.SubElement(parent_frame, "FrameGeometry", name="frame_geometry")
+    ET.SubElement(parent_geom, "socket_frame").text = ".."
+    parent_scale = ET.SubElement(parent_geom, "scale_factors")
+    parent_scale.text = "0.20000000000000001 0.20000000000000001 0.20000000000000001"
+    ET.SubElement(parent_frame, "socket_parent").text = f"/bodyset/{parent_body}"
     ET.SubElement(parent_frame, "translation").text = f"{parent_pos[0]:.6f} {parent_pos[1]:.6f} {parent_pos[2]:.6f}"
     ET.SubElement(parent_frame, "orientation").text = f"{parent_rot[0]:.6f} {parent_rot[1]:.6f} {parent_rot[2]:.6f}"
 
@@ -299,29 +349,30 @@ def create_opensim_custom_joint_from_config(
 
     for axis_name, coord_type, axis_vec in rotation_mapping:
         transform_axis = ET.SubElement(spatial_transform, "TransformAxis", name=axis_name)
-
         # Find the corresponding coordinate info
-        coord_found = False
-        for info in coord_info:
-            if info["name"] == coord_type:
-                ET.SubElement(transform_axis, "coordinates").text = f"{name}_coord_{coord_type}"
-                ET.SubElement(transform_axis, "axis").text = axis_vec
-                ET.SubElement(transform_axis, "function")  # Linear by default
-                coord_found = True
-                break
+        coord_info_item = next((info for info in coord_info if info["name"] == coord_type), None)
 
-        if not coord_found:
-            # Locked axis
-            ET.SubElement(transform_axis, "coordinates")
+        if coord_info_item and not coord_info_item.get("is_locked", False):
+            # Active rotational axis -> map to coordinate and use a LinearFunction
+            ET.SubElement(transform_axis, "coordinates").text = f"{name}_coord_{coord_type}"
             ET.SubElement(transform_axis, "axis").text = axis_vec
-            ET.SubElement(transform_axis, "function")
+            linear_func = ET.SubElement(transform_axis, "LinearFunction", name="function")
+            # Coefficients map coordinate value to transform: value * 1 + 0
+            ET.SubElement(linear_func, "coefficients").text = "1 0"
+        else:
+            # Locked axis -> no coordinate mapping, use constant zero
+            ET.SubElement(transform_axis, "coordinates").text = ""
+            ET.SubElement(transform_axis, "axis").text = axis_vec
+            constant_func = ET.SubElement(transform_axis, "Constant", name="function")
+            ET.SubElement(constant_func, "value").text = "0"
 
     # Translational axes (all locked)
     for i, axis_vec in enumerate(["1 0 0", "0 1 0", "0 0 1"], 1):
         transform_axis = ET.SubElement(spatial_transform, "TransformAxis", name=f"translation{i}")
-        ET.SubElement(transform_axis, "coordinates")
+        ET.SubElement(transform_axis, "coordinates").text = ""
         ET.SubElement(transform_axis, "axis").text = axis_vec
-        ET.SubElement(transform_axis, "function")
+        constant_func = ET.SubElement(transform_axis, "Constant", name="function")
+        ET.SubElement(constant_func, "value").text = "0"
 
     return joint
 
@@ -346,7 +397,7 @@ def create_joint_from_config(
         child_rot: Child frame rotation in radians
 
     Returns:
-        Joint XML element (FreeJoint or CustomJoint)
+        Joint XML element (FreeJoint, WeldJoint, or CustomJoint)
     """
     constraints = bone_config.constraints
     joint_name = f"{bone_config.opensim_name}_joint"
@@ -356,7 +407,21 @@ def create_joint_from_config(
             joint_name, parent_body_name, bone_config.opensim_name, parent_pos, parent_rot, child_pos, child_rot
         )
     else:  # CUSTOM joint
-        return create_opensim_custom_joint_from_config(
+        # Check if joint has any degrees of freedom
+        has_dof = False
+        for axis_constraint in [constraints.x_axis, constraints.y_axis, constraints.z_axis]:
+            if axis_constraint and not axis_constraint.locked:
+                has_dof = True
+                break
+        
+        if not has_dof:
+            # Use WeldJoint for 0-DOF (fully constrained) joints
+            return create_opensim_weld_joint(
+                joint_name, parent_body_name, bone_config.opensim_name, parent_pos, parent_rot, child_pos, child_rot
+            )
+        else:
+            # Use CustomJoint for 1-3 DOF joints
+            return create_opensim_custom_joint_from_config(
             joint_name,
             parent_body_name,
             bone_config.opensim_name,
