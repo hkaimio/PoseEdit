@@ -307,9 +307,32 @@ def create_opensim_custom_joint_from_config(
     coordinates = ET.SubElement(joint, "coordinates")
     for info in coord_info:
         coord = ET.SubElement(coordinates, "Coordinate", name=f"{name}_coord_{info['name']}")
+
+        # Always set default_value to 0
         ET.SubElement(coord, "default_value").text = "0"
         ET.SubElement(coord, "default_speed_value").text = "0"
-        ET.SubElement(coord, "range").text = f"{info['min_val']:.10f} {info['max_val']:.10f}"
+
+        # Ensure the range includes 0. If it doesn't, extend min or max and warn.
+        min_val = float(info['min_val'])
+        max_val = float(info['max_val'])
+        orig_min = min_val
+        orig_max = max_val
+        adjusted = False
+        if min_val > 0.0:
+            min_val = 0.0
+            adjusted = True
+        if max_val < 0.0:
+            max_val = 0.0
+            adjusted = True
+
+        if adjusted:
+            print(
+                f"Warning: joint '{name}' coordinate '{info['name']}' range "
+                f"[{orig_min:.10f}, {orig_max:.10f}] does not include 0 — extending to "
+                f"[{min_val:.10f}, {max_val:.10f}] to allow default 0."
+            )
+
+        ET.SubElement(coord, "range").text = f"{min_val:.10f} {max_val:.10f}"
         ET.SubElement(coord, "clamped").text = "true"
         ET.SubElement(coord, "locked").text = "false"
         ET.SubElement(coord, "prescribed_function")
@@ -413,7 +436,7 @@ def create_joint_from_config(
             if axis_constraint and not axis_constraint.locked:
                 has_dof = True
                 break
-        
+
         if not has_dof:
             # Use WeldJoint for 0-DOF (fully constrained) joints
             return create_opensim_weld_joint(

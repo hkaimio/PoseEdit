@@ -70,16 +70,16 @@ def blender_to_opensim_transform(matrix: Matrix) -> tuple[tuple[float, float, fl
     #            [0  0   1]
     #            [0 -1   0]
     R_change = Matrix.Rotation(math.radians(-90), 4, 'X')
-    
+
     # Apply coordinate change: T_opensim = R_change @ T_blender @ R_change^-1
     # For position this simplifies to: R_change @ position
     # For rotation: we transform the rotation matrix through the coordinate change
     transformed_matrix = R_change @ matrix @ R_change.inverted()
-    
+
     # Extract position (already in OpenSim coords after transformation)
     position = transformed_matrix.translation
     position = (position.x, position.y, position.z)
-    
+
     # Extract rotation as Euler angles (XYZ order) from the transformed matrix
     euler = transformed_matrix.to_euler('XYZ')
     rotation = (euler.x, euler.y, euler.z)
@@ -94,28 +94,60 @@ def get_bone_opensim_transform(
     """
     Get bone transform in OpenSim coordinate system relative to parent.
 
+    This follows the same logic as the legacy exporter in opensim_export.py:
+    - Root bone: Apply Z-up to Y-up rotation (-90° around X-axis) to bone matrix
+    - Child bones: Compute local transform directly (NO coordinate conversion)
+    - Use ZYX Euler order for rotation extraction
+
     Args:
         pose_bone: Blender pose bone
         parent_pose_bone: Parent pose bone (or None for root)
 
     Returns:
         Tuple of (position, rotation, length)
-        - position: Local position in OpenSim coordinates (meters)
-        - rotation: Local rotation in OpenSim coordinates (radians, XYZ Euler)
+        - position: Local position (meters)
+        - rotation: Local rotation (radians, ZYX Euler)
         - length: Bone length in meters
     """
-    # Get local transform relative to parent
-    if parent_pose_bone:
-        local_matrix = parent_pose_bone.matrix.inverted() @ pose_bone.matrix
-    else:
-        # Root bone: use world transform
-        local_matrix = pose_bone.matrix.copy()
+    # Get bone matrix
+    bone_matrix = pose_bone.matrix.copy()
 
-    # Convert to OpenSim coordinate system
-    position, rotation = blender_to_opensim_transform(local_matrix)
+    # Get parent matrix and apply coordinate conversion for root only
+    if parent_pose_bone:
+        # Child bone: use parent matrix as-is
+        parent_matrix = parent_pose_bone.matrix
+    else:
+        # Root bone: apply Z-up to Y-up conversion
+        parent_matrix = Matrix.Identity(4)
+        rot_y_up_mat = Matrix.Rotation(math.radians(-90), 4, 'X')
+        bone_matrix = rot_y_up_mat @ bone_matrix
+
+    # Compute local transform
+    local_matrix = parent_matrix.inverted() @ bone_matrix
+
+    # Extract position and rotation
+    position = local_matrix.translation
+    position = (position.x, position.y, position.z)
+
+    # Use ZYX Euler order (same as legacy exporter)
+    euler = local_matrix.to_euler('ZYX')
+    rotation = (euler.x, euler.y, euler.z)
 
     # Calculate bone length
     bone_length = pose_bone.bone.length
+
+    if ("clavicle" in pose_bone.name.lower()) or ("foot" in pose_bone.name.lower()):
+        print("Clavicle or foot detected:", pose_bone.name)
+        print(f"  name: {pose_bone.name}")
+        print(f"  global matrix:\n{bone_matrix}")
+        print(f"     gobal postion: {bone_matrix.translation}")
+        print(f"     global rotation (XYZ): {bone_matrix.to_euler('XYZ')}")
+        print(f"  parent matrix:\n{parent_matrix}")
+        print(f"     parent global position: {parent_matrix.translation}")
+        print(f"     parent global rotation (XYZ): {parent_matrix.to_euler('XYZ')}")
+        print(f"  local matrix:\n{local_matrix}")
+        print(f"  local translation: {position}")
+        print(f"  local rotation (ZYX): {rotation}")
 
     return position, rotation, bone_length
 
@@ -211,23 +243,26 @@ def get_marker_local_position(
     """
     Get marker position in parent body's local coordinate system.
 
+    This follows the same logic as the legacy exporter:
+    - Compute local position relative to parent (or world if no parent)
+    - NO coordinate conversion (position stays as-is)
+
     Args:
         marker_bone: Marker pose bone
         parent_bone: Parent body pose bone (or None for ground)
 
     Returns:
-        Local position in OpenSim coordinates (x, y, z) in meters
+        Local position (x, y, z) in meters
     """
     if parent_bone:
+        # Calculate position relative to parent body
         local_matrix = parent_bone.matrix.inverted() @ marker_bone.matrix
+        position = local_matrix.translation
     else:
-        # Parent is ground, use world position
-        local_matrix = marker_bone.matrix.copy()
+        # No parent body, use global position
+        position = marker_bone.matrix.translation
 
-    # Convert to OpenSim coordinate system
-    position, _ = blender_to_opensim_transform(local_matrix)
-
-    return position
+    return (position.x, position.y, position.z)
 
 
 def export_markers(
