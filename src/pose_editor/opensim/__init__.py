@@ -8,19 +8,45 @@ This package provides:
 """
 
 from .config import (
-    JointType,
-    AxisConstraint,
-    JointConstraints,
-    BoneConfig,
-    MarkerConfig,
     ArmatureExportConfig,
+    AxisConstraint,
+    BoneConfig,
+    JointConstraints,
+    JointType,
+    MarkerConfig,
+)
+from .export import export_armature_to_opensim_with_config
+from .hierarchy import BoneHierarchyNode, build_export_hierarchy, get_hierarchy_info
+from .opensim_xml import (
+    create_joint_from_config,
+    create_opensim_body,
+    create_opensim_custom_joint_from_config,
+    create_opensim_document,
+    create_opensim_free_joint,
+    create_opensim_marker,
+    write_opensim_file,
 )
 
 __all__ = [
+    # Configuration
     "JointType",
     "AxisConstraint",
     "JointConstraints",
     "BoneConfig",
     "MarkerConfig",
     "ArmatureExportConfig",
+    # Export
+    "export_armature_to_opensim_with_config",
+    # Hierarchy
+    "BoneHierarchyNode",
+    "build_export_hierarchy",
+    "get_hierarchy_info",
+    # XML Generation
+    "create_opensim_document",
+    "create_opensim_body",
+    "create_opensim_free_joint",
+    "create_opensim_custom_joint_from_config",
+    "create_joint_from_config",
+    "create_opensim_marker",
+    "write_opensim_file",
 ]
