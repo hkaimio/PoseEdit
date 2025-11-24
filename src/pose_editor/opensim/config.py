@@ -236,9 +236,9 @@ class MarkerConfig:
             name = name[0].upper() + name[1:]
 
         if name.endswith(".L"):
-            name = "L_" + name[:-2]
+            name = "L" + name[:-2]
         elif name.endswith(".R"):
-            name = "R_" + name[:-2]
+            name = "R" + name[:-2]
 
         return name
 

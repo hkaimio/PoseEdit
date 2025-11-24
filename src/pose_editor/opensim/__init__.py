@@ -27,6 +27,13 @@ from .opensim_xml import (
     create_opensim_weld_joint,
     write_opensim_file,
 )
+from .solution_import import (
+    OpenSimSolutionData,
+    apply_solution_to_armature,
+    build_coordinate_to_bone_map,
+    import_opensim_solution,
+    parse_opensim_solution,
+)
 
 __all__ = [
     # Configuration
@@ -38,6 +45,12 @@ __all__ = [
     "ArmatureExportConfig",
     # Export
     "export_armature_to_opensim_with_config",
+    # Import
+    "import_opensim_solution",
+    "parse_opensim_solution",
+    "OpenSimSolutionData",
+    "build_coordinate_to_bone_map",
+    "apply_solution_to_armature",
     # Hierarchy
     "BoneHierarchyNode",
     "build_export_hierarchy",

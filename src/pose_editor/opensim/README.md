@@ -150,14 +150,35 @@ Run tests with:
 pytest tests/opensim/ -v
 ```
 
-## Future Development
+## Current Status
 
-Phase 2 will add:
-- Export functionality (Blender → OpenSim .osim files)
-- Hierarchy building from Blender armature
-- Joint and body XML generation
+✅ **Phase 1: Configuration System** - Complete
+✅ **Phase 2: Export Integration** - Complete
+✅ **Phase 3: Solution Import** - Complete
 
-Phase 3 will add:
-- Import functionality (OpenSim solutions → Blender animation)
-- Coordinate mapping
-- Keyframe application
+### Features Available
+
+**Export (Blender → OpenSim):**
+- Configuration-based armature export
+- Support for Free, Custom, and Weld joints
+- Automatic joint type selection based on DOF
+- Coordinate range validation and extension
+- Marker export with custom naming
+- Proper coordinate system conversion (Z-up → Y-up)
+
+**Import (OpenSim → Blender):**
+- Parse .mot and .sto solution files
+- Map OpenSim coordinates back to Blender bones
+- Apply animation as keyframes
+- Support for all joint types (Free, Custom, Weld)
+- Configurable FPS and frame range
+- Robust error handling and reporting
+
+### Future Enhancements
+
+- GUI integration for export/import in Blender panels
+- Backward compatibility wrapper for legacy export function
+- Batch export/import for multiple armatures
+- Animation export (coordinate values over time)
+- Performance optimization for large solutions
+- Keyframe interpolation options
