@@ -106,12 +106,28 @@ class MarkerData:
                         (marker_name, "location", 1),
                         (marker_name, "location", 2),
                         (marker_name, '["quality"]', -1),
+                        (marker_name, '["enable"]', -1),
                     ])
-                # Create a 1-frame array of NaNs. `set_fcurves_from_numpy` will create
-                # the f-curves but won't add keyframes for NaN values.
-                nan_data = np.full((1, len(marker_columns)), np.nan)
+                # Create a 1-frame array of NaNs for location/quality, but True (1.0) for enable
+                # `set_fcurves_from_numpy` will create the f-curves but won't add keyframes for NaN values.
                 scene_start, _ = dal.get_scene_frame_range()
+                nan_data = np.full((1, len(marker_columns)), np.nan)
+                # Set enable columns to 1.0 (True) instead of NaN
+                for i, (_, prop, _) in enumerate(marker_columns):
+                    if prop == '["enable"]':
+                        nan_data[0, i] = 1.0
+                # Use default LINEAR interpolation for all curves
                 dal.set_fcurves_from_numpy(action, marker_columns, scene_start, nan_data)
+
+                # Set CONSTANT interpolation only for enable property F-curves
+                for marker_name, prop, index in marker_columns:
+                    if prop == '["enable"]':
+                        slot = dal.get_or_create_action_slot(action, marker_name)
+                        channelbag = dal._get_or_create_channelbag(action, slot)
+                        fcurve = channelbag.fcurves.find('["enable"]', index=index)
+                        if fcurve:
+                            for kf in fcurve.keyframe_points:
+                                kf.interpolation = 'CONSTANT'
 
             # Assign the main action to the data-series object and give it its own slot.
             # This prevents other DAL functions from creating a new, incorrect action.

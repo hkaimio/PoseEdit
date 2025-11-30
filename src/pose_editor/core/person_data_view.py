@@ -347,11 +347,13 @@ class PersonDataView:
             dal.set_bone_custom_property(armature_object, marker_name, dal.MARKER_ROLE, marker_name)
             dal.set_bone_custom_property(armature_object, marker_name, dal.BODY_PART, body_part)
 
-            # Initialize quality custom property (will be animated by F-curves)
+            # Initialize quality and enable custom properties
+            # These will be populated from MarkerData action via F-curves
             armature_obj = armature_object._get_obj()
             pose_bone = armature_obj.pose.bones.get(marker_name)
             if pose_bone:
                 pose_bone["quality"] = 0.0
+                pose_bone["enable"] = True
 
             # Move to body part collection
             dal.move_bone_to_collection(armature_object, marker_name, body_part)
@@ -418,6 +420,10 @@ class PersonDataView:
                     role = bone.get(dal.MARKER_ROLE._prop_name)
                     if role:
                         self._marker_bones_by_role[role] = bone.name
+                        # Ensure enable property exists on existing bones (backward compatibility)
+                        pose_bone = armature_obj.pose.bones.get(bone.name)
+                        if pose_bone and "enable" not in pose_bone:
+                            pose_bone["enable"] = True
                 break
 
         if not self.armature_ref:

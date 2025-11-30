@@ -115,6 +115,7 @@ def triangulate_point(
     if len(valid_indices) < min_cameras:
         return None
 
+    min_cameras = len(valid_indices)
     x = np.array([x_all[i] for i in valid_indices])
     y = np.array([y_all[i] for i in valid_indices])
     quality = np.array([likelihood_all[i] for i in valid_indices])
@@ -174,8 +175,8 @@ def triangulate_point(
 
         nb_cams_off += 1
 
-    if Q_best is None or error_min > reproj_error_threshold:
-        return None
+    # if Q_best is None or error_min > reproj_error_threshold:
+    #     return None
 
     contributing_cams = [valid_camera_names[i] for i in best_cam_indices]
 
