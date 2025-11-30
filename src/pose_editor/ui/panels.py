@@ -132,51 +132,55 @@ class PE_PT_3DPipelinePanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
 
-        # Operator to triangulate selected persons
+        # Person selector at the top
+        box = layout.box()
+        box.label(text="Selected Person:", icon='ARMATURE_DATA')
+        box.prop(context.scene.pose_editor_props, "selected_person", text="")
+
+        person_id = context.scene.pose_editor_props.selected_person
+        person_selected = bool(person_id)
+
+        # Edit Person button
+        row = box.row()
+        row.operator("pose_editor.edit_person", text="Edit Person", icon='POSE_HLT')
+        row.enabled = person_selected
+
+        layout.separator()
+
+        # Triangulation section
         layout.operator("pose_editor.triangulate_person", text="Triangulate Selected Persons")
 
-        # Separator
         layout.separator()
 
-        # Export section
+        # Person-specific actions grouped
         box = layout.box()
-        box.label(text="Export:", icon='EXPORT')
+        box.label(text="Person Actions:", icon='COMMUNITY')
 
-        # Person selector for export
-        box.prop(context.scene.pose_editor_props, "selected_person", text="Person")
+        # Check if person has 3D view (triangulated data)
+        has_3d_view = False
+        if person_selected:
+            from ..core.person_facade import RealPersonInstanceFacade
+            from ..core.person_3d_view import Person3DView
+            person = RealPersonInstanceFacade.get_by_id(person_id)
+            if person:
+                has_3d_view = Person3DView.get_for_person(person) is not None
 
-        # Export TRC button
+        # Export TRC button (requires 3D view)
         row = box.row()
         row.operator("pose_editor.export_trc", text="Export TRC", icon='FILE')
-        row.enabled = bool(context.scene.pose_editor_props.selected_person)
+        row.enabled = person_selected and has_3d_view
 
-        # Separator
-        layout.separator()
-
-        # Rig Scaling section
-        box = layout.box()
-        box.label(text="Rig Scaling:", icon='ARMATURE_DATA')
-
-        # Person selector for scaling
-        box.prop(context.scene.pose_editor_props, "selected_person", text="Person")
-
-        # Scale rig button
+        # Create scaled rig button (requires 3D view)
         row = box.row()
         row.operator("pose_editor.scale_rig_from_person", text="Create Scaled Rig", icon='MOD_ARMATURE')
-        row.enabled = bool(context.scene.pose_editor_props.selected_person)
+        row.enabled = person_selected and has_3d_view
 
-        # OpenSim export section
-        box.label(text="", icon='BLANK1')
-        box.label(text="Export Rig:", icon='EXPORT')
-
-        # Export to OpenSim button (requires active armature)
+        # Export to OpenSim button (requires 3D view)
         row = box.row()
-        row.operator("pose_editor.export_rig_to_opensim", text="Export to OpenSim", icon='FILE')
-        row.enabled = (context.active_object is not None and
-                      context.active_object.type == 'ARMATURE')
+        row.operator("pose_editor.export_rig_to_opensim", text="Export to OpenSim", icon='EXPORT')
+        row.enabled = person_selected and has_3d_view
 
-        # Separator
         layout.separator()
 
-        # Operator to apply rigging to armature
+        # Apply rigging operator
         layout.operator("pose_editor.apply_rigging", text="Apply Motion Capture Rigging")

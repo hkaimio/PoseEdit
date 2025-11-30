@@ -11,11 +11,12 @@ from .blender.scaling_operators import PE_OT_ScaleRigFromPerson, PE_OT_ExportRig
 from .blender.operators import (
     PE_OT_AddPersonInstance,
     PE_OT_AssignTrack,
-    PE_OT_CreateProject,
-    PE_OT_LoadCameraViews,
-    PE_OT_LoadCalibration,
-    PE_OT_TriangulatePerson,
     PE_OT_CopyStitching,
+    PE_OT_CreateProject,
+    PE_OT_EditPerson,
+    PE_OT_LoadCalibration,
+    PE_OT_LoadCameraViews,
+    PE_OT_TriangulatePerson,
 )
 from .blender.properties import (
     CameraViewSettings,
@@ -53,6 +54,7 @@ _classes = [
     PE_OT_AssignTrack,
     PE_OT_TriangulatePerson,
     PE_OT_CopyStitching,
+    PE_OT_EditPerson,
     PE_OT_ExportTRC,
     PE_OT_ScaleRigFromPerson,
     PE_OT_ExportRigToOpenSim,

@@ -488,3 +488,66 @@ class PE_OT_CopyStitching(bpy.types.Operator):
         props = context.scene.pose_editor_copy_stitching
         layout.prop(props, "person_to_copy")
         layout.prop(props, "source_camera")
+
+
+class PE_OT_EditPerson(bpy.types.Operator):
+    """Select all armatures for the selected person and switch to pose mode."""
+
+    bl_idname = "pose_editor.edit_person"
+    bl_label = "Edit Person"
+    bl_description = "Select all 2D and 3D armatures for the person and switch to pose mode"
+
+    def execute(self, context):
+        person_id = context.scene.pose_editor_props.selected_person
+        if not person_id:
+            self.report({"ERROR"}, "No person selected")
+            return {"CANCELLED"}
+
+        # Get the person facade
+        person = RealPersonInstanceFacade.get_by_id(person_id)
+        if not person:
+            self.report({"ERROR"}, f"Person with ID {person_id} not found")
+            return {"CANCELLED"}
+
+        # Switch to object mode first
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        # Deselect all objects
+        bpy.ops.object.select_all(action='DESELECT')
+
+        armatures_selected = 0
+
+        # Get all PersonDataViews for this person and select their armatures
+        all_person_views = PersonDataView.get_all()
+        for view in all_person_views:
+            if view.get_person() and view.get_person().obj._id == person_id:
+                if view.armature_ref and view.armature_ref._get_obj():
+                    armature_obj = view.armature_ref._get_obj()
+                    armature_obj.select_set(True)
+                    armatures_selected += 1
+                    # Set the first armature as active
+                    if armatures_selected == 1:
+                        context.view_layer.objects.active = armature_obj
+
+        # Get Person3DView for this person and select its armature
+        from ..core.person_3d_view import Person3DView
+        person_3d_view = Person3DView.get_for_person(person)
+        if person_3d_view and person_3d_view.armature_ref:
+            armature_obj = person_3d_view.armature_ref._get_obj()
+            if armature_obj:
+                armature_obj.select_set(True)
+                armatures_selected += 1
+                # Set as active if it's the only armature
+                if armatures_selected == 1:
+                    context.view_layer.objects.active = armature_obj
+
+        if armatures_selected == 0:
+            self.report({"WARNING"}, f"No armatures found for person {person.name}")
+            return {"CANCELLED"}
+
+        # Switch to pose mode
+        bpy.ops.object.mode_set(mode='POSE')
+
+        self.report({"INFO"}, f"Selected {armatures_selected} armature(s) for {person.name}")
+        return {"FINISHED"}
