@@ -964,11 +964,17 @@ def add_bone_driver(
     if not pose_bone:
         raise ValueError(f"Bone {bone_name} not found in armature {armature_obj.name}.")
 
-    # For array properties like location[0], split into property and index
+    # Distinguish between array properties like location[0] and custom properties like ["prop_name"]
     if "[" in data_path and "]" in data_path:
-        prop_name = data_path.split("[")[0]
-        array_index = int(data_path.split("[")[1].rstrip("]"))
-        driver = pose_bone.driver_add(prop_name, array_index).driver
+        # Check if it's a custom property (starts with ["
+        if data_path.startswith('["'):
+            # Custom property - use as-is
+            driver = pose_bone.driver_add(data_path).driver
+        else:
+            # Array property like location[0]
+            prop_name = data_path.split("[")[0]
+            array_index = int(data_path.split("[")[1].rstrip("]"))
+            driver = pose_bone.driver_add(prop_name, array_index).driver
     else:
         driver = pose_bone.driver_add(data_path).driver
 

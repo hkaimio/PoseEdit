@@ -354,6 +354,9 @@ class PersonDataView:
             if pose_bone:
                 pose_bone["quality"] = 0.0
                 pose_bone["enable"] = True
+                pose_bone["enable_children"] = True
+                pose_bone["enabled_from_parent"] = True
+                pose_bone["is_enabled"] = True
 
             # Move to body part collection
             dal.move_bone_to_collection(armature_object, marker_name, body_part)
@@ -403,6 +406,49 @@ class PersonDataView:
                         scale=1.0, wireframe=True, wire_width=3.0
                     )
 
+        # Add drivers for computed properties after all bones are created
+        armature_obj = armature_object._get_obj()
+        for node in PreOrderIter(self.skeleton._skeleton):
+            if not (hasattr(node, "id") and node.id is not None):
+                continue
+            marker_name = node.name
+            bone_name = self._marker_bones_by_role[marker_name]
+
+            # Add driver for enabled_from_parent
+            if node.parent and hasattr(node.parent, "name"):
+                parent_bone_name = self._marker_bones_by_role.get(node.parent.name)
+                if parent_bone_name:
+                    # enabled_from_parent = parent.enable_children AND parent.enabled_from_parent
+                    dal.add_bone_driver(
+                        armature_object,
+                        bone_name,
+                        '["enabled_from_parent"]',
+                        'parent_ec and parent_efp',
+                        [
+                            ('parent_ec', 'SINGLE_PROP', armature_obj.name,
+                             f'pose.bones["{parent_bone_name}"]["enable_children"]'),
+                            ('parent_efp', 'SINGLE_PROP', armature_obj.name,
+                             f'pose.bones["{parent_bone_name}"]["enabled_from_parent"]'),
+                        ]
+                    )
+
+            # Add driver for is_enabled
+            # is_enabled = enable AND enabled_from_parent AND (quality > 0)
+            dal.add_bone_driver(
+                armature_object,
+                bone_name,
+                '["is_enabled"]',
+                'enable and efp and (quality > 0)',
+                [
+                    ('enable', 'SINGLE_PROP', armature_obj.name,
+                     f'pose.bones["{bone_name}"]["enable"]'),
+                    ('efp', 'SINGLE_PROP', armature_obj.name,
+                     f'pose.bones["{bone_name}"]["enabled_from_parent"]'),
+                    ('quality', 'SINGLE_PROP', armature_obj.name,
+                     f'pose.bones["{bone_name}"]["quality"]'),
+                ]
+            )
+
     def _find_armature_and_populate_marker_bones(self):
         """Finds the armature and populates the marker bones dictionary."""
         self._marker_bones_by_role = {}
@@ -420,10 +466,17 @@ class PersonDataView:
                     role = bone.get(dal.MARKER_ROLE._prop_name)
                     if role:
                         self._marker_bones_by_role[role] = bone.name
-                        # Ensure enable property exists on existing bones (backward compatibility)
+                        # Ensure enable and new properties exist on existing bones (backward compatibility)
                         pose_bone = armature_obj.pose.bones.get(bone.name)
-                        if pose_bone and "enable" not in pose_bone:
-                            pose_bone["enable"] = True
+                        if pose_bone:
+                            if "enable" not in pose_bone:
+                                pose_bone["enable"] = True
+                            if "enable_children" not in pose_bone:
+                                pose_bone["enable_children"] = True
+                            if "enabled_from_parent" not in pose_bone:
+                                pose_bone["enabled_from_parent"] = True
+                            if "is_enabled" not in pose_bone:
+                                pose_bone["is_enabled"] = True
                 break
 
         if not self.armature_ref:
