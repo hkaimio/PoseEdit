@@ -16,6 +16,8 @@ from .blender.operators import (
     PE_OT_EditPerson,
     PE_OT_LoadCalibration,
     PE_OT_LoadCameraViews,
+    PE_OT_MarkFrame,
+    PE_OT_ToggleBodyPartEnable,
     PE_OT_TriangulatePerson,
 )
 from .blender.properties import (
@@ -55,6 +57,8 @@ _classes = [
     PE_OT_TriangulatePerson,
     PE_OT_CopyStitching,
     PE_OT_EditPerson,
+    PE_OT_MarkFrame,
+    PE_OT_ToggleBodyPartEnable,
     PE_OT_ExportTRC,
     PE_OT_ScaleRigFromPerson,
     PE_OT_ExportRigToOpenSim,

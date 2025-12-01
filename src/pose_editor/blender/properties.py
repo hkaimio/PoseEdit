@@ -143,6 +143,13 @@ class PoseEditorProperties(bpy.types.PropertyGroup):
         items=get_persons_by_id_for_enum
     )
 
+    marker_frame: bpy.props.IntProperty(
+        name="Marker Frame",
+        description="Reference frame for body part enable/disable operations",
+        default=1,
+        min=1
+    )
+
 
 classes = [
     CameraViewSettings,

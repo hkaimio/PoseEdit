@@ -216,14 +216,14 @@ class PE_OT_AddPersonInstance(bpy.types.Operator):
             existing_pdvs = PersonDataView.get_all()
             if existing_pdvs:
                 skeleton = existing_pdvs[0].skeleton
-            
+
             # If no existing PDVs or skeleton, fallback to getting from camera view properties
             if not skeleton and camera_views:
                 # Get skeleton from first camera view's associated person data if available
                 cam_view_pdvs = PersonDataView.get_all_for_camera_view(camera_views[0])
                 if cam_view_pdvs:
                     skeleton = cam_view_pdvs[0].skeleton
-        
+
         # Final fallback to COCO133 if no skeleton found
         if not skeleton:
             skeleton = COCO133Skeleton()
@@ -551,3 +551,138 @@ class PE_OT_EditPerson(bpy.types.Operator):
 
         self.report({"INFO"}, f"Selected {armatures_selected} armature(s) for {person.name}")
         return {"FINISHED"}
+
+
+class PE_OT_MarkFrame(bpy.types.Operator):
+    """Mark current frame as reference for body part enable/disable operations"""
+
+    bl_idname = "pose_editor.mark_frame"
+    bl_label = "Mark Frame"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        context.scene.pose_editor_props.marker_frame = context.scene.frame_current
+        self.report({'INFO'}, f"Marked frame {context.scene.frame_current}")
+        return {'FINISHED'}
+
+
+class PE_OT_ToggleBodyPartEnable(bpy.types.Operator):
+    """Toggle body part enable_children property for frame range"""
+
+    bl_idname = "pose_editor.toggle_body_part_enable"
+    bl_label = "Toggle Body Part Enable"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    bone_name: bpy.props.StringProperty(
+        name="Bone Name",
+        description="Name of the bone to toggle",
+        default=""
+    )
+
+    def execute(self, context):
+        # Check we're in POSE mode
+        if context.mode != 'POSE':
+            self.report({'WARNING'}, "Must be in Pose Mode")
+            return {'CANCELLED'}
+
+        # Get current view's armature
+        armature = self._get_current_view_armature(context)
+        if not armature:
+            self.report({'ERROR'}, "No armature found for current view")
+            return {'CANCELLED'}
+
+        # Get bone
+        if self.bone_name not in armature.pose.bones:
+            self.report({'ERROR'}, f"Bone '{self.bone_name}' not found in armature")
+            return {'CANCELLED'}
+
+        pose_bone = armature.pose.bones[self.bone_name]
+
+        # Get frames
+        current_frame = context.scene.frame_current
+        marker_frame = context.scene.pose_editor_props.marker_frame
+        frame_start = min(current_frame, marker_frame)
+        frame_end = max(current_frame, marker_frame)
+
+        # Get current value and toggle
+        current_value = pose_bone.get("enable_children", 1.0)
+        new_value = 1.0 if current_value < 0.5 else 0.0
+
+        # Store original frame
+        original_frame = current_frame
+
+        # Check values at boundaries (outside the range)
+        value_before = new_value
+        if frame_start > 1:
+            context.scene.frame_set(frame_start - 1)
+            value_before = pose_bone.get("enable_children", 1.0)
+
+        context.scene.frame_set(frame_end + 1)
+        value_after = pose_bone.get("enable_children", 1.0)
+
+        # Set boundary keyframes if needed
+        if value_before != new_value:
+            context.scene.frame_set(frame_start)
+            pose_bone["enable_children"] = new_value
+            pose_bone.keyframe_insert(data_path='["enable_children"]', frame=frame_start)
+
+        if value_after != new_value:
+            # Set frame_end + 1 back to value_after to preserve value outside range
+            context.scene.frame_set(frame_end + 1)
+            pose_bone["enable_children"] = value_after
+            pose_bone.keyframe_insert(data_path='["enable_children"]', frame=frame_end + 1)
+
+        # Remove all keyframes inside the range (exclusive)
+        armature_ref = dal.BlenderObjRef(armature.name)
+        fcurve_path = f'pose.bones["{self.bone_name}"]["enable_children"]'
+        fcurve = dal.get_fcurve_on_object(armature_ref, fcurve_path)
+        if fcurve:
+            keyframes_to_remove = []
+            for kf in fcurve.keyframe_points:
+                if frame_start < kf.co[0] < frame_end:
+                    keyframes_to_remove.append(kf)
+            for kf in reversed(keyframes_to_remove):
+                fcurve.keyframe_points.remove(kf)
+
+        # Restore original frame
+        context.scene.frame_set(original_frame)
+
+        state = "enabled" if new_value > 0.5 else "disabled"
+        self.report({'INFO'}, f"{self.bone_name} {state} for frames {frame_start}-{frame_end}")
+        return {'FINISHED'}
+
+    def _get_current_view_armature(self, context):
+        """Get the PersonDataView armature for the current camera view."""
+        camera = context.space_data.camera
+        if not camera or not camera.name.startswith("Cam_"):
+            return None
+
+        view_name = camera.name.replace("Cam_", "")
+
+        # Find view object
+        view_obj = dal.get_object_by_name(f"View_{view_name}")
+        if not view_obj:
+            return None
+
+        # Get selected person
+        person_id = context.scene.pose_editor_props.selected_person
+        if not person_id:
+            return None
+
+        # Find PersonDataView for this person and camera
+        for person_view in PersonDataView.get_all():
+            view_person = person_view.get_person()
+            if not view_person:
+                continue
+
+            camera_view_obj = person_view.camera_view()
+            if not camera_view_obj or not camera_view_obj._obj:
+                continue
+
+            if (view_person.obj._id == person_id and
+                camera_view_obj._obj.name == view_obj.name):
+                if person_view.armature_ref:
+                    return person_view.armature_ref._get_obj()
+
+        return None
+

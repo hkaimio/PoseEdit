@@ -50,6 +50,62 @@ class PE_PT_ViewPanel(bpy.types.Panel):
 
         layout.prop(view_settings, "view_start")
 
+        layout.separator()
+
+        # Marker Frame section
+        box = layout.box()
+        box.label(text="Marker Frame", icon='KEYFRAME')
+        row = box.row()
+        row.prop(scene.pose_editor_props, "marker_frame", text="")
+        row.operator("pose_editor.mark_frame", text="Mark Frame")
+
+        layout.separator()
+
+        # Body Part Enable section
+        person_id = scene.pose_editor_props.selected_person
+        if person_id:
+            from ..core.person_facade import RealPersonInstanceFacade
+            person = RealPersonInstanceFacade.get_by_id(person_id)
+
+            if person:
+                box = layout.box()
+                box.label(text=f"Body Part Enable ({person.name})", icon='BONE_DATA')
+
+                # Check if we're in pose mode
+                in_pose_mode = context.mode == 'POSE'
+
+                # Body parts in order: head, arms, legs
+                body_parts = [
+                    ("Head", "Head"),
+                    ("Left Arm", "LShoulder"),
+                    ("Right Arm", "RShoulder"),
+                    ("Left Leg", "LHip"),
+                    ("Right Leg", "RHip"),
+                ]
+
+                # Head (centered)
+                row = box.row()
+                row.alignment = 'CENTER'
+                op = row.operator("pose_editor.toggle_body_part_enable", text="Head")
+                op.bone_name = "Head"
+                row.enabled = in_pose_mode
+
+                # Arms (two columns)
+                row = box.row()
+                op = row.operator("pose_editor.toggle_body_part_enable", text="Left Arm")
+                op.bone_name = "LShoulder"
+                op = row.operator("pose_editor.toggle_body_part_enable", text="Right Arm")
+                op.bone_name = "RShoulder"
+                row.enabled = in_pose_mode
+
+                # Legs (two columns)
+                row = box.row()
+                op = row.operator("pose_editor.toggle_body_part_enable", text="Left Leg")
+                op.bone_name = "LHip"
+                op = row.operator("pose_editor.toggle_body_part_enable", text="Right Leg")
+                op.bone_name = "RHip"
+                row.enabled = in_pose_mode
+
 
 class PE_PT_StitchingPanel(bpy.types.Panel):
     """Creates a Panel in the 3D Viewport sidebar for 2D Stitching."""
