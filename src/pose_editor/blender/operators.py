@@ -410,8 +410,8 @@ class PE_OT_TriangulatePerson(bpy.types.Operator):
                     self.report({"ERROR"}, f"Baking stitching data failed for {facade.name}: {e}")
                 self.report({"INFO"}, f"Triangulating {facade.name}...")
                 facade.triangulate(
-                    start_frame, 
-                    end_frame, 
+                    start_frame,
+                    end_frame,
                     algorithm=self.algorithm,
                     reproj_error_threshold=self.reproj_error_threshold
                 )

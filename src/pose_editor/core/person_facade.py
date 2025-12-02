@@ -5,12 +5,14 @@
 
 from typing import TYPE_CHECKING, Optional
 
+import bpy
 import numpy as np
 from anytree import PreOrderIter
 
 from ..blender import dal
 from ..blender.dal import CAMERA_VIEW_ID, BlenderObjRef
 from .calibration import Calibration
+from .frame_handler import frame_handler
 from .marker_data import MarkerData
 from .skeleton import SkeletonBase, get_skeleton
 from .triangulation import TriangulationOutput, triangulate_point
@@ -28,6 +30,53 @@ PERSON_NAME = dal.CustomProperty[str]("person_name")
 POSE_EDITOR_OBJECT_TYPE = dal.CustomProperty[str]("pose_editor_object_type")
 
 _all_person_instances_cache: dict[str, "RealPersonInstanceFacade"] = {}
+
+
+def _update_reprojected_bone_colors(scene, depsgraph):
+    """Frame change callback to update bone colors based on cam_used fcurve values."""
+    from .person_data_view import PersonDataView
+
+    current_frame = scene.frame_current
+
+    # Get all PersonDataView objects
+    all_pdvs = PersonDataView.get_all()
+
+    for pdv in all_pdvs:
+        if not hasattr(pdv, 'armature_ref') or not pdv.armature_ref:
+            continue
+
+        armature_obj = pdv.armature_ref._get_obj()
+        if not armature_obj or not armature_obj.animation_data or not armature_obj.animation_data.action:
+            continue
+
+        action = armature_obj.animation_data.action
+        slot_name = pdv.armature_ref.name
+
+        # Update colors for all reprojected bones (those starting with "PROJ-")
+        for pose_bone in armature_obj.pose.bones:
+            if not pose_bone.name.startswith("PROJ-"):
+                continue
+
+            # Get the cam_used fcurve for this bone
+            data_path = f'pose.bones["{pose_bone.name}"]["cam_used"]'
+            fcurve = None
+            try:
+                fcurve = dal.get_fcurve_from_action(action, slot_name, data_path, -1)
+            except Exception:
+                pass
+
+            if fcurve and pose_bone.color.palette == 'CUSTOM':
+                cam_used_value = fcurve.evaluate(current_frame)
+                if cam_used_value > 0.5:  # Used
+                    pose_bone.color.custom.normal = (0.0, 1.0, 0.0)
+                    pose_bone.color.custom.select = (0.5, 1.0, 0.5)
+                    pose_bone.color.custom.active = (0.2, 1.0, 0.2)
+                else:  # Not used
+                    pose_bone.color.custom.normal = (1.0, 0.0, 0.0)
+                    pose_bone.color.custom.select = (1.0, 0.5, 0.5)
+                    pose_bone.color.custom.active = (1.0, 0.2, 0.2)
+
+
 class RealPersonInstanceFacade:
     """A facade for a Real Person Instance.
 
@@ -312,7 +361,7 @@ class RealPersonInstanceFacade:
             print(f"Error: Could not find or create MarkerData for {marker_data_3d_name}")
             return
 
-        # 4. Build camera name to PersonDataView mapping and ensure reprojected bones exist
+        # 4. Build camera name to PersonDataView mapping
         cam_name_to_pdv = {}
         for pdv in person_pdvs:
             cam_view = pdv.get_camera_view()
@@ -329,8 +378,10 @@ class RealPersonInstanceFacade:
         num_markers = len(marker_nodes)
         marker_names_list = [node.name for node in marker_nodes]
 
-        # Ensure reprojected bones exist in all 2D views
-        for pdv in cam_name_to_pdv.values():
+        # Ensure reprojected bones exist in all 2D views before triangulation
+        print(f"Creating reprojected bones for {len(cam_name_to_pdv)} camera views...")
+        for cam_name, pdv in cam_name_to_pdv.items():
+            print(f"  Creating reprojected bones for camera: {cam_name}")
             pdv.ensure_reprojected_bones(marker_names_list)
 
         # Prepare NumPy arrays to hold the final 3D data and metadata
@@ -524,15 +575,17 @@ class RealPersonInstanceFacade:
                 action = armature_obj.animation_data.action
 
             # Build column list for reprojected bones
+            # All bones share the same slot (armature slot), with bone-specific data paths
             reproj_columns = []
+            armature_slot_name = pdv.armature_ref.name
             for marker_node in marker_nodes:
                 marker_name = marker_node.name
                 reproj_bone_name = f"PROJ-{marker_name}"
-                # x, y, z, cam_used
-                reproj_columns.append((reproj_bone_name, "location", 0))
-                reproj_columns.append((reproj_bone_name, "location", 1))
-                reproj_columns.append((reproj_bone_name, "location", 2))
-                reproj_columns.append((reproj_bone_name, '["cam_used"]', -1))
+                # Use armature slot with bone-specific data paths
+                reproj_columns.append((armature_slot_name, f'pose.bones["{reproj_bone_name}"].location', 0))
+                reproj_columns.append((armature_slot_name, f'pose.bones["{reproj_bone_name}"].location', 1))
+                reproj_columns.append((armature_slot_name, f'pose.bones["{reproj_bone_name}"].location', 2))
+                reproj_columns.append((armature_slot_name, f'pose.bones["{reproj_bone_name}"]["cam_used"]', -1))
 
             # Write all reprojected data at once using fast NumPy method
             dal.replace_fcurve_segment_from_numpy(
@@ -544,6 +597,11 @@ class RealPersonInstanceFacade:
             )
 
         print("Reprojected coordinates successfully written to 2D view bones.")
+
+        # Register frame change handler for dynamic bone coloring
+        frame_handler.add_callback(_update_reprojected_bone_colors)
+        frame_handler.register_handler()
+        print("Frame change handler registered for dynamic bone coloring.")
 
         # Clear the status bar message
         dal.set_status_message("")

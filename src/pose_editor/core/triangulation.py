@@ -131,7 +131,7 @@ def triangulate_point_exhaustive(
     if len(valid_indices) < min_cameras:
         return None
 
-    min_cameras_for_algo = len(valid_indices)
+    min_cameras_for_algo = min_cameras
     x = np.array([x_all[i] for i in valid_indices])
     y = np.array([y_all[i] for i in valid_indices])
     quality = np.array([likelihood_all[i] for i in valid_indices])
