@@ -65,6 +65,7 @@ class PE_PT_ViewPanel(bpy.types.Panel):
         person_id = scene.pose_editor_props.selected_person
         if person_id:
             from ..core.person_facade import RealPersonInstanceFacade
+            from ..core.person_data_view import PersonDataView
             person = RealPersonInstanceFacade.get_by_id(person_id)
 
             if person:
@@ -74,37 +75,34 @@ class PE_PT_ViewPanel(bpy.types.Panel):
                 # Check if we're in pose mode
                 in_pose_mode = context.mode == 'POSE'
 
-                # Body parts in order: head, arms, legs
-                body_parts = [
-                    ("Head", "Head"),
-                    ("Left Arm", "LShoulder"),
-                    ("Right Arm", "RShoulder"),
-                    ("Left Leg", "LHip"),
-                    ("Right Leg", "RHip"),
-                ]
+                # Get skeleton from the person's view to get body parts dynamically
+                skeleton = None
+                for person_view in PersonDataView.get_all():
+                    view_person = person_view.get_person()
+                    if view_person and view_person.obj._id == person_id:
+                        skeleton = person_view.skeleton
+                        break
 
-                # Head (centered)
-                row = box.row()
-                row.alignment = 'CENTER'
-                op = row.operator("pose_editor.toggle_body_part_enable", text="Head")
-                op.bone_name = "Head"
-                row.enabled = in_pose_mode
+                if skeleton:
+                    # Get body parts from skeleton
+                    body_parts = skeleton.body_parts()
 
-                # Arms (two columns)
-                row = box.row()
-                op = row.operator("pose_editor.toggle_body_part_enable", text="Left Arm")
-                op.bone_name = "LShoulder"
-                op = row.operator("pose_editor.toggle_body_part_enable", text="Right Arm")
-                op.bone_name = "RShoulder"
-                row.enabled = in_pose_mode
+                    # Create buttons in a grid layout (2 columns)
+                    for i in range(0, len(body_parts), 2):
+                        row = box.row()
 
-                # Legs (two columns)
-                row = box.row()
-                op = row.operator("pose_editor.toggle_body_part_enable", text="Left Leg")
-                op.bone_name = "LHip"
-                op = row.operator("pose_editor.toggle_body_part_enable", text="Right Leg")
-                op.bone_name = "RHip"
-                row.enabled = in_pose_mode
+                        # First column
+                        op = row.operator("pose_editor.toggle_body_part_enable", text=body_parts[i])
+                        op.body_part_name = body_parts[i]
+
+                        # Second column (if exists)
+                        if i + 1 < len(body_parts):
+                            op = row.operator("pose_editor.toggle_body_part_enable", text=body_parts[i + 1])
+                            op.body_part_name = body_parts[i + 1]
+
+                        row.enabled = in_pose_mode
+                else:
+                    box.label(text="No skeleton found", icon='ERROR')
 
 
 class PE_PT_StitchingPanel(bpy.types.Panel):

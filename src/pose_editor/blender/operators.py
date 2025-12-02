@@ -358,6 +358,26 @@ class PE_OT_TriangulatePerson(bpy.types.Operator):
         default=250,
     )
 
+    algorithm: bpy.props.EnumProperty(
+        name="Algorithm",
+        description="Triangulation algorithm to use",
+        items=[
+            ("ransac", "RANSAC", "RANSAC-based algorithm (faster, robust to outliers)"),
+            ("exhaustive", "Exhaustive", "Exhaustive search (slower, but more thorough)"),
+        ],
+        default="ransac",
+    )
+
+    reproj_error_threshold: bpy.props.FloatProperty(
+        name="Reprojection Error Threshold",
+        description="Maximum allowed reprojection error in pixels",
+        default=10.0,
+        min=0.1,
+        max=100.0,
+        soft_min=1.0,
+        soft_max=50.0,
+    )
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "frame_range")
@@ -365,6 +385,8 @@ class PE_OT_TriangulatePerson(bpy.types.Operator):
             row = layout.row()
             row.prop(self, "start_frame")
             row.prop(self, "end_frame")
+        layout.prop(self, "algorithm")
+        layout.prop(self, "reproj_error_threshold")
 
     def execute(self, context):
         start_frame, end_frame = self._get_frame_range(context)
@@ -387,7 +409,12 @@ class PE_OT_TriangulatePerson(bpy.types.Operator):
                 except Exception as e:
                     self.report({"ERROR"}, f"Baking stitching data failed for {facade.name}: {e}")
                 self.report({"INFO"}, f"Triangulating {facade.name}...")
-                facade.triangulate(start_frame, end_frame)
+                facade.triangulate(
+                    start_frame, 
+                    end_frame, 
+                    algorithm=self.algorithm,
+                    reproj_error_threshold=self.reproj_error_threshold
+                )
             except Exception as e:
                 import traceback
                 self.report({"ERROR"}, f"Triangulation failed for {facade.name}: {e}")
@@ -567,15 +594,15 @@ class PE_OT_MarkFrame(bpy.types.Operator):
 
 
 class PE_OT_ToggleBodyPartEnable(bpy.types.Operator):
-    """Toggle body part enable_children property for frame range"""
+    """Toggle body part enable property for frame range"""
 
     bl_idname = "pose_editor.toggle_body_part_enable"
     bl_label = "Toggle Body Part Enable"
     bl_options = {'REGISTER', 'UNDO'}
 
-    bone_name: bpy.props.StringProperty(
-        name="Bone Name",
-        description="Name of the bone to toggle",
+    body_part_name: bpy.props.StringProperty(
+        name="Body Part Name",
+        description="Name of the body part to toggle",
         default=""
     )
 
@@ -591,12 +618,17 @@ class PE_OT_ToggleBodyPartEnable(bpy.types.Operator):
             self.report({'ERROR'}, "No armature found for current view")
             return {'CANCELLED'}
 
-        # Get bone
-        if self.bone_name not in armature.pose.bones:
-            self.report({'ERROR'}, f"Bone '{self.bone_name}' not found in armature")
+        # Get CTRL-enable bone
+        ctrl_bone_name = "CTRL-enable"
+        if ctrl_bone_name not in armature.pose.bones:
+            self.report({'ERROR'}, f"Control bone '{ctrl_bone_name}' not found in armature")
             return {'CANCELLED'}
 
-        pose_bone = armature.pose.bones[self.bone_name]
+        pose_bone = armature.pose.bones[ctrl_bone_name]
+
+        # Convert body part name to property name
+        from ..core.person_data_view import _body_part_to_property_name
+        prop_name = f"enable_{_body_part_to_property_name(self.body_part_name)}"
 
         # Get frames
         current_frame = context.scene.frame_current
@@ -605,7 +637,7 @@ class PE_OT_ToggleBodyPartEnable(bpy.types.Operator):
         frame_end = max(current_frame, marker_frame)
 
         # Get current value and toggle
-        current_value = pose_bone.get("enable_children", 1.0)
+        current_value = pose_bone.get(prop_name, 1.0)
         new_value = 1.0 if current_value < 0.5 else 0.0
 
         # Store original frame
@@ -615,26 +647,26 @@ class PE_OT_ToggleBodyPartEnable(bpy.types.Operator):
         value_before = new_value
         if frame_start > 1:
             context.scene.frame_set(frame_start - 1)
-            value_before = pose_bone.get("enable_children", 1.0)
+            value_before = pose_bone.get(prop_name, 1.0)
 
         context.scene.frame_set(frame_end + 1)
-        value_after = pose_bone.get("enable_children", 1.0)
+        value_after = pose_bone.get(prop_name, 1.0)
 
         # Set boundary keyframes if needed
         if value_before != new_value:
             context.scene.frame_set(frame_start)
-            pose_bone["enable_children"] = new_value
-            pose_bone.keyframe_insert(data_path='["enable_children"]', frame=frame_start)
+            pose_bone[prop_name] = new_value
+            pose_bone.keyframe_insert(data_path=f'["{prop_name}"]', frame=frame_start)
 
         if value_after != new_value:
             # Set frame_end + 1 back to value_after to preserve value outside range
             context.scene.frame_set(frame_end + 1)
-            pose_bone["enable_children"] = value_after
-            pose_bone.keyframe_insert(data_path='["enable_children"]', frame=frame_end + 1)
+            pose_bone[prop_name] = value_after
+            pose_bone.keyframe_insert(data_path=f'["{prop_name}"]', frame=frame_end + 1)
 
         # Remove all keyframes inside the range (exclusive)
         armature_ref = dal.BlenderObjRef(armature.name)
-        fcurve_path = f'pose.bones["{self.bone_name}"]["enable_children"]'
+        fcurve_path = f'pose.bones["{ctrl_bone_name}"]["{prop_name}"]'
         fcurve = dal.get_fcurve_on_object(armature_ref, fcurve_path)
         if fcurve:
             keyframes_to_remove = []
@@ -648,7 +680,7 @@ class PE_OT_ToggleBodyPartEnable(bpy.types.Operator):
         context.scene.frame_set(original_frame)
 
         state = "enabled" if new_value > 0.5 else "disabled"
-        self.report({'INFO'}, f"{self.bone_name} {state} for frames {frame_start}-{frame_end}")
+        self.report({'INFO'}, f"{self.body_part_name} {state} for frames {frame_start}-{frame_end}")
         return {'FINISHED'}
 
     def _get_current_view_armature(self, context):

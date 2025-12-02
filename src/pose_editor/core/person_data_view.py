@@ -20,6 +20,16 @@ SKELETON_NAME = dal.CustomProperty[str]("skeleton_name")
 
 _all_person_data_views_cache: dict[str, "PersonDataView"] = {}
 
+def _body_part_to_property_name(body_part_name: str) -> str:
+    """Convert body part name to snake_case for use as property name.
+
+    Examples:
+        "Left leg" -> "left_leg"
+        "Head" -> "head"
+        "Left hand" -> "left_hand"
+    """
+    return body_part_name.lower().replace(" ", "_")
+
 class PersonDataView:
     """A facade for a person's 2D data view (View layer).
 
@@ -314,8 +324,12 @@ class PersonDataView:
         for body_part_name in self.skeleton.body_parts():
             dal.create_bone_collection(armature_object, body_part_name)
 
-        # Prepare all bones (markers + connecting)
+        # Prepare all bones (markers + connecting + control)
         bones_to_add = []
+
+        # Add control bone first
+        ctrl_bone_name = "CTRL-enable"
+        bones_to_add.append((ctrl_bone_name, (0, -1, 0), (0, -1, 0.1)))
 
         # Add marker bones
         for node in PreOrderIter(self.skeleton._skeleton):
@@ -336,6 +350,25 @@ class PersonDataView:
         # Create all bones in one edit mode session
         dal.add_bones_in_bulk(armature_object, bones_to_add)
 
+        # Set up control bone with body part enable properties
+        armature_obj = armature_object._get_obj()
+        ctrl_pose_bone = armature_obj.pose.bones.get(ctrl_bone_name)
+        if ctrl_pose_bone:
+            # Add enable property for each body part
+            for body_part_name in self.skeleton.body_parts():
+                prop_name = f"enable_{_body_part_to_property_name(body_part_name)}"
+                ctrl_pose_bone[prop_name] = True
+
+                # Add keyframe at frame 1 with CONSTANT interpolation
+                ctrl_pose_bone.keyframe_insert(data_path=f'["{prop_name}"]', frame=1)
+
+                # Set interpolation to CONSTANT
+                fcurve_path = f'pose.bones["{ctrl_bone_name}"]["{prop_name}"]'
+                fcurve = dal.get_fcurve_on_object(armature_object, fcurve_path)
+                if fcurve:
+                    for keyframe in fcurve.keyframe_points:
+                        keyframe.interpolation = 'CONSTANT'
+
         # Set custom properties and collections for marker bones
         for node in PreOrderIter(self.skeleton._skeleton):
             if not (hasattr(node, "id") and node.id is not None):
@@ -354,8 +387,6 @@ class PersonDataView:
             if pose_bone:
                 pose_bone["quality"] = 0.0
                 pose_bone["enable"] = True
-                pose_bone["enable_children"] = True
-                pose_bone["enabled_from_parent"] = True
                 pose_bone["is_enabled"] = True
 
             # Move to body part collection
@@ -406,7 +437,7 @@ class PersonDataView:
                         scale=1.0, wireframe=True, wire_width=3.0
                     )
 
-        # Add drivers for computed properties after all bones are created
+        # Add drivers for is_enabled property after all bones are created
         armature_obj = armature_object._get_obj()
         for node in PreOrderIter(self.skeleton._skeleton):
             if not (hasattr(node, "id") and node.id is not None):
@@ -414,40 +445,41 @@ class PersonDataView:
             marker_name = node.name
             bone_name = self._marker_bones_by_role[marker_name]
 
-            # Add driver for enabled_from_parent
-            if node.parent and hasattr(node.parent, "name"):
-                parent_bone_name = self._marker_bones_by_role.get(node.parent.name)
-                if parent_bone_name:
-                    # enabled_from_parent = parent.enable_children AND parent.enabled_from_parent
-                    dal.add_bone_driver(
-                        armature_object,
-                        bone_name,
-                        '["enabled_from_parent"]',
-                        'parent_ec and parent_efp',
-                        [
-                            ('parent_ec', 'SINGLE_PROP', armature_obj.name,
-                             f'pose.bones["{parent_bone_name}"]["enable_children"]'),
-                            ('parent_efp', 'SINGLE_PROP', armature_obj.name,
-                             f'pose.bones["{parent_bone_name}"]["enabled_from_parent"]'),
-                        ]
-                    )
+            # Get body part for this marker
+            body_part = self.skeleton.body_part(marker_name)
 
             # Add driver for is_enabled
-            # is_enabled = enable AND enabled_from_parent AND (quality > 0)
-            dal.add_bone_driver(
-                armature_object,
-                bone_name,
-                '["is_enabled"]',
-                'enable and efp and (quality > 0)',
-                [
-                    ('enable', 'SINGLE_PROP', armature_obj.name,
-                     f'pose.bones["{bone_name}"]["enable"]'),
-                    ('efp', 'SINGLE_PROP', armature_obj.name,
-                     f'pose.bones["{bone_name}"]["enabled_from_parent"]'),
-                    ('quality', 'SINGLE_PROP', armature_obj.name,
-                     f'pose.bones["{bone_name}"]["quality"]'),
-                ]
-            )
+            if body_part and body_part != "Unknown":
+                # is_enabled = enable AND body_part_enable AND (quality > 0)
+                prop_name = f"enable_{_body_part_to_property_name(body_part)}"
+                dal.add_bone_driver(
+                    armature_object,
+                    bone_name,
+                    '["is_enabled"]',
+                    'enable and body_part_enable and (quality > 0)',
+                    [
+                        ('enable', 'SINGLE_PROP', armature_obj.name,
+                         f'pose.bones["{bone_name}"]["enable"]'),
+                        ('body_part_enable', 'SINGLE_PROP', armature_obj.name,
+                         f'pose.bones["{ctrl_bone_name}"]["{prop_name}"]'),
+                        ('quality', 'SINGLE_PROP', armature_obj.name,
+                         f'pose.bones["{bone_name}"]["quality"]'),
+                    ]
+                )
+            else:
+                # No body part - just check enable and quality
+                dal.add_bone_driver(
+                    armature_object,
+                    bone_name,
+                    '["is_enabled"]',
+                    'enable and (quality > 0)',
+                    [
+                        ('enable', 'SINGLE_PROP', armature_obj.name,
+                         f'pose.bones["{bone_name}"]["enable"]'),
+                        ('quality', 'SINGLE_PROP', armature_obj.name,
+                         f'pose.bones["{bone_name}"]["quality"]'),
+                    ]
+                )
 
     def _find_armature_and_populate_marker_bones(self):
         """Finds the armature and populates the marker bones dictionary."""
@@ -466,15 +498,11 @@ class PersonDataView:
                     role = bone.get(dal.MARKER_ROLE._prop_name)
                     if role:
                         self._marker_bones_by_role[role] = bone.name
-                        # Ensure enable and new properties exist on existing bones (backward compatibility)
+                        # Ensure enable property exists on existing bones (backward compatibility)
                         pose_bone = armature_obj.pose.bones.get(bone.name)
                         if pose_bone:
                             if "enable" not in pose_bone:
                                 pose_bone["enable"] = True
-                            if "enable_children" not in pose_bone:
-                                pose_bone["enable_children"] = True
-                            if "enabled_from_parent" not in pose_bone:
-                                pose_bone["enabled_from_parent"] = True
                             if "is_enabled" not in pose_bone:
                                 pose_bone["is_enabled"] = True
                 break

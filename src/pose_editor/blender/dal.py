@@ -113,6 +113,26 @@ MARKER_DATA_ID = CustomProperty[str]("marker_data_id")
 CALIBRATION_CAMERA_NAME = CustomProperty[str]("calibration_camera_name")
 
 
+def set_status_message(message: str) -> None:
+    """
+    Sets the status bar message in Blender's window manager and forces UI update.
+    
+    Args:
+        message: The message to display in the status bar
+    """
+    # Set the status message
+    if bpy.context.window_manager.windows:
+        bpy.context.window_manager.windows[0].screen.areas[0].header_text_set(message)
+    
+    # Force UI redraw
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            area.tag_redraw()
+    
+    # Process pending events to update the UI immediately
+    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+
+
 def create_collection(name: str, parent_collection: bpy.types.Collection = None) -> bpy.types.Collection:
     """
     Creates a new collection in the scene.

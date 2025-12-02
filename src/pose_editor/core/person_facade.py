@@ -235,8 +235,21 @@ class RealPersonInstanceFacade:
 
         return scene_end
 
-    def triangulate(self, frame_start: int, frame_end: int):
-        """Performs 3D triangulation for this person over a frame range."""
+    def triangulate(
+        self,
+        frame_start: int,
+        frame_end: int,
+        algorithm: str = "ransac",
+        reproj_error_threshold: float = 10.0
+    ):
+        """Performs 3D triangulation for this person over a frame range.
+
+        Args:
+            frame_start: First frame to triangulate
+            frame_end: Last frame to triangulate
+            algorithm: Triangulation algorithm to use ("ransac" or "exhaustive")
+            reproj_error_threshold: Maximum allowed reprojection error in pixels
+        """
 
         from .person_data_view import PersonDataView
         from .person_3d_view import Person3DView
@@ -299,12 +312,26 @@ class RealPersonInstanceFacade:
             print(f"Error: Could not find or create MarkerData for {marker_data_3d_name}")
             return
 
-        # 4. Loop through frames and markers, collecting triangulation results
+        # 4. Build camera name to PersonDataView mapping and ensure reprojected bones exist
+        cam_name_to_pdv = {}
+        for pdv in person_pdvs:
+            cam_view = pdv.get_camera_view()
+            if cam_view and cam_view._obj:
+                calib_cam_name = dal.get_custom_property(cam_view._obj, dal.CALIBRATION_CAMERA_NAME)
+                if calib_cam_name:
+                    cam_name_to_pdv[calib_cam_name] = pdv
+
+        # 5. Loop through frames and markers, collecting triangulation results
         num_frames = frame_end - frame_start + 1
         marker_nodes = [
             node for node in PreOrderIter(skeleton._skeleton) if hasattr(node, "id") and node.id is not None
         ]
         num_markers = len(marker_nodes)
+        marker_names_list = [node.name for node in marker_nodes]
+
+        # Ensure reprojected bones exist in all 2D views
+        for pdv in cam_name_to_pdv.values():
+            pdv.ensure_reprojected_bones(marker_names_list)
 
         # Prepare NumPy arrays to hold the final 3D data and metadata
         output_locations = np.full((num_frames, num_markers * 3), np.nan)
@@ -312,9 +339,22 @@ class RealPersonInstanceFacade:
         output_cam_counts = np.zeros((num_frames, num_markers), dtype=int)
         output_cam_bools = np.zeros((num_frames, num_markers * len(all_camera_names)), dtype=bool)
 
+        # Prepare NumPy arrays for reprojected 2D data (per camera)
+        # For each camera: [marker0_x, marker0_y, marker0_z, marker0_cam_used, marker1_x, ...]
+        reproj_data_by_camera = {}
+        for cam_name in cam_name_to_pdv.keys():
+            # 4 values per marker: x, y, z (always 0), cam_used (boolean as float)
+            reproj_data_by_camera[cam_name] = np.full((num_frames, num_markers * 4), np.nan)
+
         calib_by_cam = calibration._data
 
         for frame_offset, frame in enumerate(range(frame_start, frame_end + 1)):
+            # Update status bar with progress every 10 frames to balance responsiveness and performance
+            if frame_offset % 10 == 9 or frame == frame_start or frame == frame_end:
+                dal.set_status_message(
+                    f"Triangulating {self.name}: frame {frame} of {frame_end} ({frame_offset + 1}/{num_frames})"
+                )
+
             for marker_idx, marker_node in enumerate(marker_nodes):
                 marker_name = marker_node.name
 
@@ -377,8 +417,10 @@ class RealPersonInstanceFacade:
                     result: TriangulationOutput | None = triangulate_point(
                         points_2d_by_camera=points_2d_by_camera,
                         calibration_by_camera=calib_by_cam,
+                        algorithm=algorithm,
+                        reproj_error_threshold=reproj_error_threshold,
                     )
-                    # 7. Collect results
+                    # 7. Collect results for 3D data
                     if result:
                         loc_col_start = marker_idx * 3
                         output_locations[frame_offset, loc_col_start : loc_col_start + 3] = result.point_3d
@@ -391,6 +433,26 @@ class RealPersonInstanceFacade:
                             output_cam_bools[
                                 frame_offset, bool_col_start + cam_idx
                             ] = (cam_name in result.contributing_cameras)
+
+                        # 8. Cache reprojection data for each camera
+                        if result.reprojected_points:
+                            for cam_name, reproj_point in result.reprojected_points.items():
+                                if cam_name in reproj_data_by_camera:
+                                    # reproj_point is np.array([x, y, cam_used])
+                                    reproj_col_start = marker_idx * 4
+                                    reproj_data_by_camera[cam_name][frame_offset, reproj_col_start] = reproj_point[0]  # x
+                                    reproj_data_by_camera[cam_name][frame_offset, reproj_col_start + 1] = reproj_point[1]  # y
+                                    reproj_data_by_camera[cam_name][frame_offset, reproj_col_start + 2] = 0.0  # z
+                                    reproj_data_by_camera[cam_name][frame_offset, reproj_col_start + 3] = float(reproj_point[2])  # cam_used
+
+        # 9. Define the columns for the NumPy array and write 3D data to F-Curves
+                        for cam_idx, cam_name in enumerate(all_camera_names):
+                            bool_col_start = marker_idx * len(all_camera_names)
+                            output_cam_bools[
+                                frame_offset, bool_col_start + cam_idx
+                            ] = (cam_name in result.contributing_cameras)
+
+        dal.set_status_message("Updating 3D armature animation...")
 
         # 8. Define the columns for the NumPy array and write to F-Curves
         final_columns = []
@@ -425,6 +487,7 @@ class RealPersonInstanceFacade:
 
         print(f"Writing {final_data_array.shape} data array to action {marker_data_3d.action.name}...")
 
+
         dal.replace_fcurve_segment_from_numpy(
             action=marker_data_3d.action,
             columns=final_columns,
@@ -438,145 +501,49 @@ class RealPersonInstanceFacade:
 
         print("Triangulation data successfully written to f-curves.")
 
-        # 10. Write reprojected coordinates to 2D view armature bones
+        # 10. Write reprojected coordinates to 2D view armature bones using cached data
         print("Writing reprojected coordinates to 2D view bones...")
-        cam_name_to_pdv = {}
-        for pdv in person_pdvs:
-            cam_view = pdv.get_camera_view()
-            if cam_view and cam_view._obj:
-                calib_cam_name = dal.get_custom_property(cam_view._obj, dal.CALIBRATION_CAMERA_NAME)
-                if calib_cam_name:
-                    cam_name_to_pdv[calib_cam_name] = pdv
 
-        # Ensure reprojected bones exist in all 2D views
-        marker_names_list = [node.name for node in marker_nodes]
-        for _cam_name, pdv in cam_name_to_pdv.items():
-            pdv.ensure_reprojected_bones(marker_names_list)
+        for cam_name, pdv in cam_name_to_pdv.items():
+            dal.set_status_message(f"Updating 2D armature animation for {pdv.view_name}...")
+            if cam_name not in reproj_data_by_camera:
+                continue
 
-        # Write reprojected coordinates frame by frame
-        for _frame_offset, frame in enumerate(range(frame_start, frame_end + 1)):
-            for _marker_idx, marker_node in enumerate(marker_nodes):
+            reproj_data = reproj_data_by_camera[cam_name]
+            armature_obj = pdv.armature_ref._get_obj()
+            if not armature_obj or not armature_obj.animation_data:
+                print(f"Warning: No armature found for {pdv.view_name}")
+                continue
+
+            # Get or create action for armature
+            if not armature_obj.animation_data.action:
+                action_name = f"{pdv.view_name}_Action"
+                action = dal.get_or_create_action(action_name)
+                dal.assign_action_to_object(pdv.armature_ref, action, pdv.armature_ref.name)
+            else:
+                action = armature_obj.animation_data.action
+
+            # Build column list for reprojected bones
+            reproj_columns = []
+            for marker_node in marker_nodes:
                 marker_name = marker_node.name
+                reproj_bone_name = f"PROJ-{marker_name}"
+                # x, y, z, cam_used
+                reproj_columns.append((reproj_bone_name, "location", 0))
+                reproj_columns.append((reproj_bone_name, "location", 1))
+                reproj_columns.append((reproj_bone_name, "location", 2))
+                reproj_columns.append((reproj_bone_name, '["cam_used"]', -1))
 
-                # Get 2D data and triangulation result for this marker at this frame
-                points_2d_by_camera = {}
-                for pdv in person_pdvs:
-                    cam_view = pdv.get_camera_view()
-                    if not cam_view or not cam_view._obj:
-                        continue
-
-                    calib_cam_name = dal.get_custom_property(cam_view._obj, dal.CALIBRATION_CAMERA_NAME)
-                    if not calib_cam_name:
-                        continue
-
-                    # Get MarkerData for this view
-                    marker_data_id = dal.get_custom_property(pdv._obj, dal.MARKER_DATA_ID)
-                    if not marker_data_id:
-                        continue
-
-                    marker_data_obj = dal.get_object_by_name(marker_data_id)
-                    if not marker_data_obj:
-                        continue
-
-                    marker_data_2d = MarkerData.from_blender_object(marker_data_obj)
-                    if not marker_data_2d or not marker_data_2d.action:
-                        continue
-
-                    try:
-                        fcurve_x = dal.get_fcurve_from_action(
-                            marker_data_2d.action, marker_name, "location", 0
-                        )
-                        fcurve_y = dal.get_fcurve_from_action(
-                            marker_data_2d.action, marker_name, "location", 1
-                        )
-                        fcurve_quality = dal.get_fcurve_from_action(
-                            marker_data_2d.action, marker_name, '["quality"]', -1
-                        )
-                    except Exception:
-                        continue
-
-                    if fcurve_x and fcurve_y and fcurve_quality:
-                        x = fcurve_x.evaluate(frame)
-                        y = fcurve_y.evaluate(frame)
-                        quality = fcurve_quality.evaluate(frame)
-                        points_2d_by_camera[calib_cam_name] = np.array([x, y, quality])
-
-                # Triangulate to get reprojection data
-                if len(points_2d_by_camera) >= 2:
-                    result = triangulate_point(
-                        points_2d_by_camera=points_2d_by_camera,
-                        calibration_by_camera=calib_by_cam,
-                    )
-
-                    if result and result.reprojected_points:
-                        # Write reprojected coordinates to each camera view's reprojected bones
-                        for cam_name, reproj_result in result.reprojected_points.items():
-                            pdv = cam_name_to_pdv.get(cam_name)
-                            if not pdv or not pdv.armature_ref:
-                                continue
-
-                            reproj_bone_name = f"PROJ-{marker_name}"
-                            armature_obj = pdv.armature_ref._get_obj()
-                            if not armature_obj or not armature_obj.animation_data:
-                                continue
-
-                            # Get or create action for armature
-                            if not armature_obj.animation_data.action:
-                                action_name = f"{pdv.view_name}_Action"
-                                action = dal.create_action(action_name)
-                                armature_obj.animation_data.action = action
-                            else:
-                                action = armature_obj.animation_data.action
-
-                            # Get or create action slot for armature
-                            slot = dal.get_or_create_action_slot(action, pdv.armature_ref.name)
-                            channelbag = dal._get_or_create_channelbag(action, slot)
-
-                            # Write location x, y (z = 0)
-                            for axis_idx, axis_value in enumerate([reproj_result.x, reproj_result.y, 0.0]):
-                                data_path = f'pose.bones["{reproj_bone_name}"].location'
-                                fcurve = channelbag.fcurves.find(data_path, index=axis_idx)
-                                if not fcurve:
-                                    fcurve = channelbag.fcurves.new(data_path, index=axis_idx)
-
-                                # Remove existing keyframe if any
-                                for kf in list(fcurve.keyframe_points):
-                                    if kf.co[0] == frame:
-                                        fcurve.keyframe_points.remove(kf)
-                                        break
-
-                                # Insert new keyframe
-                                fcurve.keyframe_points.insert(frame, axis_value)
-                                fcurve.update()
-
-                            # Write cam_used flag
-                            data_path = f'pose.bones["{reproj_bone_name}"]["cam_used"]'
-                            fcurve = channelbag.fcurves.find(data_path, index=-1)
-                            if not fcurve:
-                                fcurve = channelbag.fcurves.new(data_path, index=-1)
-
-                            # Remove existing keyframe if any
-                            for kf in list(fcurve.keyframe_points):
-                                if kf.co[0] == frame:
-                                    fcurve.keyframe_points.remove(kf)
-                                    break
-
-                            # Insert new keyframe
-                            fcurve.keyframe_points.insert(frame, float(reproj_result.cam_used))
-                            fcurve.update()
-
-                            # Update bone color based on cam_used
-                            pose_bone = armature_obj.pose.bones.get(reproj_bone_name)
-                            if pose_bone and pose_bone.color.palette == 'CUSTOM':
-                                if reproj_result.cam_used:
-                                    # Green for used cameras
-                                    pose_bone.color.custom.normal = (0.0, 1.0, 0.0)
-                                    pose_bone.color.custom.select = (0.5, 1.0, 0.5)
-                                    pose_bone.color.custom.active = (0.2, 1.0, 0.2)
-                                else:
-                                    # Red for unused cameras
-                                    pose_bone.color.custom.normal = (1.0, 0.0, 0.0)
-                                    pose_bone.color.custom.select = (1.0, 0.5, 0.5)
-                                    pose_bone.color.custom.active = (1.0, 0.2, 0.2)
+            # Write all reprojected data at once using fast NumPy method
+            dal.replace_fcurve_segment_from_numpy(
+                action=action,
+                columns=reproj_columns,
+                start_frame=frame_start,
+                end_frame=frame_end,
+                data=reproj_data,
+            )
 
         print("Reprojected coordinates successfully written to 2D view bones.")
+
+        # Clear the status bar message
+        dal.set_status_message("")

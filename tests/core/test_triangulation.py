@@ -7,7 +7,7 @@
 import numpy as np
 import pytest
 
-from pose_editor.core.triangulation import triangulate_point, TriangulationOutput
+from pose_editor.core.triangulation import TriangulationOutput, triangulate_point
 
 
 @pytest.fixture
@@ -89,3 +89,95 @@ def test_triangulate_point_high_reprojection_error(mock_calibration_data):
 
     # Assert
     assert result is None
+
+
+def test_triangulate_point_with_disabled_camera(mock_calibration_data):
+    """Test that triangulation respects the is_enabled flag."""
+    # Arrange
+    points_2d = {
+        "cam1": np.array([960, 540, 0.9, True]),   # Enabled
+        "cam2": np.array([965, 545, 0.9, False]),  # Disabled
+        "cam3": np.array([955, 535, 0.9, True]),   # Enabled
+    }
+
+    # Act
+    result = triangulate_point(points_2d, mock_calibration_data, algorithm="ransac")
+
+    # Assert
+    assert result is not None
+    # cam2 should not be in contributing cameras
+    assert "cam2" not in result.contributing_cameras
+    # cam2 should still have reprojection data
+    assert "cam2" in result.reprojected_points
+
+
+def test_triangulate_point_ransac_algorithm(mock_calibration_data):
+    """Test that RANSAC algorithm can be explicitly selected."""
+    # Arrange
+    points_2d = {
+        "cam1": np.array([960, 540, 0.9, True]),
+        "cam2": np.array([965, 545, 0.9, True]),
+        "cam3": np.array([955, 535, 0.9, True]),
+    }
+
+    # Act
+    result = triangulate_point(points_2d, mock_calibration_data, algorithm="ransac")
+
+    # Assert
+    assert result is not None
+    assert isinstance(result, TriangulationOutput)
+
+
+def test_triangulate_point_exhaustive_algorithm(mock_calibration_data):
+    """Test that exhaustive algorithm can be explicitly selected."""
+    # Arrange
+    points_2d = {
+        "cam1": np.array([960, 540, 0.9, True]),
+        "cam2": np.array([965, 545, 0.9, True]),
+        "cam3": np.array([955, 535, 0.9, True]),
+    }
+
+    # Act
+    result = triangulate_point(points_2d, mock_calibration_data, algorithm="exhaustive")
+
+    # Assert
+    assert result is not None
+    assert isinstance(result, TriangulationOutput)
+
+
+def test_triangulate_point_invalid_algorithm(mock_calibration_data):
+    """Test that an invalid algorithm raises ValueError."""
+    # Arrange
+    points_2d = {
+        "cam1": np.array([960, 540, 0.9]),
+        "cam2": np.array([965, 545, 0.9]),
+    }
+
+    # Act & Assert
+    with pytest.raises(ValueError, match="Unknown algorithm"):
+        triangulate_point(points_2d, mock_calibration_data, algorithm="invalid")
+
+
+def test_reprojected_points_include_all_cameras(mock_calibration_data):
+    """Test that reprojected_points includes all cameras, not just filtered ones."""
+    # Arrange
+    points_2d = {
+        "cam1": np.array([960, 540, 0.9, True]),   # High quality, enabled
+        "cam2": np.array([965, 545, 0.2, True]),   # Low quality (filtered out)
+        "cam3": np.array([955, 535, 0.9, True]),   # High quality, enabled
+    }
+
+    # Act
+    result = triangulate_point(
+        points_2d, mock_calibration_data,
+        min_quality=0.5, algorithm="ransac"
+    )
+
+    # Assert
+    assert result is not None
+    # All cameras should have reprojection data
+    assert "cam1" in result.reprojected_points
+    assert "cam2" in result.reprojected_points
+    assert "cam3" in result.reprojected_points
+    # cam2 was filtered out, so should not be in contributing_cameras
+    assert "cam2" not in result.contributing_cameras
