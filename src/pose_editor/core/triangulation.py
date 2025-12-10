@@ -88,10 +88,15 @@ def triangulate_point_exhaustive(
     min_cameras: int = 2,
     reproj_error_threshold: float = 10.0,
     min_quality: float = 0.5,
+    preferred_cams: list[str] | None = None,
 ) -> TriangulationOutput | None:
     """
     Triangulates a single 3D point from multiple 2D observations using exhaustive search.
     This is the original algorithm kept for comparison.
+
+    Args:
+        preferred_cams: List of camera names to prefer (e.g., cameras used in previous frame).
+                       Combinations with more preferred cameras are tried first.
     """
 
     camera_names = list(calibration_by_camera.keys())
@@ -149,7 +154,17 @@ def triangulate_point_exhaustive(
         q_configs = []
         indices_configs = []
 
-        for cam_indices in it.combinations(range(n_cams), n_cams - nb_cams_off):
+        # Generate all combinations and sort by preference
+        all_combinations = list(it.combinations(range(n_cams), n_cams - nb_cams_off))
+
+        # Sort combinations by number of preferred cameras (descending)
+        if preferred_cams:
+            preferred_set = set(preferred_cams)
+            def count_preferred(cam_indices):
+                return sum(1 for i in cam_indices if valid_camera_names[i] in preferred_set)
+            all_combinations.sort(key=count_preferred, reverse=True)
+
+        for cam_indices in all_combinations:
             if not cam_indices:
                 continue
 
@@ -224,6 +239,7 @@ def triangulate_point_ransac(
     reproj_error_threshold: float = 10.0,
     min_quality: float = 0.5,
     max_ransac_iterations: int = 100,
+    preferred_cams: list[str] | None = None,
 ) -> TriangulationOutput | None:
     """
     Triangulates a single 3D point from multiple 2D observations using RANSAC algorithm.
@@ -235,6 +251,8 @@ def triangulate_point_ransac(
         reproj_error_threshold: Maximum reprojection error for inliers (pixels)
         min_quality: Minimum quality threshold for filtering
         max_ransac_iterations: Maximum RANSAC iterations
+        preferred_cams: List of camera names to prefer (e.g., cameras used in previous frame).
+                       Note: RANSAC doesn't use this parameter as it relies on random sampling.
 
     Returns:
         TriangulationOutput with 3D point and metadata, or None if triangulation fails
@@ -384,6 +402,7 @@ def triangulate_point(
     min_quality: float = 0.5,
     algorithm: str = "ransac",
     max_ransac_iterations: int = 100,
+    preferred_cams: list[str] | None = None,
 ) -> TriangulationOutput | None:
     """
     Triangulates a single 3D point from multiple 2D observations.
@@ -396,6 +415,7 @@ def triangulate_point(
         min_quality: Minimum quality threshold for filtering
         algorithm: "ransac" or "exhaustive" (default: "ransac")
         max_ransac_iterations: Maximum RANSAC iterations (only for RANSAC)
+        preferred_cams: List of camera names to prefer (e.g., cameras used in previous frame)
 
     Returns:
         TriangulationOutput with 3D point and metadata, or None if triangulation fails
@@ -408,6 +428,7 @@ def triangulate_point(
             reproj_error_threshold,
             min_quality,
             max_ransac_iterations,
+            preferred_cams,
         )
     elif algorithm == "exhaustive":
         return triangulate_point_exhaustive(
@@ -416,6 +437,7 @@ def triangulate_point(
             min_cameras,
             reproj_error_threshold,
             min_quality,
+            preferred_cams,
         )
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. Use 'ransac' or 'exhaustive'.")

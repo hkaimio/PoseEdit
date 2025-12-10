@@ -260,9 +260,9 @@ def apply_solution_to_armature(
             data_path = f'pose.bones["{bone_name}"].rotation_euler'
             # Ensure bone uses XYZ Euler rotation
             pose_bone = armature_obj.pose.bones[bone_name]
-            if pose_bone.rotation_mode != 'XYZ':
-                print(f"Setting bone '{bone_name}' rotation mode to XYZ")
-                pose_bone.rotation_mode = 'XYZ'
+            if pose_bone.rotation_mode != 'ZYX':
+                print(f"Setting bone '{bone_name}' rotation mode to ZYX")
+                pose_bone.rotation_mode = 'ZYX'
 
         # Store coordinate info
         if bone_name not in bone_channels:

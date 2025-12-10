@@ -399,7 +399,13 @@ class RealPersonInstanceFacade:
 
         calib_by_cam = calibration._data
 
+        # Track which cameras were used for each marker in the previous frame
+        prev_frame_cameras_by_marker = {}  # marker_idx -> list of camera names
+
         for frame_offset, frame in enumerate(range(frame_start, frame_end + 1)):
+            # Set scene frame to ensure drivers are evaluated at correct time
+            bpy.context.scene.frame_set(frame)  # type: ignore
+
             # Update status bar with progress every 10 frames to balance responsiveness and performance
             if frame_offset % 10 == 9 or frame == frame_start or frame == frame_end:
                 dal.set_status_message(
@@ -437,11 +443,24 @@ class RealPersonInstanceFacade:
                             bone_data_path_x = f'pose.bones["{bone_name}"].location'
                             bone_data_path_quality = f'pose.bones["{bone_name}"]["quality"]'
 
-                            fcurve_x = dal.get_fcurve_from_action(armature_action, armature_obj.name, bone_data_path_x, 0)
-                            fcurve_y = dal.get_fcurve_from_action(armature_action, armature_obj.name, bone_data_path_x, 1)
-                            fcurve_quality = dal.get_fcurve_from_action(armature_action, armature_obj.name, bone_data_path_quality, -1)
+                            fcurve_x = dal.get_fcurve_from_action(
+                                armature_action, armature_obj.name, bone_data_path_x, 0
+                            )
+                            fcurve_y = dal.get_fcurve_from_action(
+                                armature_action, armature_obj.name, bone_data_path_x, 1
+                            )
+                            fcurve_quality = dal.get_fcurve_from_action(
+                                armature_action, armature_obj.name, bone_data_path_quality, -1
+                            )
+
+                            # is_enabled is driven, not animated - read from pose bone property
+                            pose_bone = armature_obj.pose.bones.get(bone_name)
+                            is_enabled_value = pose_bone.get("is_enabled", 1.0) if pose_bone else 1.0
                         except Exception as e:
-                            print(f"Warning: Could not get f-curves for bone {bone_name} in armature {armature_obj.name}: {e}")
+                            print(
+                                f"Warning: Could not get data for bone {bone_name} "
+                                f"in armature {armature_obj.name}: {e}"
+                            )
                             continue
                     else:
                         # Legacy object-based view: read from MarkerData action
@@ -450,9 +469,17 @@ class RealPersonInstanceFacade:
                             continue
 
                         try:
-                            fcurve_x = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 0)
-                            fcurve_y = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, "location", 1)
-                            fcurve_quality = dal.get_fcurve_from_action(marker_data_2d.action, marker_name, '["quality"]', -1)
+                            fcurve_x = dal.get_fcurve_from_action(
+                                marker_data_2d.action, marker_name, "location", 0
+                            )
+                            fcurve_y = dal.get_fcurve_from_action(
+                                marker_data_2d.action, marker_name, "location", 1
+                            )
+                            fcurve_quality = dal.get_fcurve_from_action(
+                                marker_data_2d.action, marker_name, '["quality"]', -1
+                            )
+                            # Legacy views don't have is_enabled, so default to enabled
+                            is_enabled_value = 1.0
                         except Exception:
                             print(f"Warning: Could not get f-curves for marker {marker_name} in view {cam_view.name}")
                             continue
@@ -461,15 +488,19 @@ class RealPersonInstanceFacade:
                         x = fcurve_x.evaluate(frame)
                         y = fcurve_y.evaluate(frame)
                         quality = fcurve_quality.evaluate(frame)
-                        points_2d_by_camera[calib_cam_name] = np.array([x, y, quality])
+                        points_2d_by_camera[calib_cam_name] = np.array([x, y, quality, is_enabled_value])
 
                 # 6. Triangulate the point
                 if len(points_2d_by_camera) >= 2:
+                    # Get preferred cameras from previous frame (if available)
+                    preferred_cams = prev_frame_cameras_by_marker.get(marker_idx)
+
                     result: TriangulationOutput | None = triangulate_point(
                         points_2d_by_camera=points_2d_by_camera,
                         calibration_by_camera=calib_by_cam,
                         algorithm=algorithm,
                         reproj_error_threshold=reproj_error_threshold,
+                        preferred_cams=preferred_cams,
                     )
                     # 7. Collect results for 3D data
                     if result:
@@ -477,6 +508,9 @@ class RealPersonInstanceFacade:
                         output_locations[frame_offset, loc_col_start : loc_col_start + 3] = result.point_3d
                         output_reprojection_errors[frame_offset, marker_idx] = result.reprojection_error
                         output_cam_counts[frame_offset, marker_idx] = len(result.contributing_cameras)
+
+                        # Store cameras used for this marker to use as preferred in next frame
+                        prev_frame_cameras_by_marker[marker_idx] = result.contributing_cameras
 
                         # Set boolean flags for each camera
                         for cam_idx, cam_name in enumerate(all_camera_names):

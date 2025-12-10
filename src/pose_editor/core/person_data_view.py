@@ -30,6 +30,82 @@ def _body_part_to_property_name(body_part_name: str) -> str:
     """
     return body_part_name.lower().replace(" ", "_")
 
+
+def _update_marker_bone_colors(scene, depsgraph):
+    """Frame change callback to update marker bone colors based on properties.
+
+    Color logic:
+    - Grey: quality < 0
+    - Green: is_enabled and enable are both True
+    - Red: enable is False
+    - Orange: enable is True but is_enabled is False
+    """
+    try:
+        # Get all PersonDataView objects from Blender
+        all_pdv_objs = dal.find_all_objects_by_property(
+            dal.POSE_EDITOR_OBJECT_TYPE, "PersonDataView"
+        )
+
+        for pdv_obj in all_pdv_objs:
+            if not pdv_obj:
+                continue
+
+            # Find armature child
+            armature_obj = None
+            children = dal.get_children_of_object(pdv_obj, recursive=False)
+            for child_ref in children:
+                child = child_ref._get_obj()
+                if child and child.type == "ARMATURE":
+                    armature_obj = child
+                    break
+
+            if not armature_obj:
+                continue
+
+            # Update colors for marker bones
+            for pose_bone in armature_obj.pose.bones:
+                bone = pose_bone.bone
+
+                # Check if this is a marker bone (has MARKER_ROLE property)
+                marker_role = bone.get(dal.MARKER_ROLE._prop_name)
+                if not marker_role:
+                    continue
+
+                # Skip reprojected bones and connecting bones
+                if pose_bone.name.startswith("PROJ-") or "-" in pose_bone.name:
+                    continue
+
+                # Read properties
+                quality = pose_bone.get("quality", 1.0)
+                enable = pose_bone.get("enable", True)
+                is_enabled = pose_bone.get("is_enabled", True)
+
+                # Set color palette to CUSTOM
+                if pose_bone.color.palette != 'CUSTOM':
+                    pose_bone.color.palette = 'CUSTOM'
+
+                # Determine color based on logic
+                if quality < 0:
+                    # Grey
+                    color = (0.5, 0.5, 0.5)
+                elif not enable:
+                    # Red
+                    color = (1.0, 0.0, 0.0)
+                elif enable and not is_enabled:
+                    # Orange
+                    color = (1.0, 0.5, 0.0)
+                else:
+                    # Green (enable and is_enabled both True)
+                    color = (0.0, 1.0, 0.0)
+
+                pose_bone.color.custom.normal = color
+                pose_bone.color.custom.select = tuple(min(1.0, c + 0.3) for c in color)
+                pose_bone.color.custom.active = tuple(min(1.0, c + 0.2) for c in color)
+    except Exception as e:
+        # Silently ignore errors to avoid breaking frame changes
+        print(f"Error updating marker bone colors: {e}")
+
+
 class PersonDataView:
     """A facade for a person's 2D data view (View layer).
 
@@ -388,6 +464,13 @@ class PersonDataView:
                 pose_bone["quality"] = 0.0
                 pose_bone["enable"] = True
                 pose_bone["is_enabled"] = True
+
+                # Set up bone to use custom colors
+                pose_bone.color.palette = 'CUSTOM'
+                # Initial color (green for enabled)
+                pose_bone.color.custom.normal = (0.0, 1.0, 0.0)
+                pose_bone.color.custom.select = (0.5, 1.0, 0.5)
+                pose_bone.color.custom.active = (0.2, 1.0, 0.2)
 
             # Move to body part collection
             dal.move_bone_to_collection(armature_object, marker_name, body_part)
@@ -837,3 +920,8 @@ class PersonDataView:
                 )
 
         return reproj_bone_map
+
+
+# Register the global frame change handler for marker bone coloring when module loads
+frame_handler.add_callback(_update_marker_bone_colors)
+frame_handler.register_handler()
