@@ -201,27 +201,18 @@ class PersonDataView:
         """
         from .camera_view import CameraView
 
-        # Create the collection hierarchy
+        # Create the collection hierarchy - just use PersonViews
         person_views_col = dal.get_or_create_collection("PersonViews")
 
-        # Handle optional camera_view
+        # Set parent object for hierarchy
         if camera_view and camera_view._obj:
-            camera_col = dal.get_or_create_collection(f"CameraView_{camera_view._obj.name}", parent_collection=person_views_col)
             parent_obj = camera_view._obj
         else:
-            camera_col = person_views_col
             parent_obj = None
 
-        pv_col = dal.get_or_create_collection(view_name, parent_collection=camera_col)
-
-        # Create body part sub-collections
-        body_part_collections = {}
-        for part_name in skeleton.body_parts():
-            body_part_collections[part_name] = dal.get_or_create_collection(f"{part_name}_{view_name}", parent_collection=pv_col)
-
-        # The main PV object goes into the camera-level collection
+        # The main PV object goes into PersonViews collection
         obj = dal.get_or_create_object(
-            name=view_name, obj_type="EMPTY", collection_name=camera_col.name, parent=parent_obj
+            name=view_name, obj_type="EMPTY", collection_name=person_views_col.name, parent=parent_obj
         )
         # Set custom properties
         dal.set_custom_property(obj, dal.SERIES_NAME, view_name)
@@ -237,8 +228,8 @@ class PersonDataView:
         instance.skeleton = skeleton
         instance._marker_bones_by_role = {}
 
-        # Create armature with both marker and connecting bones
-        instance._create_armature_with_bones(body_part_collections)
+        # Create armature with bones
+        instance._create_armature_with_bones()
 
         # Now initialize from Blender to find and populate the armature reference
         instance._init_from_blender_ref(obj)
@@ -374,7 +365,7 @@ class PersonDataView:
                 ret.append(pdv)
         return ret
 
-    def _create_armature_with_bones(self, body_part_collections: dict[str, "dal.CollectionRef"]):
+    def _create_armature_with_bones(self):
         """Creates an armature with marker bones and connecting bones."""
         import os
         from anytree import PreOrderIter
