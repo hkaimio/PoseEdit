@@ -801,22 +801,27 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
 def rotation_matrix_to_euler_xyz(R):
     """
     Convert a 3x3 rotation matrix to XYZ Euler angles (in degrees) for BVH format.
-    BVH uses XYZ rotation order and degrees.
+    Extracts angles for rotation order: R = Rx(x) * Ry(y) * Rz(z)
+    This matches BVH's CHANNELS Xrotation Yrotation Zrotation convention.
     """
-    # Extract Euler angles in XYZ order
-    if abs(R[0, 2]) < 1.0:
-        y = math.asin(R[0, 2])
+    # For R = Rx * Ry * Rz, the key matrix elements are:
+    # R[0,2] = sin(y)
+    # R[1,2] = -sin(x)*cos(y)
+    # R[2,2] = cos(x)*cos(y)
+    # R[0,1] = -cos(y)*sin(z)
+    # R[0,0] = cos(y)*cos(z)
+
+    sy = R[0, 2]
+
+    if abs(sy) < 1.0:
+        y = math.asin(sy)
         x = math.atan2(-R[1, 2], R[2, 2])
-        z = math.atan2(-R[0, 1], R[0, 0])
+        z = math.atan2(R[0, 1], R[0, 0])  # Note: positive sign, not negative
     else:
         # Gimbal lock
+        y = math.copysign(math.pi / 2, sy)
+        x = math.atan2(R[2, 1], R[1, 1])
         z = 0
-        if R[0, 2] < 0:
-            y = -math.pi / 2
-            x = math.atan2(R[1, 0], R[1, 1])
-        else:
-            y = math.pi / 2
-            x = math.atan2(-R[1, 0], R[1, 1])
 
     # Convert to degrees
     return (math.degrees(x), math.degrees(y), math.degrees(z))
@@ -875,13 +880,14 @@ def write_bvh_hierarchy(f, node, indent=0, is_root=True, parent_global_origin=No
     f.write(f"{indent_str}}}\n")
 
 
-def collect_bvh_channel_data(node, frame_data, is_root=True, log=False):
+def collect_bvh_channel_data(node, frame_data, rest_rotations, is_root=True, log=False):
     """
     Collect channel data for a node and its children in BVH order.
 
     Args:
         node: Skeleton node
         frame_data: Dictionary mapping bone names to their transform data
+        rest_rotations: Dictionary mapping bone names to rest pose rotation matrices
         is_root: Whether this is the root node
 
     Returns:
@@ -902,17 +908,25 @@ def collect_bvh_channel_data(node, frame_data, is_root=True, log=False):
             pos = node_data['position']
             values.extend([pos[0], pos[1], pos[2]])
 
-        # Convert quaternion to rotation matrix (this is already local rotation)
+        # Convert quaternion to rotation matrix (this is the full local rotation)
         quat = node_data['rotation']  # (w, x, y, z)
         w, x, y, z = quat[0], quat[1], quat[2], quat[3]
-        R = np.array([
+        R_anim = np.array([
             [1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)],
             [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
             [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)]
         ])
 
-        # Convert local rotation to Euler XYZ
-        euler_xyz = rotation_matrix_to_euler_xyz(R)
+        # Compute rotation relative to rest pose: R_relative = R_rest^T @ R_anim
+        R_rest = rest_rotations.get(node['name'])
+        if R_rest is not None:
+            R_relative = R_rest.T @ R_anim
+        else:
+            R_relative = R_anim
+
+        # Convert relative rotation to Euler XYZ (for BVH Xrotation Yrotation Zrotation)
+        # BVH applies rotations in order: Rx * Ry * Rz
+        euler_xyz = rotation_matrix_to_euler_xyz(R_relative)
         values.extend(euler_xyz)
     else:
         # No data for this node - use zeros
@@ -923,10 +937,32 @@ def collect_bvh_channel_data(node, frame_data, is_root=True, log=False):
     if log:
         print(f"Node {node['name']} values: {values}")
 
+    if  node['name'] in ['LeftUpLeg', 'RightUpLeg', 'LeftArm', 'Spine']:
+        print(f"\n=== {node['name']} ===")
+        print(f"Rest quaternion: {node.get('rotation')}")
+        print(f"Rest rotation matrix:\n{R_rest}")
+        print(f"Animation quaternion: {quat}")
+        print(f"Animation rotation matrix:\n{R_anim}")
+        print(f"Relative rotation matrix:\n{R_relative}")
+        euler = rotation_matrix_to_euler_xyz(R_relative)
+        print(f"Output Euler XYZ (degrees): {euler}")
+        # Also try other orderings
+        print(f"If ZXY: {rotation_matrix_to_euler_zxy(R_relative)}")
+
+        # Test simple rotations
+        Rx_90 = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])  # -90° around X
+        Rz_60 = np.array([[0.5, -0.866, 0], [0.866, 0.5, 0], [0, 0, 1]])  # 60° around Z
+
+        print(f"\nTest Rx(-90°): {rotation_matrix_to_euler_zxy(Rx_90)}")
+        print(f"Test Rz(60°): {rotation_matrix_to_euler_zxy(Rz_60)}")
+        print(f"Test Rx*Rz: {rotation_matrix_to_euler_zxy(Rx_90 @ Rz_60)}")
+
+        print(f"\nActual R_relative for {node['name']}:")
+
     # Recursively collect from children
     if node.get('children'):
         for child in node['children']:
-            values.extend(collect_bvh_channel_data(child, frame_data, is_root=False, log=log))
+            values.extend(collect_bvh_channel_data(child, frame_data, rest_rotations, is_root=False, log=log))
     return values
 
 
@@ -1084,6 +1120,17 @@ def export_opensim_animation_to_bvh(osim_file_path: str, mot_file_path: str,
             if len(frames_data) % 100 == 0:
                 print(f"Processed {len(frames_data)} frames...")
 
+        # Extract rest rotations from skeleton
+        def extract_rest_rotations(node, rotations_dict):
+            """Recursively extract rest pose rotation matrices."""
+            if 'rotation_matrix' in node and node['rotation_matrix'] is not None:
+                rotations_dict[node['name']] = node['rotation_matrix']
+            for child in node.get('children', []):
+                extract_rest_rotations(child, rotations_dict)
+
+        rest_rotations = {}
+        extract_rest_rotations(root_node, rest_rotations)
+
         # Write BVH file
         print(f"Writing BVH file: {output_file}")
         with open(output_file, 'w') as f:
@@ -1101,7 +1148,7 @@ def export_opensim_animation_to_bvh(osim_file_path: str, mot_file_path: str,
             # Write frame data
             first_frame = True
             for frame_data in frames_data:
-                values = collect_bvh_channel_data(root_node, frame_data, is_root=True, log=first_frame)
+                values = collect_bvh_channel_data(root_node, frame_data, rest_rotations, is_root=True, log=first_frame)
                 f.write(" ".join(f"{v:.6f}" for v in values) + "\n")
                 first_frame = False
 
