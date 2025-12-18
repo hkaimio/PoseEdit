@@ -904,9 +904,12 @@ def collect_bvh_channel_data(node, frame_data, rest_rotations, is_root=True, log
 
     if node_data:
         if is_root:
-            # Root: position + rotation
+            # Root: position (relative to rest pose offset)
+            # OFFSET in HIERARCHY already defines rest position, so subtract it
             pos = node_data['position']
-            values.extend([pos[0], pos[1], pos[2]])
+            rest_pos = node.get('global_origin', np.array([0, 0, 0]))
+            relative_pos = np.array(pos) - rest_pos
+            values.extend([relative_pos[0], relative_pos[1], relative_pos[2]])
 
         # Convert quaternion to rotation matrix (this is the full local rotation)
         quat = node_data['rotation']  # (w, x, y, z)
