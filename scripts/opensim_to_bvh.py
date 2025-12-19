@@ -318,16 +318,16 @@ def matrix_to_euler_zxy(R):
     return tuple(euler_rad)
 
 
-def set_rest_pose_frame(animation, model, state, frame_idx=0):
+def set_frame_from_state(animation, model, state, frame_idx):
     """
-    Set animation frame to rest pose (all OpenSim coordinates at default values).
-    Compute local rotations from OpenSim's rest pose global transforms.
+    Set animation frame data from OpenSim state.
+    Used for both rest pose (frame 0) and animation frames.
 
     Args:
         animation: bvhsdk Animation object
         model: OpenSim Model object
-        state: OpenSim State at default pose
-        frame_idx: Frame index to set (default 0)
+        state: OpenSim State object
+        frame_idx: Frame index to set
     """
     joints_list = animation.getlistofjoints()
 
@@ -352,7 +352,7 @@ def set_rest_pose_frame(animation, model, state, frame_idx=0):
         # Convert to Euler ZXY (radians)
         euler_zxy = matrix_to_euler_zxy(local_rotation_matrix)
 
-        # Initialize arrays if needed
+        # Initialize arrays if needed (for first frame)
         if len(joint.rotation) == 0 or joint.rotation.shape[0] == 0:
             joint.rotation = np.zeros((animation.frames, 3))
 
@@ -447,48 +447,6 @@ def populate_animation_from_motion(animation, model, motion_table, skeleton_tree
             print(f"  Processed frame {frame_idx - start_frame + 1}/{end_frame - start_frame + 1}")
 
 
-def set_frame_from_state(animation, model, state, frame_idx):
-    """
-    Set animation frame data from OpenSim state.
-
-    Args:
-        animation: bvhsdk Animation object
-        model: OpenSim Model object
-        state: OpenSim State object
-        frame_idx: Frame index to set
-    """
-    joints_list = animation.getlistofjoints()
-
-    for joint in joints_list:
-        body_name = joint.name
-
-        # Get global transform from OpenSim
-        global_transform = get_body_global_transform_matrix(model, state, body_name)
-        global_rotation = global_transform[0:3, 0:3]
-        global_position = global_transform[0:3, 3]
-
-        # Compute local rotation
-        if joint.parent:
-            parent_body_name = joint.parent.name
-            parent_transform = get_body_global_transform_matrix(model, state, parent_body_name)
-            parent_global_rotation = parent_transform[0:3, 0:3]
-            local_rotation_matrix = parent_global_rotation.T @ global_rotation
-        else:
-            # Root uses global rotation directly
-            local_rotation_matrix = global_rotation
-
-        # Convert to Euler ZXY
-        euler_zxy = matrix_to_euler_zxy(local_rotation_matrix)
-
-        # Set rotation
-        joint.rotation[frame_idx] = euler_zxy
-
-        # Set translation (only for root)
-        if joint.parent is None:
-            # Translation relative to rest pose offset
-            joint.translation[frame_idx] = global_position - joint.offset
-
-
 def export_to_bvh(model_path, output_path, motion_path=None, framerate=30.0,
                   start_frame=0, end_frame=None, root_body='pelvis'):
     """
@@ -537,7 +495,7 @@ def export_to_bvh(model_path, output_path, motion_path=None, framerate=30.0,
     print("Setting rest pose (frame 0)...")
     state = model.initSystem()
     model.realizePosition(state)
-    set_rest_pose_frame(animation, model, state, frame_idx=0)
+    set_frame_from_state(animation, model, state, frame_idx=0)
 
     if motion_table:
         print(f"Populating animation frames...")
