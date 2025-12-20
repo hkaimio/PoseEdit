@@ -2,7 +2,7 @@
 """
 OpenSim Animation Exporter
 
-Standalone script to export OpenSim model animations to YAML or BVH format.
+Standalone script to export OpenSim model animations to YAML format.
 Uses similar logic as motion.py (lines 132 onward) to extract body transforms
 and exports them in a format compatible with armature_export.py from Blender.
 
@@ -12,17 +12,14 @@ Requirements:
 - PyYAML
 
 Usage:
-    # Export animation with skeleton (YAML format)
+    # Export animation with skeleton
     python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml
-
-    # Export animation as BVH
-    python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.bvh
 
     # With optional parameters:
     python opensim_animation_exporter.py --model model.osim --motion motion.mot -o output.yaml \\
         --start-frame 0 --end-frame 100 --framerate 30.0
 
-    # Export skeleton rest pose only (YAML format)
+    # Export skeleton rest pose only
     python opensim_animation_exporter.py --skeleton --model model.osim -o skeleton.yaml
 """
 
@@ -162,11 +159,9 @@ def rotation_matrix_to_quaternion(R):
 # Example bone mapping with None for bones to skip
 bone_to_hik_map = {
     'spine' : 'Hips',
-    # 'spine.001' : 'Spine',
-    # 'spine.002' : 'Spine3',
-    # 'spine.003' : 'Spine9',
-    'spine.002' : 'Spine',
-    'spine.003' : 'Spine3',
+    'spine.001' : 'Spine',
+    'spine.002' : 'Spine3',
+    'spine.003' : 'Spine9',
     'spine.004' : 'Neck',
     'spine.005' : 'Neck1',
     'spine.006' : 'Head',
@@ -678,27 +673,12 @@ def build_skeleton_node(body_name, model, state, parent_to_children, coordinates
         quat = rotation_matrix_to_quaternion(R)
         rotation = [round(q, 6) for q in quat]  # Quaternion (w, x, y, z)
 
-    # Store global origin for BVH
-    if coordinates == 'local' and global_transforms:
-        global_origin = global_transforms[body_name][0:3, 3] * 100  # cm
-        parent_global_origin = None
-        if body_name in child_to_parent:
-            parent_name = child_to_parent[body_name]
-            parent_global_origin = global_transforms[parent_name][0:3, 3] * 100  # cm
-    else:
-        # For global coordinates, use position as global origin
-        global_origin = np.array(position)
-        parent_global_origin = None
-
     # Build the skeleton node
     node = {
         'name': hik_name,
         'hikname': hik_name,
         'position': position,
         'rotation': rotation,
-        'rotation_matrix': R,
-        'global_origin': global_origin,  # For BVH OFFSET calculation
-        'parent_global_origin': parent_global_origin,
         'children': []
     }
 
@@ -798,374 +778,6 @@ def export_opensim_skeleton_to_yaml(osim_file_path: str, output_file: str,
         return False
 
 
-def rotation_matrix_to_euler_xyz(R):
-    """
-    Convert a 3x3 rotation matrix to XYZ Euler angles (in degrees) for BVH format.
-    Extracts angles for rotation order: R = Rx(x) * Ry(y) * Rz(z)
-    This matches BVH's CHANNELS Xrotation Yrotation Zrotation convention.
-    """
-    # For R = Rx * Ry * Rz, the key matrix elements are:
-    # R[0,2] = sin(y)
-    # R[1,2] = -sin(x)*cos(y)
-    # R[2,2] = cos(x)*cos(y)
-    # R[0,1] = -cos(y)*sin(z)
-    # R[0,0] = cos(y)*cos(z)
-
-    sy = R[0, 2]
-
-    if abs(sy) < 1.0:
-        y = math.asin(sy)
-        x = math.atan2(-R[1, 2], R[2, 2])
-        z = math.atan2(R[0, 1], R[0, 0])  # Note: positive sign, not negative
-    else:
-        # Gimbal lock
-        y = math.copysign(math.pi / 2, sy)
-        x = math.atan2(R[2, 1], R[1, 1])
-        z = 0
-
-    # Convert to degrees
-    return (math.degrees(x), math.degrees(y), math.degrees(z))
-
-
-def write_bvh_hierarchy(f, node, indent=0, is_root=True, parent_global_origin=None):
-    """
-    Recursively write BVH hierarchy section for a skeleton node.
-
-    Args:
-        f: File handle to write to
-        node: Skeleton node dictionary
-        indent: Current indentation level
-        is_root: Whether this is the root node
-        parent_global_origin: Parent's global origin for offset calculation
-    """
-    indent_str = "  " * indent
-    node_type = "ROOT" if is_root else "JOINT"
-
-    # Write node declaration
-    f.write(f"{indent_str}{node_type} {node['name']}\n")
-    f.write(f"{indent_str}{{\n")
-
-    # Calculate offset as difference between global origins
-    if is_root:
-        # Root offset is its global position
-        offset = node['global_origin']
-    elif parent_global_origin is not None:
-        # Child offset = child_global - parent_global
-        offset = node['global_origin'] - parent_global_origin
-    else:
-        # Fallback to stored position
-        offset = np.array(node['position'])
-
-    f.write(f"{indent_str}  OFFSET {offset[0]:.6f} {offset[1]:.6f} {offset[2]:.6f}\n")
-
-    # Write channels
-    if is_root:
-        # Root has 6 channels: 3 position + 3 rotation
-        f.write(f"{indent_str}  CHANNELS 6 Xposition Yposition Zposition Xrotation Yrotation Zrotation\n")
-    else:
-        # Other joints have 3 rotation channels
-        f.write(f"{indent_str}  CHANNELS 3 Xrotation Yrotation Zrotation\n")
-
-    # Process children
-    if node.get('children'):
-        for child in node['children']:
-            write_bvh_hierarchy(f, child, indent + 1, is_root=False, parent_global_origin=node['global_origin'])
-    else:
-        # End site (leaf node) - use a small offset
-        f.write(f"{indent_str}  End Site\n")
-        f.write(f"{indent_str}  {{\n")
-        f.write(f"{indent_str}    OFFSET 0.0 5.0 0.0\n")  # Small offset for end effector
-        f.write(f"{indent_str}  }}\n")
-
-    f.write(f"{indent_str}}}\n")
-
-
-def collect_bvh_channel_data(node, frame_data, rest_rotations, is_root=True, log=False):
-    """
-    Collect channel data for a node and its children in BVH order.
-
-    Args:
-        node: Skeleton node
-        frame_data: Dictionary mapping bone names to their transform data
-        rest_rotations: Dictionary mapping bone names to rest pose rotation matrices
-        is_root: Whether this is the root node
-
-    Returns:
-        List of channel values in BVH order
-    """
-    values = []
-
-    # Find this node's data in the frame
-    node_data = None
-    for change in frame_data:
-        if change['name'] == node['name']:
-            node_data = change
-            break
-
-    if node_data:
-        if is_root:
-            # Root: position (relative to rest pose offset)
-            # OFFSET in HIERARCHY already defines rest position, so subtract it
-            pos = node_data['position']
-            rest_pos = node.get('global_origin', np.array([0, 0, 0]))
-            relative_pos = np.array(pos) - rest_pos
-            values.extend([relative_pos[0], relative_pos[1], relative_pos[2]])
-
-        # Convert quaternion to rotation matrix (this is the full local rotation)
-        quat = node_data['rotation']  # (w, x, y, z)
-        w, x, y, z = quat[0], quat[1], quat[2], quat[3]
-        R_anim = np.array([
-            [1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)],
-            [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
-            [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)]
-        ])
-
-        # Compute rotation relative to rest pose: R_relative = R_rest^T @ R_anim
-        R_rest = rest_rotations.get(node['name'])
-        if R_rest is not None:
-            R_relative = R_rest.T @ R_anim
-        else:
-            R_relative = R_anim
-
-        # Convert relative rotation to Euler XYZ (for BVH Xrotation Yrotation Zrotation)
-        # BVH applies rotations in order: Rx * Ry * Rz
-        euler_xyz = rotation_matrix_to_euler_xyz(R_relative)
-        values.extend(euler_xyz)
-    else:
-        # No data for this node - use zeros
-        if is_root:
-            values.extend([0, 0, 0])  # Position
-        values.extend([0, 0, 0])  # Rotation
-
-    if log:
-        print(f"Node {node['name']} values: {values}")
-
-    if  node['name'] in ['LeftUpLeg', 'RightUpLeg', 'LeftArm', 'Spine']:
-        print(f"\n=== {node['name']} ===")
-        print(f"Rest quaternion: {node.get('rotation')}")
-        print(f"Rest rotation matrix:\n{R_rest}")
-        print(f"Animation quaternion: {quat}")
-        print(f"Animation rotation matrix:\n{R_anim}")
-        print(f"Relative rotation matrix:\n{R_relative}")
-        euler = rotation_matrix_to_euler_xyz(R_relative)
-        print(f"Output Euler XYZ (degrees): {euler}")
-        # Also try other orderings
-        print(f"If ZXY: {rotation_matrix_to_euler_zxy(R_relative)}")
-
-        # Test simple rotations
-        Rx_90 = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])  # -90° around X
-        Rz_60 = np.array([[0.5, -0.866, 0], [0.866, 0.5, 0], [0, 0, 1]])  # 60° around Z
-
-        print(f"\nTest Rx(-90°): {rotation_matrix_to_euler_zxy(Rx_90)}")
-        print(f"Test Rz(60°): {rotation_matrix_to_euler_zxy(Rz_60)}")
-        print(f"Test Rx*Rz: {rotation_matrix_to_euler_zxy(Rx_90 @ Rz_60)}")
-
-        print(f"\nActual R_relative for {node['name']}:")
-
-    # Recursively collect from children
-    if node.get('children'):
-        for child in node['children']:
-            values.extend(collect_bvh_channel_data(child, frame_data, rest_rotations, is_root=False, log=log))
-    return values
-
-
-def export_opensim_animation_to_bvh(osim_file_path: str, mot_file_path: str,
-                                   output_file: str, frame_start: int = 0,
-                                   frame_end: int | None = None,
-                                   target_framerate: float = 60.0,
-                                   force_overwrite: bool = False) -> bool:
-    """
-    Export OpenSim animation to BVH format.
-
-    Args:
-        osim_file_path: Path to OpenSim model file (.osim)
-        mot_file_path: Path to motion file (.mot)
-        output_file: Output BVH file path
-        frame_start: Starting frame (default 0)
-        frame_end: Ending frame (None for all frames)
-        target_framerate: Target framerate for export (default 60.0)
-        force_overwrite: Whether to overwrite existing files without asking
-
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    try:
-        # Check for file overwrite permission
-        if not check_file_overwrite(output_file, force_overwrite):
-            print("Export cancelled.")
-            return False
-
-        print(f"Loading OpenSim model: {osim_file_path}")
-        print(f"Loading motion data: {mot_file_path}")
-
-        # Load OpenSim model and motion data
-        model = osim.Model(osim_file_path)
-        motion_data = osim.TimeSeriesTable(mot_file_path)
-
-        # Get model components
-        model_bodySet = model.getBodySet()
-        bodies = [model_bodySet.get(i) for i in range(model_bodySet.getSize())]
-
-        # Get motion data
-        times = motion_data.getIndependentColumn()
-        coordinateNames = motion_data.getColumnLabels()
-        motion_data_np = motion_data.getMatrix().to_numpy()
-
-        # Convert rotational coordinates from degrees to radians if needed
-        model_coordSet = model.getCoordinateSet()
-        for i, c in enumerate(coordinateNames):
-            try:
-                if model_coordSet.get(c).getMotionType() == 1:  # 1: rotation
-                    if motion_data.getTableMetaDataAsString('inDegrees') == 'yes':
-                        motion_data_np[:, i] = motion_data_np[:, i] * np.pi / 180
-            except Exception:
-                pass
-
-        # Calculate frame parameters
-        fps = round((len(times) - 1) / (times[-1] - times[0])) if len(times) > 1 else target_framerate
-
-        # Apply frame range limits
-        if frame_end is None:
-            frame_end = len(times) - 1
-        frame_end = min(frame_end, len(times) - 1)
-        frame_start = max(0, frame_start)
-
-        conv_fac_frame_rate = max(1, fps // target_framerate)
-        frame_time = 1.0 / target_framerate
-
-        print(f"Motion data: {len(times)} frames at {fps:.1f} fps")
-        print(f"Exporting frames {frame_start} to {frame_end} at {target_framerate} fps")
-        print(f"Bodies: {len(bodies)}, Coordinates: {len(coordinateNames)}")
-
-        # Initialize OpenSim model state
-        state = model.initSystem()
-
-        # Build body hierarchy for local coordinate calculations
-        parent_to_children, child_to_parent = get_body_hierarchy(model)
-
-        # Build rest pose skeleton for hierarchy
-        rest_state = model.initSystem()
-        coord_set = model.getCoordinateSet()
-        for i in range(coord_set.getSize()):
-            coord = coord_set.get(i)
-            coord.setValue(rest_state, coord.getDefaultValue(), enforceContraints=False)
-        model.realizePosition(rest_state)
-
-        # Find root body
-        root_body = find_root_body(model, child_to_parent)
-        if not root_body:
-            print("Error: Could not find root body in OpenSim model")
-            return False
-
-        # Build skeleton hierarchy for BVH (always use local coordinates for BVH)
-        root_node = build_skeleton_node(root_body, model, rest_state, parent_to_children,
-                                       'local', child_to_parent)
-
-        # Collect animation frames
-        frames_data = []
-
-        print("Processing animation frames...")
-        for n in range(frame_start, frame_end + 1, conv_fac_frame_rate):
-            if n >= len(times):
-                break
-
-            # Set model state for this time frame
-            for c, coord in enumerate(coordinateNames):
-                try:
-                    model.getCoordinateSet().get(coord).setValue(
-                        state, motion_data_np[n, c], enforceContraints=False)
-                except Exception:
-                    pass
-
-            # Realize position to get body transforms
-            model.realizePosition(state)
-
-            # Extract body transforms using local coordinates
-            global_transforms = get_body_global_transforms(model, state, bodies)
-            changes = []
-
-            for body in bodies:
-                body_name = body.getName()
-                hik_name = bone_to_hik_map.get(body_name, body_name)
-
-                if not hik_name or body_name.lower() == 'ground':
-                    continue
-
-                # Get this body's global transform
-                global_H = global_transforms[body_name]
-
-                # Convert to local coordinates relative to parent
-                if body_name in child_to_parent:
-                    parent_name = child_to_parent[body_name]
-                    parent_global_H = global_transforms[parent_name]
-                    local_H = global_to_local_transform(global_H, parent_global_H)
-                else:
-                    # Root body uses global coordinates
-                    local_H = global_H
-
-                # Extract position (convert to cm)
-                position = [float(local_H[0, 3])*100, float(local_H[1, 3])*100, float(local_H[2, 3])*100]
-
-                # Extract rotation matrix and convert to quaternion
-                R = local_H[0:3, 0:3]
-                quat = rotation_matrix_to_quaternion(R)
-
-                # Create change entry
-                change = {
-                    'name': hik_name,
-                    'position': position,
-                    'rotation': quat
-                }
-                changes.append(change)
-
-            frames_data.append(changes)
-
-            if len(frames_data) % 100 == 0:
-                print(f"Processed {len(frames_data)} frames...")
-
-        # Extract rest rotations from skeleton
-        def extract_rest_rotations(node, rotations_dict):
-            """Recursively extract rest pose rotation matrices."""
-            if 'rotation_matrix' in node and node['rotation_matrix'] is not None:
-                rotations_dict[node['name']] = node['rotation_matrix']
-            for child in node.get('children', []):
-                extract_rest_rotations(child, rotations_dict)
-
-        rest_rotations = {}
-        extract_rest_rotations(root_node, rest_rotations)
-
-        # Write BVH file
-        print(f"Writing BVH file: {output_file}")
-        with open(output_file, 'w') as f:
-            # Write header
-            f.write("HIERARCHY\n")
-
-            # Write skeleton hierarchy
-            write_bvh_hierarchy(f, root_node, indent=0, is_root=True)
-
-            # Write motion section
-            f.write("MOTION\n")
-            f.write(f"Frames: {len(frames_data)}\n")
-            f.write(f"Frame Time: {frame_time:.6f}\n")
-
-            # Write frame data
-            first_frame = True
-            for frame_data in frames_data:
-                values = collect_bvh_channel_data(root_node, frame_data, rest_rotations, is_root=True, log=first_frame)
-                f.write(" ".join(f"{v:.6f}" for v in values) + "\n")
-                first_frame = False
-
-        print(f"Successfully exported animation to BVH: {output_file}")
-        print(f"Exported {len(frames_data)} frames at {target_framerate} fps")
-
-        return True
-
-    except Exception as e:
-        print(f"Error exporting OpenSim animation to BVH: {e}")
-        traceback.print_exc()
-        return False
-
-
 def main():
     """Main function to handle command line arguments and run the export."""
     parser = argparse.ArgumentParser(
@@ -1196,11 +808,9 @@ Examples:
     parser.add_argument('--motion', type=str,
                         help='Path to motion file (.mot) - required for animation export')
     parser.add_argument('-o', '--output', type=str, required=True,
-                        help='Output file path (.yaml or .bvh)')
-    parser.add_argument('--format', type=str, choices=['yaml', 'bvh'],
-                        help='Output format: yaml or bvh (auto-detected from file extension if not specified)')
+                        help='Output YAML file path')
     parser.add_argument('--skeleton', action='store_true',
-                        help='Export skeleton rest pose instead of animation (YAML format only)')
+                        help='Export skeleton rest pose instead of animation')
     parser.add_argument('--start-frame', type=int, default=0,
                         help='Starting frame number (default: 0)')
     parser.add_argument('--end-frame', type=int, default=None,
@@ -1211,7 +821,7 @@ Examples:
                         help='Name for skeleton export (default: opensim_skeleton)')
     parser.add_argument('--coordinates', type=str, choices=['local', 'global'],
                         default='local',
-                        help='Coordinate system: local (parent-relative) or global (ground-relative) (default: local, BVH always uses local)')
+                        help='Coordinate system: local (parent-relative) or global (ground-relative) (default: local)')
     parser.add_argument('--force', '-f', action='store_true',
                         help='Force overwrite existing files without asking')
 
@@ -1236,29 +846,8 @@ Examples:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Auto-detect format from file extension if not specified
-    output_format = args.format
-    if not output_format:
-        ext = output_path.suffix.lower()
-        if ext == '.bvh':
-            output_format = 'bvh'
-        elif ext == '.yaml' or ext == '.yml':
-            output_format = 'yaml'
-        else:
-            print(f"Error: Cannot auto-detect format from extension '{ext}'. Use --format to specify.")
-            sys.exit(1)
-
-    # Validate format-specific options
-    if output_format == 'bvh':
-        if args.skeleton:
-            print("Error: Skeleton export is only supported for YAML format")
-            sys.exit(1)
-        if args.coordinates == 'global':
-            print("Warning: BVH format always uses local coordinates, ignoring --coordinates global")
-            args.coordinates = 'local'
-
     if args.skeleton:
-        # Export skeleton rest pose (YAML only)
+        # Export skeleton rest pose
         success = export_opensim_skeleton_to_yaml(
             str(osim_path),
             str(output_path),
@@ -1278,28 +867,17 @@ Examples:
             print(f"Error: Motion file not found: {args.motion}")
             sys.exit(1)
 
-        # Run the appropriate animation export
-        if output_format == 'bvh':
-            success = export_opensim_animation_to_bvh(
-                str(osim_path),
-                str(mot_path),
-                str(output_path),
-                args.start_frame,
-                args.end_frame,
-                args.framerate,
-                args.force
-            )
-        else:  # yaml
-            success = export_opensim_animation_to_yaml(
-                str(osim_path),
-                str(mot_path),
-                str(output_path),
-                args.start_frame,
-                args.end_frame,
-                args.framerate,
-                args.coordinates,
-                args.force
-            )
+        # Run the animation export
+        success = export_opensim_animation_to_yaml(
+            str(osim_path),
+            str(mot_path),
+            str(output_path),
+            args.start_frame,
+            args.end_frame,
+            args.framerate,
+            args.coordinates,
+            args.force
+        )
 
     sys.exit(0 if success else 1)
 

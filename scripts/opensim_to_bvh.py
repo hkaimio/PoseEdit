@@ -29,6 +29,11 @@ from pathlib import Path
 # Add bvhsdk to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'bvhsdk'))
 
+import opensim
+import numpy as np
+from bvhsdk import anim as bvh
+from bvhsdk import mathutils
+
 try:
     import opensim as osim
 except ImportError:
@@ -131,6 +136,19 @@ def build_skeleton_tree(model, root_body_name):
         if parent_body_name in skeleton_tree:
             skeleton_tree[parent_body_name]['children'].append(child_body_name)
 
+        # Debug: Print joint type for first few joints
+        if i < 5:
+            joint_type = joint.getConcreteClassName()
+            try:
+                num_coords = joint.numCoordinates()
+                coord_names = []
+                for j in range(num_coords):
+                    coord_names.append(joint.get_coordinates(j).getName())
+                print(f"  Joint {i}: {child_body_name} <- {parent_body_name}")
+                print(f"    Type: {joint_type}, Coordinates: {coord_names}")
+            except:
+                print(f"  Joint {i}: {child_body_name} <- {parent_body_name}, Type: {joint_type}")
+
     # Verify root body exists
     if root_body_name not in skeleton_tree:
         available_bodies = list(skeleton_tree.keys())[:10]
@@ -140,6 +158,52 @@ def build_skeleton_tree(model, root_body_name):
         )
 
     return skeleton_tree
+
+
+def get_joint_rotation_from_coordinates(model, state, body_name):
+    """
+    Extract rotation from joint coordinates, excluding frame orientation offsets.
+
+    Args:
+        model: OpenSim Model object
+        state: OpenSim State object
+        body_name: Name of the child body
+
+    Returns:
+        4x4 transform matrix representing the joint rotation in parent frame
+    """
+    # Find the joint connecting to this body
+    joint_set = model.getJointSet()
+    for i in range(joint_set.getSize()):
+        joint = joint_set.get(i)
+        if joint.getChildFrame().findBaseFrame().getName() == body_name:
+            try:
+                # Get parent and child frames
+                parent_frame = joint.getParentFrame()
+                child_frame = joint.getChildFrame()
+
+                # Get transform from child frame to parent frame
+                # This gives us the transform due to coordinate values only
+                transform = child_frame.findTransformBetween(state, parent_frame)
+
+                # Convert to numpy
+                rotation = transform.R()
+                translation = transform.T()
+
+                matrix = np.eye(4)
+                for ii in range(3):
+                    for jj in range(3):
+                        matrix[ii, jj] = rotation.get(ii, jj)
+                    matrix[ii, 3] = translation.get(ii) * 100.0  # meters to cm
+
+                return matrix
+            except Exception as e:
+                print(f"DEBUG: Error getting joint transform for {body_name}: {e}")
+                # Fall back to body transform
+                return get_body_global_transform_matrix(model, state, body_name)
+
+    # No joint found - return identity
+    return np.eye(4)
 
 
 def get_body_global_transform_matrix(model, state, body_name):
@@ -156,6 +220,7 @@ def get_body_global_transform_matrix(model, state, body_name):
     """
     body = model.getBodySet().get(body_name)
     transform_osim = body.getTransformInGround(state)
+    #print(f"Getting global transform for body: {body_name}")
 
     # Convert OpenSim::Transform to 4x4 matrix
     rotation = transform_osim.R()
@@ -169,6 +234,8 @@ def get_body_global_transform_matrix(model, state, body_name):
 
     # Convert from meters to centimeters (BVH standard)
     matrix[0:3, 3] *= 100.0
+    #print(matrix)
+
 
     return matrix
 
@@ -318,6 +385,45 @@ def matrix_to_euler_zxy(R):
     return tuple(euler_rad)
 
 
+def euler_to_matrix_zxy(euler_deg):
+    """
+    Convert Euler ZXY angles (in degrees) to 3x3 rotation matrix.
+
+    Args:
+        euler_deg: (rz, rx, ry) tuple in degrees
+
+    Returns:
+        3x3 rotation matrix
+    """
+    rz, rx, ry = np.radians(euler_deg)
+
+    # Build rotation matrix for ZXY order: R = Rz * Rx * Ry
+    # Rz (rotation around Z axis)
+    Rz = np.array([
+        [np.cos(rz), -np.sin(rz), 0],
+        [np.sin(rz), np.cos(rz), 0],
+        [0, 0, 1]
+    ])
+
+    # Rx (rotation around X axis)
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(rx), -np.sin(rx)],
+        [0, np.sin(rx), np.cos(rx)]
+    ])
+
+    # Ry (rotation around Y axis)
+    Ry = np.array([
+        [np.cos(ry), 0, np.sin(ry)],
+        [0, 1, 0],
+        [-np.sin(ry), 0, np.cos(ry)]
+    ])
+
+    # ZXY order means: first Y, then X, then Z
+    return Rz @ Rx @ Ry
+
+
+
 def set_frame_from_state(animation, model, state, frame_idx):
     """
     Set animation frame data from OpenSim state.
@@ -331,39 +437,123 @@ def set_frame_from_state(animation, model, state, frame_idx):
     """
     joints_list = animation.getlistofjoints()
 
+    # Debug: Focus on specific joints
+    debug_joints = ["spine", "shin.R"]
+    debug_frames = [0, 1, 2]  # Only print first few frames
+
     for joint in joints_list:
         body_name = joint.name
+        # Initialize arrays if needed (for first frame)
+        if len(joint.rotation) == 0 or joint.rotation.shape[0] == 0:
+            joint.rotation = np.zeros((animation.frames, 3))
+        if joint.parent is None:
+            if len(joint.translation) == 0 or joint.translation.shape[0] == 0:
+                joint.translation = np.zeros((animation.frames, 3))
 
         # Get global transform from OpenSim
         global_transform = get_body_global_transform_matrix(model, state, body_name)
         global_rotation = global_transform[0:3, 0:3]
         global_position = global_transform[0:3, 3]
 
-        # Compute local rotation
-        if joint.parent:
-            parent_body_name = joint.parent.name
-            parent_transform = get_body_global_transform_matrix(model, state, parent_body_name)
-            parent_global_rotation = parent_transform[0:3, 0:3]
-            local_rotation_matrix = parent_global_rotation.T @ global_rotation
-        else:
-            # Root uses global rotation directly
-            local_rotation_matrix = global_rotation
+        # Debug output for specific joints
+        if body_name in debug_joints and frame_idx in debug_frames:
+            print(f"\n=== Frame {frame_idx}, Joint: {body_name} ===")
 
-        # Convert to Euler ZXY (radians)
-        euler_zxy = matrix_to_euler_zxy(local_rotation_matrix)
+            # Print OpenSim generalized coordinates for this body's joint
+            try:
+                # Find the joint that has this body as child
+                joint_set = model.getJointSet()
+                for i in range(joint_set.getSize()):
+                    joint_obj = joint_set.get(i)
+                    if joint_obj.getChildFrame().findBaseFrame().getName() == body_name:
+                        print(f"OpenSim Joint: {joint_obj.getName()}")
+                        num_coords = joint_obj.numCoordinates()
+                        coord_values = []
+                        for j in range(num_coords):
+                            coord = joint_obj.get_coordinates(j)
+                            coord_name = coord.getName()
+                            coord_value = coord.getValue(state)
+                            coord_values.append(f"{coord_name}={coord_value:.4f}")
+                        print(f"  Generalized coordinates: {', '.join(coord_values)}")
 
-        # Initialize arrays if needed (for first frame)
-        if len(joint.rotation) == 0 or joint.rotation.shape[0] == 0:
-            joint.rotation = np.zeros((animation.frames, 3))
+                        # Check for orientation offsets in the joint frames
+                        try:
+                            parent_frame = joint_obj.getParentFrame()
+                            child_frame = joint_obj.getChildFrame()
 
-        joint.rotation[frame_idx] = euler_zxy
+                            # Get the transform from parent body to parent frame
+                            parent_transform = parent_frame.findTransformInBaseFrame()
+                            parent_rot_in_body = parent_transform.R()
 
-        # Set translation (only for root)
+                            # Get the transform from child body to child frame
+                            child_transform = child_frame.findTransformInBaseFrame()
+                            child_rot_in_body = child_transform.R()
+
+                            print(f"  Parent frame orientation in parent body:")
+                            parent_rot_matrix = np.eye(3)
+                            for ii in range(3):
+                                for jj in range(3):
+                                    parent_rot_matrix[ii, jj] = parent_rot_in_body.get(ii, jj)
+                            print(f"    {parent_rot_matrix}")
+
+                            print(f"  Child frame orientation in child body:")
+                            child_rot_matrix = np.eye(3)
+                            for ii in range(3):
+                                for jj in range(3):
+                                    child_rot_matrix[ii, jj] = child_rot_in_body.get(ii, jj)
+                            print(f"    {child_rot_matrix}")
+                        except Exception as e:
+                            print(f"    Could not get frame orientations: {e}")
+
+                        break
+            except Exception as e:
+                print(f"  Could not get coordinates: {e}")
+
+            print(f"Global transform from OpenSim:")
+            print(global_transform)
+            print(f"Global rotation matrix:")
+            print(global_rotation)
+            print(f"Global position: {global_position}")
+
+        # Convert global rotation matrix to Euler ZXY (returns degrees)
+        global_euler_deg, warning = mathutils.eulerFromMatrix(global_rotation, 'ZXY')
+
+        # Debug: print global Euler before bvhsdk processes it
+        if body_name in debug_joints and frame_idx in debug_frames:
+            print(f"Global Euler (degrees): {global_euler_deg}")
+
+        # Use bvhsdk's setGlobalRotation to automatically compute local rotation
+        # setGlobalRotation expects degrees (bvhsdk operates in degrees)
+        joint.setGlobalRotation(global_euler_deg, frame_idx)
+
+        # Debug: print what bvhsdk computed as local rotation
+        if body_name in debug_joints and frame_idx in debug_frames:
+            print(f"Local rotation computed by bvhsdk (degrees): {joint.rotation[frame_idx]}")
+
+            # Get bvhsdk's global rotation to verify
+            if joint.parent:
+                print(f"Parent joint: {joint.parent.name}")
+            else:
+                print(f"Root joint (no parent)")
+
+            # Get what bvhsdk thinks the global rotation is
+            # getGlobalRotation may return (euler, warning) tuple like eulerFromMatrix
+            result = joint.getGlobalRotation(frame_idx)
+            if isinstance(result, tuple):
+                bvhsdk_global_euler_deg = result[0]
+            else:
+                bvhsdk_global_euler_deg = result
+
+            print(f"Global Euler we passed to setGlobalRotation (degrees): {global_euler_deg}")
+            print(f"Global Euler from bvhsdk's getGlobalRotation (degrees): {bvhsdk_global_euler_deg}")
+            print(f"Difference in global Euler: {bvhsdk_global_euler_deg - global_euler_deg}")
+
+        # For root: set global translation
         if joint.parent is None:
-            if len(joint.translation) == 0 or joint.translation.shape[0] == 0:
-                joint.translation = np.zeros((animation.frames, 3))
-            # Translation relative to rest pose offset
             joint.translation[frame_idx] = global_position - joint.offset
+            if body_name in debug_joints and frame_idx in debug_frames:
+                print(f"Root translation: {joint.translation[frame_idx]}")
+                print(f"Root offset: {joint.offset}")
 
 
 def populate_animation_from_motion(animation, model, motion_table, skeleton_tree,
@@ -379,37 +569,56 @@ def populate_animation_from_motion(animation, model, motion_table, skeleton_tree
         start_frame: First frame to export
         end_frame: Last frame to export (inclusive)
     """
+    # Initialize state ONCE before the loop (matching YAML script approach)
     state = model.initSystem()
     coordinate_set = model.getCoordinateSet()
 
     # Get column labels (coordinate names)
-    labels = motion_table.getColumnLabels()
+    coordinate_names = motion_table.getColumnLabels()
+    motion_data_np = motion_table.getMatrix().to_numpy()
+    for i, c in enumerate(coordinate_names):
+        try:
+            if coordinate_set.get(c).getMotionType() == 1:  # 1: rotation
+                if motion_table.getTableMetaDataAsString('inDegrees') == 'yes':
+                    motion_data_np[:, i] = motion_data_np[:, i] * np.pi / 180
+        except Exception:
+            pass
 
     # Debug: print first few coordinate names
-    print(f"  Motion table has {len(labels) if isinstance(labels, tuple) else labels.getSize()} coordinates")
+    print(f"  Motion table has {len(coordinate_names) if isinstance(coordinate_names, tuple) else coordinate_names.getSize()} coordinates")
+    if isinstance(coordinate_names, tuple):
+        print(f"  First 10 coordinates: {coordinate_names[:10]}")
+    else:
+        first_10 = [coordinate_names.get(i) for i in range(min(10, coordinate_names.getSize()))]
+        print(f"  First 10 coordinates: {first_10}")
 
     num_coords_set = 0
     for frame_idx in range(start_frame, end_frame + 1):
         # Get time and state values for this frame
         time = motion_table.getIndependentColumn()[frame_idx]
-        row_vec = motion_table.getRowAtIndex(frame_idx)
 
         # Reset coordinate counter for this frame
         coords_changed = 0
 
         # Set coordinate values in state
         # labels can be either a tuple or an OpenSim object
-        if isinstance(labels, tuple):
+        if isinstance(coordinate_names, tuple):
             # Python tuple - iterate directly
-            for i, coord_name in enumerate(labels):
+            for i, coord_name in enumerate(coordinate_names):
                 try:
                     coord = coordinate_set.get(coord_name)
-                    value = row_vec[i]
-                    coord.setValue(state, value)
+                    value = motion_data_np[frame_idx, i]
+                    coord.setValue(state, value, enforceContraints=False)
                     coords_changed += 1
                     if frame_idx == start_frame and num_coords_set < 5:
                         print(f"    {coord_name} = {value}")
                         num_coords_set += 1
+                    # Debug: print spine.001 coordinates for first few frames
+                    if frame_idx < start_frame + 3 and 'spine.001' in coord_name:
+                        print(f"  Frame {frame_idx}: {coord_name} = {value}")
+                    # Debug: print a specific coordinate for first few frames
+                    if frame_idx < start_frame + 3 and coord_name == coordinate_names[0] if isinstance(coordinate_names[0], str) else coordinate_names.get(0):
+                        print(f"  Frame {frame_idx}: {coord_name} = {value}")
                 except Exception as e:
                     # Coordinate might not exist in model
                     if frame_idx == start_frame:
@@ -417,16 +626,19 @@ def populate_animation_from_motion(animation, model, motion_table, skeleton_tree
                     pass
         else:
             # OpenSim object with getSize() method
-            for i in range(labels.getSize()):
-                coord_name = labels.get(i)
+            for i in range(coordinate_names.getSize()):
+                coord_name = coordinate_names.get(i)
                 try:
                     coord = coordinate_set.get(coord_name)
                     value = row_vec.get(i)
-                    coord.setValue(state, value)
+                    coord.setValue(state, value, enforceContraints=False)
                     coords_changed += 1
                     if frame_idx == start_frame and num_coords_set < 5:
                         print(f"    {coord_name} = {value}")
                         num_coords_set += 1
+                    # Debug: print first coordinate for first few frames
+                    if frame_idx < start_frame + 3 and i == 0:
+                        print(f"  Frame {frame_idx}: {coord_name} = {value}")
                 except Exception as e:
                     # Coordinate might not exist in model
                     if frame_idx == start_frame:
@@ -445,6 +657,7 @@ def populate_animation_from_motion(animation, model, motion_table, skeleton_tree
 
         if frame_idx % 100 == 0:
             print(f"  Processed frame {frame_idx - start_frame + 1}/{end_frame - start_frame + 1}")
+
 
 
 def export_to_bvh(model_path, output_path, motion_path=None, framerate=30.0,
